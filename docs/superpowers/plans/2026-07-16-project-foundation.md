@@ -24,6 +24,8 @@
 
 승인된 제품 명세에는 인증, 원장, 예산, 반복 거래, 자산, 오프라인 동기화, CSV, PWA가 포함되어 있으므로 하나의 거대 계획으로 실행하지 않는다. 이 문서는 사용자가 지정한 최초 저장소 단계만 다룬다. 완료 결과는 구조 검증 테스트가 통과하는 비공개 저장소, 보호된 `main`, 동일 기준점의 `maintenance-branch`다.
 
+Subagent-Driven 실행에서는 Task 1~3을 하나의 복합 실행·검토 단위로 취급한다. Task 1의 RED가 Task 2의 실제 구조 생성으로 GREEN이 되고 Task 3에서 한 번 커밋되기 전까지 중간 작업을 완료로 표시하지 않는다. 이 묶음은 구조 계약, 실제 구조, 커밋 증거를 분리하지 않으면서 사용자에게 승인받은 최초 `main` 반영 순서를 유지한다.
+
 ## File Map
 
 | 경로 | 책임 |
@@ -40,6 +42,7 @@
 | `packages/*/README.md` | 계약, DB, 공통 설정 패키지의 책임 경계를 기록한다. |
 | `supabase/*/README.md` | 마이그레이션과 seed 정책을 기록한다. |
 | `docs/*/README.md` | 아키텍처, API, DB, 가이드, 로드맵 문서의 색인을 만든다. |
+| `docs/guides/testing.md` | RED·GREEN·REFACTOR와 인프라 검증 증거의 기록 방식을 설명한다. |
 | `tests/e2e/README.md` | 후속 브라우저 E2E 테스트의 범위를 기록한다. |
 | `.github/settings/main-protection.json` | 첫 푸시 후 적용할 `main` 보호 정책을 버전 관리한다. |
 | `README.md` | 제품 소개, 현재 단계, 문서와 구조 검증 명령을 제공한다. |
@@ -133,43 +136,67 @@ Create `scripts/verify-structure.test.mjs`:
 
 ```js
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { findMissingPaths } from "./required-structure.mjs";
+const cliPath = fileURLToPath(
+  new URL("./verify-structure.mjs", import.meta.url),
+);
 
-test("findMissingPaths returns only paths absent from the root", async () => {
+/**
+ * Runs the public structure-verification CLI against an isolated fixture.
+ *
+ * @param {string} rootDir Fixture directory treated as the repository root.
+ * @param {readonly string[]} requiredPaths Contract paths passed to the CLI.
+ * @returns {import("node:child_process").SpawnSyncReturns<string>} Process evidence.
+ */
+function runVerifier(rootDir, requiredPaths) {
+  const args = [cliPath, "--root", rootDir];
+  for (const path of requiredPaths) {
+    args.push("--required-path", path);
+  }
+
+  return spawnSync(process.execPath, args, { encoding: "utf8" });
+}
+
+test("CLI reports only contract paths absent from the root", async () => {
   const rootDir = await mkdtemp(join(tmpdir(), "account-book-structure-"));
 
   try {
     await mkdir(join(rootDir, "apps", "web"), { recursive: true });
 
-    const missingPaths = await findMissingPaths(rootDir, [
+    const result = runVerifier(rootDir, [
       "apps/web",
       "apps/api",
     ]);
 
-    assert.deepEqual(missingPaths, ["apps/api"]);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /apps\/api/);
+    assert.doesNotMatch(result.stderr, /apps\/web/);
   } finally {
     await rm(rootDir, { recursive: true, force: true });
   }
 });
 
-test("findMissingPaths returns an empty list when every path exists", async () => {
+test("CLI succeeds when every contract path exists", async () => {
   const rootDir = await mkdtemp(join(tmpdir(), "account-book-structure-"));
 
   try {
     await mkdir(join(rootDir, "apps", "web"), { recursive: true });
     await mkdir(join(rootDir, "apps", "api"), { recursive: true });
 
-    const missingPaths = await findMissingPaths(rootDir, [
+    const result = runVerifier(rootDir, [
       "apps/web",
       "apps/api",
     ]);
 
-    assert.deepEqual(missingPaths, []);
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /Repository structure verification passed\./);
+    assert.equal(result.stderr, "");
   } finally {
     await rm(rootDir, { recursive: true, force: true });
   }
@@ -184,7 +211,7 @@ Run:
 pnpm test:structure
 ```
 
-Expected: exit code `1` with `ERR_MODULE_NOT_FOUND` for `scripts/required-structure.mjs`.
+Expected: exit code `1` with two assertion failures. The test runner itself loads and reaches the assertions; the missing CLI cannot produce the expected `apps/api` message or success exit code. A test-loader error does not count as valid RED evidence.
 
 - [ ] **Step 4: Implement the structure contract**
 
@@ -206,6 +233,7 @@ export const REQUIRED_PATHS = Object.freeze([
   "docs/api/README.md",
   "docs/database/README.md",
   "docs/guides/README.md",
+  "docs/guides/testing.md",
   "docs/roadmap/README.md",
   "docs/security/README.md",
   "tests/e2e/README.md",
@@ -261,7 +289,33 @@ Create `scripts/verify-structure.mjs`:
 ```js
 import { findMissingPaths } from "./required-structure.mjs";
 
-const missingPaths = await findMissingPaths(process.cwd());
+const args = process.argv.slice(2);
+let rootDir = process.cwd();
+const requiredPaths = [];
+
+for (let index = 0; index < args.length; index += 1) {
+  const option = args[index];
+  const value = args[index + 1];
+
+  if ((option === "--root" || option === "--required-path") && !value) {
+    throw new TypeError(`${option} requires a value`);
+  }
+
+  if (option === "--root") {
+    rootDir = value;
+    index += 1;
+  } else if (option === "--required-path") {
+    requiredPaths.push(value);
+    index += 1;
+  } else {
+    throw new TypeError(`Unknown option: ${option}`);
+  }
+}
+
+const missingPaths = await findMissingPaths(
+  rootDir,
+  requiredPaths.length > 0 ? requiredPaths : undefined,
+);
 
 if (missingPaths.length > 0) {
   console.error("Repository structure verification failed:");
@@ -310,6 +364,7 @@ Expected: exit code `1` and a list beginning with `apps/web/README.md`; this con
 - Create: `docs/api/README.md`
 - Create: `docs/database/README.md`
 - Create: `docs/guides/README.md`
+- Create: `docs/guides/testing.md`
 - Create: `docs/roadmap/README.md`
 - Create: `tests/e2e/README.md`
 - Create: `.github/settings/main-protection.json`
@@ -348,6 +403,7 @@ PC와 모바일에서 사용할 수 있는 보안 우선 동기화형 개인 가
 - [Security policy](SECURITY.md)
 - [Security architecture](docs/security/security-architecture.md)
 - [Approved application specification](docs/superpowers/specs/2026-07-16-account-book-app-design.md)
+- [Testing guide](docs/guides/testing.md)
 
 ## Verify the Repository Structure
 
@@ -454,6 +510,70 @@ Create `docs/guides/README.md`:
 
 Local development, testing, secure configuration, deployment, recovery, and user operation guides belong here.
 ```
+
+Create `docs/guides/testing.md` after both structure tests have produced the stated RED and GREEN evidence:
+
+````markdown
+# Testing Guide
+
+## 1. 기본 원칙
+
+행동을 구현하거나 수정할 때는 RED → GREEN → REFACTOR 순서를 사용한다. 테스트 실행기가 정상적으로 시작되고, 요구한 행동이 아직 없기 때문에 assertion이 실패한 경우만 유효한 RED로 기록한다. import 경로 오타, 문법 오류, 테스트 설정 실패처럼 assertion에 도달하지 못한 결과는 RED가 아니라 실행 오류다.
+
+## 2. RED
+
+1. 원하는 공개 행동과 결과를 테스트로 먼저 작성한다.
+2. 해당 테스트만 실행한다.
+3. 테스트 러너가 assertion에 도달했는지 확인한다.
+4. 실패 메시지가 아직 구현하지 않은 행동을 가리키는지 확인한다.
+5. 실행 명령, 종료 코드, 핵심 실패 출력을 작업 보고서에 기록한다.
+
+프로젝트 기반 작업의 첫 RED 명령은 다음과 같다.
+
+```powershell
+pnpm test:structure
+```
+
+구조 검사 CLI가 아직 없을 때 테스트는 성공 종료 코드와 누락 경로 메시지를 받지 못해 assertion 단계에서 실패해야 한다.
+
+## 3. GREEN
+
+테스트를 통과시키는 최소 구현만 작성하고 같은 명령을 다시 실행한다. 프로젝트 기반 검사기는 다음 두 행동을 제공한다.
+
+- 누락 경로가 있으면 해당 경로만 출력하고 종료 코드 `1`을 반환한다.
+- 모든 경로가 있으면 성공 메시지를 출력하고 종료 코드 `0`을 반환한다.
+
+초기 구조 검사기의 GREEN 증거는 `pnpm test:structure`에서 테스트 `2`개 통과, 실패 `0`개다.
+
+## 4. 실제 저장소 구조 검증
+
+검사기 코드가 GREEN이어도 실제 저장소에 필수 문서가 없으면 다음 명령은 실패해야 한다.
+
+```powershell
+pnpm verify:structure
+```
+
+필수 폴더와 책임 문서를 만든 뒤 같은 명령이 `Repository structure verification passed.`를 출력하고 종료 코드 `0`을 반환해야 한다.
+
+## 5. REFACTOR
+
+GREEN 이후에만 중복 제거, 이름 개선, 책임 분리, JSDoc 보강을 수행한다. 리팩터링 뒤에는 집중 테스트와 전체 구조 검사를 모두 다시 실행하며 출력에 경고와 예상하지 못한 오류가 없어야 한다.
+
+## 6. 인프라 변경 검증
+
+GitHub 저장소, 브랜치 보호, 보안 설정은 애플리케이션 행동이 아니므로 TDD assertion 대신 변경 전후 상태 증거를 남긴다.
+
+| 변경 | 변경 전 증거 | 변경 후 증거 |
+|---|---|---|
+| 비공개 저장소 | 대상 저장소가 존재하지 않음 | `isPrivate: true`, 기본 브랜치 `main` |
+| 첫 푸시 | `origin/main` 없음 | 로컬·원격 `main` SHA 일치 |
+| 브랜치 보호 | 보호 정책 없음 | PR 필수, 선형 기록, 강제 푸시·삭제 금지 |
+| 유지보수 브랜치 | 원격 브랜치 없음 | `main`과 `maintenance-branch` 최초 SHA 일치 |
+
+## 7. 증거 보존
+
+각 작업 보고서와 PR에는 실행 명령, 종료 코드, 통과·실패 개수, 핵심 출력, 검증한 commit SHA를 기록한다. 토큰, 쿠키, OAuth code, 전체 계좌 식별자, 실제 사용자 데이터는 테스트 출력과 증거에 포함하지 않는다.
+````
 
 Create `docs/roadmap/README.md`:
 
