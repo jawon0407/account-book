@@ -10,6 +10,8 @@
 
 PC와 모바일에서 동일한 개인 재무 데이터를 안전하게 사용할 수 있는 로그인 기반 반응형 PWA를 만든다. 사용자는 어느 기기에서든 10초 안에 거래를 기록하고, 월간 예산과 전체 자산 흐름을 한눈에 파악할 수 있어야 한다.
 
+보안은 이 제품의 최상위 품질 기준이다. 기능, 일정, 편의성보다 사용자 간 재무 데이터 격리와 계정·세션 보호를 우선하며, 필수 보안 증거가 없거나 치명적·높음 위험이 남은 변경은 출시하지 않는다.
+
 첫 버전은 개인 사용에 집중한다. 가족·커플 공유는 후속 범위이며, OCR과 금융기관 자동 연동은 별도 단계로 구현한다.
 
 ## 2. 단계별 범위
@@ -62,21 +64,22 @@ OCR과 금융기관 자동 연동은 1단계 UI에 비활성 메뉴나 예고 �
 
 ### 3.2 책임 경계
 
-프런트엔드는 금융 테이블을 직접 수정하지 않는다. Supabase Auth에서 인증을 수행하고 발급받은 JWT를 Node API에 전달한다. Node API는 JWT, 데이터 소유권, 입력값, 버전을 검증한 뒤 PostgreSQL을 변경한다.
+브라우저 PWA는 금융 테이블과 Node API를 직접 호출하지 않는다. 같은 origin의 Next.js BFF가 OAuth callback, 세션 갱신, CSRF 방어를 담당하고 짧은 수명 JWT를 서버 간 요청으로 Node API에 전달한다. Node API는 BFF를 신뢰하는 대신 JWT, 데이터 소유권, 입력값, 버전을 다시 검증한 뒤 PostgreSQL을 변경한다. 이 경계로 refresh token과 service credential이 브라우저 JavaScript에 노출되지 않게 한다.
 
-서비스 키와 데이터베이스 접속 정보는 서버에만 둔다. 금융 테이블은 비공개 스키마에 배치한다. 클라이언트 직접 조회가 필요한 표면을 추가하는 경우에만 공개 스키마와 RLS 정책을 별도로 설계한다.
+서비스 키와 데이터베이스 접속 정보는 서버에만 둔다. 금융 테이블은 비공개 스키마에 배치하고 앱 쿼리의 소유권 조건과 PostgreSQL RLS를 함께 사용한다. 클라이언트 직접 조회 표면은 추가하지 않으며, 불가피해지면 별도 위협 모델과 승인을 요구한다.
 
 Redis, 메시지 큐, 읽기 복제본, 테이블 파티셔닝은 초기 구성에 넣지 않는다. 측정된 병목이 생기면 요약 테이블, Materialized View, 캐시, 읽기 복제본, 날짜 파티셔닝 순으로 검토한다.
 
 ### 3.3 논리 흐름
 
 ```text
-Next.js PWA
-  ├─ Supabase Auth: 로그인과 JWT 갱신
-  ├─ IndexedDB: 오프라인 데이터와 변경 대기열
-  └─ Node API: 모든 금융 데이터 명령과 조회
-       ├─ PostgreSQL: 관계형 데이터와 통계
-       └─ Storage: 영수증 파일과 제한된 접근 URL
+Browser PWA
+  ├─ IndexedDB: 최소 오프라인 데이터와 변경 대기열
+  └─ Next.js BFF: OAuth callback, 보안 세션, CSRF, API 프록시
+       ├─ Supabase Auth: 로그인, 토큰 발급·갱신·폐기
+       └─ Node API: JWT 재검증과 모든 금융 데이터 명령·조회
+            ├─ PostgreSQL: 관계형 데이터, RLS, 통계
+            └─ Storage: 영수증 파일과 제한된 접근 URL
 ```
 
 ## 4. 저장소 구조
@@ -99,9 +102,11 @@ account-book/
 │  ├─ database/
 │  ├─ guides/
 │  ├─ roadmap/
+│  ├─ security/
 │  └─ superpowers/
 ├─ PRODUCT.md
 ├─ DESIGN.md
+├─ SECURITY.md
 ├─ README.md
 └─ CHANGELOG.md
 ```
@@ -263,15 +268,57 @@ Impeccable의 제품 UI 원칙과 `PRODUCT.md`, `DESIGN.md`를 따른다.
 
 ## 11. 보안과 개인정보
 
-- JWT 검증 후 모든 요청에 사용자 소유권을 강제한다.
-- 서비스 키와 DB 자격 증명은 서버 환경 변수에만 둔다.
-- CORS는 허용된 배포 도메인으로 제한한다.
-- 로그인, 비밀번호 재설정, OAuth 콜백, 가져오기 API에 속도 제한을 적용한다.
-- 로그에서 비밀번호, 토큰, 전체 계좌번호, 거래 메모 원문을 제거하거나 마스킹한다.
-- 사용자 추적에는 개인정보 대신 `requestId`와 내부 오류 코드를 사용한다.
-- 탈퇴는 인증 계정, 금융 데이터, 저장 파일을 순서대로 삭제하고 결과를 기록한다.
-- 마이그레이션 전에 백업과 롤백 가능 여부를 확인한다.
-- CI에서 의존성 취약점과 비밀정보 커밋을 검사한다.
+### 11.1 기준과 우선순위
+
+- 루트 `SECURITY.md`를 병합·배포 중단 정책의 기준으로 사용한다.
+- OWASP ASVS v5.0.0 Level 2를 기본 검증 범위로 삼고 인증·권한·세션·암호·재무 데이터에는 위험 기반 강화 항목을 적용한다.
+- OWASP Top 10:2025, Cheat Sheet Series, NIST SSDF를 설계·구현·공급망 검증 기준으로 사용한다.
+- 상세 자산 분류, 신뢰 경계, STRIDE 위협, 통제는 `docs/security/security-architecture.md`에서 관리한다.
+- PR·릴리스 증거는 `docs/security/verification-checklist.md`, 사고 처리는 `docs/security/incident-response.md`를 따른다.
+
+### 11.2 인증과 세션
+
+- JWT의 서명, 허용 알고리즘, issuer, audience, 만료를 API에서 검증한다.
+- OAuth는 Authorization Code + PKCE와 거래별 `state`, OIDC `nonce`, 정확한 redirect URI를 사용한다.
+- 동일 이메일만으로 계정을 병합하지 않고 최근 재인증 후 명시적으로 연결한다.
+- refresh token은 `localStorage`, `sessionStorage`, IndexedDB에 저장하지 않는다.
+- refresh token은 서버 측 불투명 세션 또는 `Secure`, `HttpOnly`, 적절한 `SameSite` 쿠키로 보호하는 설계를 기본으로 하며 구현 전에 ADR로 확정한다.
+- 로그인, 비밀번호 재설정, OAuth 콜백, 대량 가져오기·내보내기에 다중 신호 속도 제한을 적용한다.
+- 운영·GitHub·Supabase 관리자 계정에는 MFA를 의무화한다.
+
+### 11.3 권한과 데이터 격리
+
+- 사용자 ID는 검증된 인증 문맥에서만 얻고 요청 본문·쿼리를 신뢰하지 않는다.
+- 모든 금융 쿼리와 연관 리소스 연결에 사용자 소유권을 강제한다.
+- PostgreSQL RLS를 두 번째 방어선으로 사용하고 일반 앱 역할에는 superuser와 `BYPASSRLS`를 부여하지 않는다.
+- service-role key는 일반 금융 요청 경로에서 사용하지 않는다.
+- 사용자 A가 사용자 B의 UUID를 아는 상황을 모든 객체 권한 테스트의 기본 공격 시나리오로 둔다.
+
+### 11.4 입력·브라우저·오프라인
+
+- DTO 허용 목록, 길이·크기·범위 제한, 매개변수 SQL, 안전한 출력 인코딩을 서버에서 강제한다.
+- 쿠키 인증 요청에는 CSRF token과 origin 검증을 적용하고 `SameSite`만으로 방어하지 않는다.
+- CORS는 정확한 운영 origin으로 제한하고 CSP, HSTS, 클릭재킹·MIME·referrer 보호 헤더를 적용한다.
+- IndexedDB는 신뢰하지 않는 캐시로 취급하고 토큰을 저장하지 않으며 로그아웃·계정 전환·탈퇴 시 제거한다.
+- CSV는 크기·행·열·인코딩을 제한하고 스프레드시트 수식 삽입을 중화한다.
+- OCR과 금융기관 연동은 파일 격리, SSRF 방어, 외부 토큰 최소 scope를 포함한 별도 위협 모델 승인 후 시작한다.
+
+### 11.5 비밀정보·로그·운영
+
+- 서비스 키와 DB·OAuth 자격 증명은 비밀 저장소에서만 주입하고 환경·릴리스 간 분리한다.
+- 로그에서 비밀번호, 토큰, 쿠키, 전체 계좌 식별자, 거래 메모·CSV 원문을 제거하거나 마스킹한다.
+- 인증, 권한 거부, 로그인 수단 연결, 데이터 내보내기·삭제, 운영 권한 변경을 감사 로그로 남긴다.
+- 사용자 추적에는 개인정보 대신 `requestId`와 내부 이벤트 코드를 사용한다.
+- 탈퇴는 새 세션 차단 후 인증 계정, 금융 데이터, 저장 파일, 오프라인 삭제 신호를 순서대로 처리하고 결과를 기록한다.
+- 마이그레이션 전에 백업, 롤백, RLS와 DB 역할 영향을 확인하고 분기별 복구 연습을 수행한다.
+
+### 11.6 공급망과 릴리스 차단
+
+- lockfile, 고정 설치, GitHub Action commit SHA, 의존성 설치 스크립트 검토, SBOM을 공급망 기준으로 둔다.
+- CI에서 Git 기록 비밀정보, SAST, production 의존성, 인증·권한 회귀를 검사한다.
+- 저장소의 에이전트 스킬과 훅도 실행 가능한 공급망 코드로 취급해 업데이트 diff와 권한을 검토한다.
+- 치명적·높음 위험, 사용자 격리 실패, secret 탐지, 필수 보안 검사 누락은 병합과 배포를 차단한다.
+- 중간 위험의 임시 수용은 악용 시나리오, 보완 통제, 책임자, 30일 이내 재검토일을 요구한다.
 
 ## 12. 접근성
 
@@ -302,11 +349,13 @@ WCAG 2.2 AA를 목표로 한다.
 - `docs/architecture/`: 시스템 구조와 ADR
 - `docs/database/`: ERD, 테이블, 인덱스, 동기화 규칙
 - `docs/api/`: OpenAPI, 인증, 오류 코드
+- `docs/security/`: 보안 아키텍처, 위협 모델, 검증 체크리스트, 사고 대응
 - `docs/guides/`: 개발, 테스트, 배포, 사용자 안내
 - `docs/roadmap/`: 1단계, OCR, 금융 연동
 - `CHANGELOG.md`: 버전별 변경
 - `PRODUCT.md`: 제품 목적과 원칙
 - `DESIGN.md`: Impeccable 디자인 시스템
+- `SECURITY.md`: 취약점 보고와 병합·배포 중단 정책
 
 ## 14. 테스트와 품질 게이트
 
@@ -321,24 +370,25 @@ WCAG 2.2 AA를 목표로 한다.
 - 반응형: PC, 태블릿, 모바일 주요 화면
 - 접근성: 자동 검사와 핵심 수동 시나리오
 - 성능: 대시보드 쿼리와 대량 거래 목록 기준값
+- 보안: 사용자 A/B 객체 권한, JWT·OAuth·세션, CSRF·CORS·보안 헤더, XSS·SQL·CSV 입력, secret·로그 마스킹
 
 ### 14.2 CI 순서
 
 ```text
-format → lint → typecheck → unit → integration → build → E2E smoke
+format → lint → typecheck → unit → integration → authn/authz security tests → secret scan → SAST → SCA → build → E2E security smoke → SBOM
 ```
 
-필수 검증을 통과하지 않은 변경은 `main`에 병합하지 않는다.
+스테이징 환경이 준비되면 DAST를 릴리스 게이트에 추가한다. 필수 검증을 통과하지 않은 변경은 `main`에 병합하지 않는다.
 
 ### 14.3 구현 마일스톤
 
 1단계 범위는 다음 순서의 독립 검증 가능한 마일스톤으로 나눈다.
 
-1. 저장소 구조, 공통 설정, 인증 골격
+1. 저장소 구조, 공통 설정, 보안 기준·CI 게이트, 인증 골격
 2. 거래·카테고리·계좌와 기본 대시보드
 3. 예산·반복 거래·자산·통계
 4. IndexedDB 오프라인 대기열과 양방향 동기화
-5. CSV 입출력, PWA, 접근성, 운영 문서와 릴리스 품질 게이트
+5. CSV 입출력, PWA, 접근성, DAST·복구 연습, 운영 문서와 릴리스 품질 게이트
 
 각 마일스톤은 실패하는 테스트, 최소 구현, 전체 검증, 관련 문서 갱신의 순서로 완료한다. 뒤 마일스톤은 앞 마일스톤의 공개 인터페이스에만 의존한다.
 
@@ -369,7 +419,8 @@ format → lint → typecheck → unit → integration → build → E2E smoke
 - 최초 원격 푸시 직후 `main` 브랜치 보호를 활성화하고, 그 이후 직접 푸시를 금지한다.
 - 기능 PR은 squash merge를 기본으로 한다.
 - Conventional Commits 형식을 사용한다.
-- PR에는 기능, 테스트, 문서, 마이그레이션, 보안 영향을 기록한다.
+- PR에는 기능, 테스트, 문서, 마이그레이션, 보안 영향, 위협 모델 변경, 남은 위험을 기록한다.
+- 보안 관련 코드와 GitHub Actions 변경은 작성자 외 검토를 원칙으로 하고, 단독 개발 단계에는 자동 검사와 재현 가능한 수동 증거를 함께 남긴다.
 - 릴리스는 Semantic Versioning과 `vX.Y.Z` 태그를 사용한다.
 
 ## 16. 완료 기준
@@ -380,10 +431,16 @@ format → lint → typecheck → unit → integration → build → E2E smoke
 - 이메일, Google, Kakao, Naver 로그인 흐름이 검증된다.
 - 오프라인 거래가 재연결 후 중복 없이 동기화된다.
 - 사용자 간 데이터 격리 테스트가 통과한다.
+- JWT·OAuth·세션·재인증과 사용자 A/B 객체 권한 테스트가 통과한다.
+- CSRF, CORS, CSP, HSTS, 입력 검증, SQL·XSS·CSV 삽입 방어가 검증된다.
+- Git 기록 secret 검사, SAST, production SCA, SBOM, 스테이징 DAST가 통과한다.
+- 운영 관리자 MFA, 최소 권한 DB 역할, RLS, 비밀정보 분리·회전 절차가 검증된다.
+- 백업 복구와 계정 탈취·secret 유출·교차 사용자 접근 사고 대응 연습이 완료된다.
+- 해결되지 않은 치명적·높음 보안 위험이 0건이다.
 - CSV 가져오기와 내보내기가 오류 검토 흐름과 함께 동작한다.
 - WCAG 2.2 AA 자동 검사와 핵심 수동 접근성 시나리오가 통과한다.
 - 전체 CI 품질 게이트가 통과한다.
-- README, 아키텍처, ERD, API, 테스트, 배포, 사용자 안내, 로드맵, 변경 기록이 최신 상태다.
+- README, 아키텍처, ERD, API, 보안 정책·위협 모델·체크리스트·사고 대응, 테스트, 배포, 사용자 안내, 로드맵, 변경 기록이 최신 상태다.
 
 ## 17. 명시적 비범위
 
@@ -392,4 +449,5 @@ format → lint → typecheck → unit → integration → build → E2E smoke
 - 1단계의 금융기관 자동 연동
 - 다중 통화와 자동 환율 환산
 - 네이티브 iOS·Android 앱
+- 관리자 페이지. 사용자용 핵심 앱의 구현과 보안 검증을 완료한 뒤 분리된 권한 경계와 별도 위협 모델로 진행한다.
 - 측정되지 않은 병목을 위한 Redis, 메시지 큐, 샤딩, 조기 파티셔닝
