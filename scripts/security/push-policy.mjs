@@ -74,7 +74,7 @@ export function assertPrePushPolicy(updates) {
     if (!ALLOWED_PUSH_REFS.some((pattern) => pattern.test(update.remoteRef))) {
       throw new SecurityGateError(
         "UNSUPPORTED_PUSH_REF",
-        `Push target ${update.remoteRef} is outside the approved branch convention.`,
+        "Push target is outside the approved branch convention.",
       );
     }
   }
@@ -100,7 +100,7 @@ export function assertCiPolicy({ eventName, targetRef }) {
     if (!ALLOWED_PUSH_REFS.some((pattern) => pattern.test(targetRef))) {
       throw new SecurityGateError(
         "UNSUPPORTED_PUSH_REF",
-        `GitHub push target ${targetRef} is outside the approved branch convention.`,
+        "GitHub push target is outside the approved branch convention.",
       );
     }
     return;
@@ -112,6 +112,6 @@ export function assertCiPolicy({ eventName, targetRef }) {
 
   throw new SecurityGateError(
     "UNSUPPORTED_CI_EVENT",
-    `Unsupported CI event/ref combination: ${eventName} -> ${targetRef}.`,
+    "Unsupported CI event/ref combination.",
   );
 }
