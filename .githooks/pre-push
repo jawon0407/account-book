@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+# Git passes remote name/URL as $1/$2 and ref updates on stdin.
+# The Node CLI inherits stdin so the exact pushed refs are checked.
+node scripts/security-gate.mjs \
+  --mode pre-push \
+  --remote-name "$1" \
+  --remote-url "$2"

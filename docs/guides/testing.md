@@ -27,7 +27,7 @@ pnpm test:structure
 - 누락 경로가 있으면 해당 경로만 출력하고 종료 코드 `1`을 반환한다.
 - 모든 경로가 있으면 성공 메시지를 출력하고 종료 코드 `0`을 반환한다.
 
-초기 구조 검사기의 GREEN 증거는 `pnpm test:structure`에서 테스트 `2`개 통과, 실패 `0`개다.
+구조 검사기의 GREEN 증거는 `pnpm test:structure`의 최신 출력과 검사한 commit SHA로 남긴다. 테스트 개수는 코드와 함께 변하므로 문서에 고정하지 않는다.
 
 ## 4. 실제 저장소 구조 검증
 
@@ -51,9 +51,36 @@ GitHub 저장소, 브랜치 보호, 보안 설정은 애플리케이션 행동�
 |---|---|---|
 | 비공개 저장소 | 대상 저장소가 존재하지 않음 | `isPrivate: true`, 기본 브랜치 `main` |
 | 첫 푸시 | `origin/main` 없음 | 로컬·원격 `main` SHA 일치 |
-| 브랜치 보호 | 보호 정책 없음 | PR 필수, 선형 기록, 강제 푸시·삭제 금지 |
+| 브랜치 보호 | 보호 정책 없음 | 무료 플랜 API HTTP 403; 미지원 상태와 보완 통제를 기록 |
 | 유지보수 브랜치 | 원격 브랜치 없음 | `main`과 `maintenance-branch` 최초 SHA 일치 |
 
 ## 7. 증거 보존
 
 각 작업 보고서와 PR에는 실행 명령, 종료 코드, 통과·실패 개수, 핵심 출력, 검증한 commit SHA를 기록한다. 토큰, 쿠키, OAuth code, 전체 계좌 식별자, 실제 사용자 데이터는 테스트 출력과 증거에 포함하지 않는다.
+
+## 8. 무료 플랜 보안 게이트
+
+로컬과 CI는 같은 `scripts/security-gate.mjs`를 사용한다. 로컬 설치와 집중 검증은 다음 순서로 수행한다.
+
+```powershell
+pnpm setup:hooks
+git config --local --get core.hooksPath
+pnpm test:security-gate
+pnpm verify:structure
+```
+
+hooks 경로 출력은 정확히 `.githooks`여야 한다. `main` 차단은 원격을 변경하지 않는 합성 pre-push 입력으로 테스트하고, `feature/*` 입력은 같은 방식으로 통과를 확인한다.
+
+비밀정보 검사 테스트는 다음 실패 경계를 포함한다.
+
+- 기존 ref에는 도입된 모든 커밋의 전체 tree blob을 검사한다.
+- 신규 ref에는 head에서 도달 가능한 전체 이력을 검사한다.
+- shallow 저장소는 불완전한 결과를 반환하지 않고 fail closed로 실패한다.
+- 5 MiB 초과 blob은 오류로 실패하며 수동 승인만으로 우회할 수 없다. 파일 제거·검토된 별도 저장·또는 보안 검토와 회귀 테스트를 거친 검사 코드/한도 변경 전까지 push와 merge를 중단한다.
+- 탐지 출력에는 실제 일치 값이 아닌 JSON escape한 경로와 규칙 ID만 남는다.
+
+CI 정책 테스트는 trigger, `contents: read`, secret 미참조, SHA-pinned Action, `fetch-depth: 0`, `persist-credentials: false`, 공통 CLI 연결을 검사한다. push concurrency group은 각 `github.sha`로 고유해야 하고 push 실행은 취소되지 않아야 하며, PR 실행에만 `cancel-in-progress`를 허용한다. 같은 ref의 연속 push가 같은 group의 pending 교체로 누락되지 않도록 하는 조건이다. canonical workflow 테스트는 workflow 전체 digest가 검토값과 같은지 추가로 확인한다.
+
+CI 결과는 해당 commit의 검사 증거이지 GitHub branch protection 또는 push protection의 활성 증거가 아니다. branch protection/rulesets는 API HTTP 403, secret scanning/push protection은 HTTP 422로 사용할 수 없으며, 로컬 hook은 `--no-verify`로 우회할 수 있고 CI는 이미 원격에 도달한 push를 되돌리지 못한다. 세부 운영 절차는 [GitHub 무료 플랜 보완 통제](../security/free-plan-compensating-controls.md)를 따른다.
+
+테스트 개수는 문서에 고정하지 않는다. 실행 시점의 통과·실패 개수와 `git rev-parse HEAD` 결과를 작업 보고서와 PR에 함께 기록한다.

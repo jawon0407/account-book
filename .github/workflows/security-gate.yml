@@ -1,0 +1,47 @@
+name: security-gate
+
+on:
+  pull_request:
+  push:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-gate-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.event.pull_request.number }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  security-gate:
+    name: security-gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out the exact commit without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Use the repository-pinned Node version
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          check-latest: false
+
+      - name: Run security gate tests
+        run: node --test scripts/verify-structure.test.mjs scripts/security/*.test.mjs scripts/security-gate.test.mjs scripts/setup-hooks.test.mjs
+
+      - name: Evaluate pushed or proposed commit range
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET_REF: ${{ github.event_name == 'pull_request' && format('refs/heads/{0}', github.base_ref) || github.ref }}
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          node scripts/security-gate.mjs
+          --mode ci
+          --event "$EVENT_NAME"
+          --target-ref "$TARGET_REF"
+          --base "$BASE_SHA"
+          --head "$HEAD_SHA"

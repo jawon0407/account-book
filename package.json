@@ -10,6 +10,9 @@
   },
   "scripts": {
     "test:structure": "node --test scripts/verify-structure.test.mjs",
+    "test": "node --test scripts/verify-structure.test.mjs scripts/security/*.test.mjs scripts/security-gate.test.mjs scripts/setup-hooks.test.mjs",
+    "test:security-gate": "node --test scripts/security/*.test.mjs scripts/security-gate.test.mjs scripts/setup-hooks.test.mjs",
+    "setup:hooks": "node scripts/setup-hooks.mjs",
     "verify:structure": "node scripts/verify-structure.mjs"
   }
 }
