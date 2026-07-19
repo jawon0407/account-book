@@ -1,14 +1,7 @@
-const SECRET_RULES = Object.freeze([
-  { ruleId: "AWS_ACCESS_KEY_ID", pattern: /(?:AKIA|ASIA)[0-9A-Z]{16}/u },
-  {
-    ruleId: "GITHUB_TOKEN",
-    pattern: /(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})/u,
-  },
-  {
-    ruleId: "PRIVATE_KEY",
-    pattern: /-----BEGIN (?:(?:RSA|EC|OPENSSH|DSA|ENCRYPTED) )?PRIVATE KEY-----/u,
-  },
-]);
+import {
+  SECRET_RULES,
+  sanitizeDiagnosticPath,
+} from "./diagnostic-path-sanitizer.mjs";
 
 /**
  * Detects supported credential signatures in exact blob bytes.
@@ -39,13 +32,13 @@ export function scanBlobsForSecrets(blobs) {
  * Formats sanitized findings for terminal/CI display with untrusted paths escaped.
  *
  * @param {Array<{path: string, ruleId: string}>} findings Sanitized scan findings.
- * @returns {string} Multi-line report containing only escaped paths and rule IDs.
+ * @returns {string} Multi-line report containing only redacted, escaped paths and rule IDs.
  */
 export function formatSecretFindings(findings) {
   return [
     "Potential secrets detected; matched values are intentionally hidden:",
     ...findings.map(
-      ({ path, ruleId }) => `- ${JSON.stringify(path)}: ${ruleId}`,
+      ({ path, ruleId }) => `- ${JSON.stringify(sanitizeDiagnosticPath(path))}: ${ruleId}`,
     ),
   ].join("\n");
 }

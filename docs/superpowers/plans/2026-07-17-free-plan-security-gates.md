@@ -1153,6 +1153,8 @@ Expected: the test loads and fails trigger, permission, and pinned-action assert
 
 - [ ] **Step 3: Create the pinned read-only workflow**
 
+Final-review decision: push concurrency uses the per-run `github.run_id`, not `github.sha`, because the same SHA can be pushed to a ref again while an earlier run is pending. Push runs remain non-cancellable; PR runs keep PR-number grouping and PR-only cancellation.
+
 Create `.github/workflows/security-gate.yml`:
 
 ```yaml
@@ -1166,7 +1168,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: security-gate-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.event.pull_request.number }}
+  group: security-gate-${{ github.event_name }}-${{ github.event_name == 'push' && github.run_id || github.event.pull_request.number }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

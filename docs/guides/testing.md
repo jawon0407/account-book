@@ -77,9 +77,9 @@ hooks 경로 출력은 정확히 `.githooks`여야 한다. `main` 차단은 원�
 - 신규 ref에는 head에서 도달 가능한 전체 이력을 검사한다.
 - shallow 저장소는 불완전한 결과를 반환하지 않고 fail closed로 실패한다.
 - 5 MiB 초과 blob은 오류로 실패하며 수동 승인만으로 우회할 수 없다. 파일 제거·검토된 별도 저장·또는 보안 검토와 회귀 테스트를 거친 검사 코드/한도 변경 전까지 push와 merge를 중단한다.
-- 탐지 출력에는 실제 일치 값이 아닌 JSON escape한 경로와 규칙 ID만 남는다.
+- 탐지 출력에는 실제 일치 값이나 경로 안의 지원 credential 형식이 남지 않는다. 경로는 credential을 규칙별 표기로 가리고 Unicode format control을 보이는 escape text로 렌더링한 뒤 JSON escape하며, 규칙 ID만 함께 남긴다.
 
-CI 정책 테스트는 trigger, `contents: read`, secret 미참조, SHA-pinned Action, `fetch-depth: 0`, `persist-credentials: false`, 공통 CLI 연결을 검사한다. push concurrency group은 각 `github.sha`로 고유해야 하고 push 실행은 취소되지 않아야 하며, PR 실행에만 `cancel-in-progress`를 허용한다. 같은 ref의 연속 push가 같은 group의 pending 교체로 누락되지 않도록 하는 조건이다. canonical workflow 테스트는 workflow 전체 digest가 검토값과 같은지 추가로 확인한다.
+CI 정책 테스트는 trigger, `contents: read`, secret 미참조, SHA-pinned Action, `fetch-depth: 0`, `persist-credentials: false`, 공통 CLI 연결을 검사한다. push concurrency group은 실행마다 고유한 `github.run_id`여야 하고 push 실행은 취소되지 않아야 하며, PR 실행에만 PR 번호 그룹과 `cancel-in-progress`를 허용한다. 이는 같은 SHA를 다시 가리키는 ref push가 같은 group의 pending 실행을 대체해 누락되는 일을 막는다. canonical workflow 테스트는 workflow 전체 digest가 검토값과 같은지 추가로 확인한다.
 
 CI 결과는 해당 commit의 검사 증거이지 GitHub branch protection 또는 push protection의 활성 증거가 아니다. branch protection/rulesets는 API HTTP 403, secret scanning/push protection은 HTTP 422로 사용할 수 없으며, 로컬 hook은 `--no-verify`로 우회할 수 있고 CI는 이미 원격에 도달한 push를 되돌리지 못한다. 세부 운영 절차는 [GitHub 무료 플랜 보완 통제](../security/free-plan-compensating-controls.md)를 따른다.
 

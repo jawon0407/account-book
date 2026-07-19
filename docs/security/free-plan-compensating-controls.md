@@ -39,7 +39,7 @@
 - 저장소 secret을 참조하지 않는다.
 - 모든 `uses:`는 검토한 전체 40자리 commit SHA에 고정한다.
 - checkout은 `fetch-depth: 0`으로 전체 이력을 가져오고 `persist-credentials: false`로 Git 자격 증명을 남기지 않는다.
-- push 실행의 concurrency group에는 `github.sha`를 포함하고 취소를 비활성화해 같은 ref의 연속 push도 각각 검사한다. PR 실행만 새 실행이 이전 실행을 대체하도록 취소한다.
+- push 실행의 concurrency group에는 실행마다 고유한 `github.run_id`를 사용하고 취소를 비활성화한다. 따라서 같은 SHA를 다시 가리키는 ref push도 pending 실행을 대체하지 않고 각각 검사한다. PR 실행만 PR 번호로 그룹화하고 새 실행이 이전 실행을 대체하도록 취소한다.
 - 정적 정책 테스트는 이벤트, 권한, secret 참조, 승인된 Action, checkout 설정, CLI 연결을 확인한다.
 - canonical workflow 정책 테스트는 정규화한 workflow 전체의 SHA-256 digest를 검토값과 비교해 구조 검사를 우회하는 YAML 변경도 fail closed로 막는다.
 

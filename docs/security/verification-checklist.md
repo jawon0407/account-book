@@ -174,7 +174,7 @@ format
 - [ ] workflow가 `pull_request_target` 또는 `secrets.*`를 사용하지 않는다.
 - [ ] 모든 `uses:`가 검토한 전체 commit SHA에 고정되어 있다.
 - [ ] checkout이 `fetch-depth: 0`, `persist-credentials: false`를 사용한다.
-- [ ] push concurrency group에 `github.sha`가 포함되고 push의 `cancel-in-progress`는 false이며, PR 실행만 취소 가능하다.
+- [ ] push concurrency group이 실행마다 고유한 `github.run_id`를 사용하고 push의 `cancel-in-progress`는 false이며, PR 실행만 PR 번호로 그룹화하고 취소 가능하다. 같은 SHA ref push도 pending 실행을 대체하지 않아야 한다.
 - [ ] workflow 구조 정책과 canonical 전체 파일 digest 테스트가 모두 통과한다.
 - [ ] 로컬 HEAD, PR `headRefOid`, 성공한 `security-gate` Check의 SHA가 같다.
 - [ ] branch protection/rulesets HTTP 403과 secret scanning/push protection HTTP 422의 잔여 위험을 수동 확인했다.

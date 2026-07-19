@@ -61,6 +61,20 @@ function syntheticPrivateKeyMarker(label = "") {
   ].join("");
 }
 
+function credentialShapedFilename() {
+  const githubToken = ["gh", "p_", "P".repeat(36)].join("");
+  const awsKey = ["AK", "IA", "W".repeat(16)].join("");
+  const privateKey = ["-----", "BEGIN", " ", "PRIVATE", " ", "KEY-----"].join("");
+  const bidiControl = "\u202e";
+  return {
+    awsKey,
+    bidiControl,
+    githubToken,
+    path: ["credential-shaped", githubToken, awsKey, privateKey, bidiControl, "file.bin"].join("-"),
+    privateKey,
+  };
+}
+
 test("all tree blobs are read from each introduced pushed commit", async () => {
   const rootDir = await mkdtemp(join(tmpdir(), "account-book-security-"));
   try {
@@ -103,6 +117,24 @@ test("synthetic secrets return rule IDs without the matched value", () => {
     false,
     "formatted findings must not contain matched secret values",
   );
+});
+
+test("formatted findings redact every supported credential form and render bidi controls safely", () => {
+  const { awsKey, bidiControl, githubToken, path, privateKey } = credentialShapedFilename();
+  const report = formatSecretFindings([{ path, ruleId: "GITHUB_TOKEN" }]);
+
+  for (const credential of [githubToken, awsKey, privateKey]) {
+    assert.equal(
+      report.includes(credential),
+      false,
+      "formatted findings must not reveal credential-shaped path text",
+    );
+  }
+  assert.equal(report.includes(bidiControl), false, "formatted findings must not contain raw bidi controls");
+  assert.match(report, /\[REDACTED:GITHUB_TOKEN\]/u);
+  assert.match(report, /\[REDACTED:AWS_ACCESS_KEY_ID\]/u);
+  assert.match(report, /\[REDACTED:PRIVATE_KEY\]/u);
+  assert.match(report, /\\u202e/u);
 });
 
 test("private-key markers and AWS key IDs are detected", () => {
@@ -219,6 +251,41 @@ test("oversized blobs fail closed before their content is read", async () => {
         code === "BLOB_REVIEW_REQUIRED" &&
         message === "Changed file \"large.bin\" exceeds the 5 MiB automatic scan limit.",
     );
+  } finally {
+    await rm(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("oversized-blob errors redact credential-shaped filenames and render bidi controls safely", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "account-book-security-"));
+  try {
+    initGitFixture(rootDir);
+    const { awsKey, bidiControl, githubToken, path, privateKey } = credentialShapedFilename();
+    await writeFile(join(rootDir, path), Buffer.alloc(5 * 1024 * 1024 + 1, 0x41));
+    git(rootDir, "add", path);
+    git(rootDir, "commit", "-m", "oversized credential-shaped filename");
+    const head = git(rootDir, "rev-parse", "HEAD");
+
+    let error;
+    try {
+      readChangedBlobs({ rootDir, ranges: [{ base: null, head }] });
+    } catch (caught) {
+      error = caught;
+    }
+
+    assert.equal(error?.code, "BLOB_REVIEW_REQUIRED");
+    for (const credential of [githubToken, awsKey, privateKey]) {
+      assert.equal(
+        error.message.includes(credential),
+        false,
+        "oversized-blob errors must not reveal credential-shaped path text",
+      );
+    }
+    assert.equal(error.message.includes(bidiControl), false, "oversized-blob errors must not contain raw bidi controls");
+    assert.match(error.message, /\[REDACTED:GITHUB_TOKEN\]/u);
+    assert.match(error.message, /\[REDACTED:AWS_ACCESS_KEY_ID\]/u);
+    assert.match(error.message, /\[REDACTED:PRIVATE_KEY\]/u);
+    assert.match(error.message, /\\u202e/u);
   } finally {
     await rm(rootDir, { recursive: true, force: true });
   }

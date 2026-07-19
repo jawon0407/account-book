@@ -16,7 +16,7 @@ const approvedActions = [
   "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
 ];
 const reviewedWorkflowSha256 =
-  "9b47bc98daedbaf78ba6bdcb60af386e55cbb8c82b3e04d75a8c9f1addbd6fa6";
+  "b7fcc5b67baefb0fb7d699d29cb6db794e05b93ccf29d1da1d14ef87061e3b65";
 
 function canonicalWorkflowDigest(source) {
   const normalizedSource = source.replace(/\r\n/gu, "\n");
@@ -197,7 +197,7 @@ test("security workflow has only pull_request and push triggers", () => {
   assert.deepEqual(triggerBlock, ["on:", "  pull_request:", "  push:"]);
 });
 
-test("push runs use unique SHA groups and only PR runs are cancellable", () => {
+test("push runs use unique run-ID groups, never SHA grouping, and only PR runs are cancellable", () => {
   const source = readFileSync(workflowPath, "utf8");
   const concurrencyBlock = activeLines(
     singleTopLevelBlock(source, "concurrency"),
@@ -205,9 +205,14 @@ test("push runs use unique SHA groups and only PR runs are cancellable", () => {
 
   assert.deepEqual(concurrencyBlock, [
     "concurrency:",
-    "  group: security-gate-${{ github.event_name }}-${{ github.event_name == 'push' && github.sha || github.event.pull_request.number }}",
+    "  group: security-gate-${{ github.event_name }}-${{ github.event_name == 'push' && github.run_id || github.event.pull_request.number }}",
     "  cancel-in-progress: ${{ github.event_name == 'pull_request' }}",
   ]);
+  assert.equal(
+    concurrencyBlock.some((line) => line.includes("github.event_name == 'push' && github.sha")),
+    false,
+    "push concurrency must not group by github.sha",
+  );
 });
 
 test("security workflow grants only top-level contents read permission", () => {

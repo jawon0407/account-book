@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
 
+import { sanitizeDiagnosticPath } from "./diagnostic-path-sanitizer.mjs";
 import { SecurityGateError } from "./errors.mjs";
 import { ZERO_SHA } from "./push-policy.mjs";
 
@@ -200,10 +201,10 @@ export function readChangedBlobs({ rootDir, ranges }) {
           const sizeOutput = runGit(rootDir, ["cat-file", "-s", objectId], "utf8");
           const size = Number.parseInt(sizeOutput, 10);
           if (!Number.isSafeInteger(size) || size < 0 || size > MAX_BLOB_BYTES) {
-            // Quote/escape the repository-controlled path to prevent diagnostic injection.
+            // Redact credentials and escape the repository-controlled path before diagnostics.
             throw new SecurityGateError(
               "BLOB_REVIEW_REQUIRED",
-              `Changed file ${JSON.stringify(path)} exceeds the 5 MiB automatic scan limit.`,
+              `Changed file ${JSON.stringify(sanitizeDiagnosticPath(path))} exceeds the 5 MiB automatic scan limit.`,
             );
           }
           content = runGit(rootDir, ["cat-file", "blob", objectId]);
