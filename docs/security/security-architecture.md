@@ -210,3 +210,13 @@ IndexedDB는 암호화된 금고가 아니라 사용자가 접근 가능한 기�
 - 관리자 기능 구현 전 독립 보안 검토와 침투 테스트 범위를 확정한다.
 
 이 문서는 설계 단계의 보안 기준이다. 코드 구현 후에는 실제 엔드포인트, 정책, 인프라, 의존성을 대상으로 별도의 보안 감사를 수행한다.
+
+## 16. 무료 플랜 CI/CD 보완 계층
+
+GitHub 서버는 현재 무료 플랜의 비공개 저장소에서 `main` PR 의무화, 강제 push·삭제 차단, secret scanning과 push protection을 강제하지 못한다. 설정 API 확인은 branch protection/rulesets에서 HTTP 403, secret scanning/push protection에서 HTTP 422를 반환했다. Dependabot vulnerability alerts와 automated security fixes는 별도로 활성화되어 있다.
+
+첫 번째 계층은 `.githooks/pre-push`가 실행하는 공통 Node 보안 게이트다. 이 계층은 push 정책과 저장소 구조를 확인한 뒤, push가 도입하는 모든 커밋의 전체 tree blob을 검사한다. 신규 ref는 head에서 도달 가능한 전체 이력을 검사한다. shallow 이력, Git 판독 실패와 잘못된 SHA는 fail closed로 중단한다. 5 MiB 초과 blob은 수동 승인으로 우회할 수 없으며 파일 제거·검토된 별도 저장·또는 보안 검토와 회귀 테스트를 거친 검사 코드/한도 변경 전까지 push와 merge를 막는다. 비밀정보 탐지는 실제 일치 값과 경로 안의 지원 credential 형식을 규칙별 표기로 가리고, Unicode format control을 보이는 escape text로 렌더링한 경로와 규칙 ID만 보고한다.
+
+두 번째 계층은 같은 CLI를 실행하는 `.github/workflows/security-gate.yml`이다. workflow는 `contents: read`, SHA-pinned Action, `fetch-depth: 0`, `persist-credentials: false`를 사용하며 저장소 secret을 참조하지 않는다. 각 push의 concurrency group에는 실행마다 고유한 `github.run_id`가 들어가고 push 실행은 취소되지 않으므로 같은 SHA를 다시 가리키는 ref push도 pending 실행을 대체하지 않고 각각 검사한다. PR 실행만 PR 번호로 그룹화하고 최신 상태만 필요하므로 `cancel-in-progress`를 적용한다. 구조 정책과 canonical 전체 파일 digest 테스트가 workflow의 권한 또는 실행 경로 변경을 감시한다.
+
+로컬 계층은 `--no-verify`로 우회할 수 있고 CI 계층은 원격에 도달한 변경을 사후 탐지할 뿐 되돌리지 못한다. 따라서 PR 작성자는 동일 SHA의 로컬·CI 성공과 [수동 검증 체크리스트](verification-checklist.md)를 함께 증거로 남겨야 한다. 설치 및 사고 절차와 서버 측 통제 전환 조건은 [무료 플랜 보완 통제](free-plan-compensating-controls.md)에 정의한다.

@@ -13,6 +13,7 @@ coverage/
 # Local design and brainstorming sessions
 .superpowers/
 .impeccable/live/
+.worktrees/
 
 # Editor and OS files
 .DS_Store

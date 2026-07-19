@@ -43,10 +43,17 @@
 
 중간 등급 위험을 임시 수용하려면 악용 시나리오, 영향, 보완 통제, 소유자, 재검토일을 기록해야 한다. 재검토 기한은 원칙적으로 30일을 넘기지 않는다.
 
+## GitHub 무료 플랜 운영 제한
+
+비공개 저장소의 branch protection/rulesets와 secret scanning/push protection은 현재 무료 플랜에서 사용할 수 없다. API 확인 결과는 각각 HTTP 403과 HTTP 422였으며, Dependabot vulnerability alerts와 automated security fixes는 활성화되어 있다.
+
+`main` 직접 push는 정책상 금지하고 `.githooks/pre-push`, 공통 `scripts/security-gate.mjs`, 읽기 전용 GitHub Actions와 PR 수동 검토로 보완한다. 로컬 hook은 `--no-verify`로 우회할 수 있고 CI는 이미 GitHub에 도달한 push를 되돌릴 수 없으므로 이 구성은 서버 측 보호와 동등하지 않다. 설치, 검증, 사고 처리와 위험 종료 조건은 [GitHub 무료 플랜 보완 통제](docs/security/free-plan-compensating-controls.md)를 따른다.
+
 ## Security Documentation
 
 - [보안 기준과 문서 지도](docs/security/README.md)
 - [보안 아키텍처와 위협 모델](docs/security/security-architecture.md)
+- [GitHub 무료 플랜 보완 통제](docs/security/free-plan-compensating-controls.md)
 - [보안 검증 체크리스트](docs/security/verification-checklist.md)
 - [사고 대응 절차](docs/security/incident-response.md)
 

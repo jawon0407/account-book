@@ -165,3 +165,21 @@ format
 - 30일 이내 재검토일 또는 더 빠른 수정 릴리스
 
 치명적·높음 위험은 일정 사유로 수용할 수 없다. 중간 위험도 반복 수용하지 않으며 기한이 지나면 릴리스를 차단한다.
+
+## 9. 무료 플랜 저장소 게이트
+
+- [ ] `pnpm setup:hooks`가 성공했고 `git config --local --get core.hooksPath`가 정확히 `.githooks`를 출력한다.
+- [ ] `pnpm test:security-gate`, `pnpm test`, `pnpm verify:structure`의 결과와 검사한 commit SHA를 PR에 기록했다.
+- [ ] workflow trigger는 `pull_request`와 `push`뿐이고 권한은 최상위 `contents: read`뿐이다.
+- [ ] workflow가 `pull_request_target` 또는 `secrets.*`를 사용하지 않는다.
+- [ ] 모든 `uses:`가 검토한 전체 commit SHA에 고정되어 있다.
+- [ ] checkout이 `fetch-depth: 0`, `persist-credentials: false`를 사용한다.
+- [ ] push concurrency group이 실행마다 고유한 `github.run_id`를 사용하고 push의 `cancel-in-progress`는 false이며, PR 실행만 PR 번호로 그룹화하고 취소 가능하다. 같은 SHA ref push도 pending 실행을 대체하지 않아야 한다.
+- [ ] workflow 구조 정책과 canonical 전체 파일 digest 테스트가 모두 통과한다.
+- [ ] 로컬 HEAD, PR `headRefOid`, 성공한 `security-gate` Check의 SHA가 같다.
+- [ ] branch protection/rulesets HTTP 403과 secret scanning/push protection HTTP 422의 잔여 위험을 수동 확인했다.
+- [ ] 로컬 hook의 `--no-verify` 우회 가능성과 CI의 사후 탐지 한계를 PR에 기록했다.
+- [ ] 코드, diff, 로그, 문서, fixture에 실제 비밀정보 또는 실제 사용자 재무 데이터가 없다.
+- [ ] 5 MiB 초과 blob이 있으면 수동 승인으로 우회하지 않고 파일 제거·검토된 별도 저장·또는 보안 검토된 검사 코드/한도 변경이 완료될 때까지 push와 merge를 중단했다.
+
+운영 절차와 위험 수용 종료 조건은 [GitHub 무료 플랜 보완 통제](free-plan-compensating-controls.md)를 따른다.

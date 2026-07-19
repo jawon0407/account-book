@@ -8,9 +8,10 @@
 
 1. 루트 `SECURITY.md`의 중단 조건과 보고 정책
 2. `security-architecture.md`의 자산·신뢰 경계·필수 통제
-3. `verification-checklist.md`의 PR·릴리스 증거
-4. `incident-response.md`의 사고 처리 절차
-5. 기능별 ADR과 API·DB 문서
+3. `free-plan-compensating-controls.md`의 무료 플랜 제한, 로컬·CI 보완 통제, 잔여 위험과 종료 조건
+4. `verification-checklist.md`의 PR·릴리스 증거
+5. `incident-response.md`의 사고 처리 절차
+6. 기능별 ADR과 API·DB 문서
 
 충돌이 있으면 더 엄격한 통제를 적용하고 같은 PR에서 문서를 정정한다.
 
