@@ -763,10 +763,9 @@ const HEAD = execFileSync("git", ["rev-parse", "HEAD"], {
   cwd: rootDir,
   encoding: "utf8",
 }).trim();
-const BASE = execFileSync("git", ["rev-parse", "main"], {
-  cwd: rootDir,
-  encoding: "utf8",
-}).trim();
+// These policy tests only require a well-formed remote SHA. Keeping it synthetic
+// avoids depending on a local `main` ref, which is absent in single-branch CI checkouts.
+const BASE = "2".repeat(40);
 
 /**
  * Executes the public CLI with controlled stdin.
