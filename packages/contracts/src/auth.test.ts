@@ -10,6 +10,7 @@ import {
 
 const validEmail = "person@example.com";
 const validPassword = "a".repeat(12);
+const maximumEmail = `${"a".repeat(64)}@${"b".repeat(63)}.${"c".repeat(63)}.${"d".repeat(57)}.com`;
 
 describe("authentication input contracts", () => {
   it("accepts supported providers and minimum valid inputs", () => {
@@ -26,6 +27,20 @@ describe("authentication input contracts", () => {
     });
     expect(PasswordResetRequestInputSchema.parse({ email: validEmail })).toEqual({ email: validEmail });
     expect(PasswordUpdateInputSchema.parse({ password: validPassword })).toEqual({ password: validPassword });
+  });
+
+  it("accepts a valid 254-character email", () => {
+    expect(maximumEmail).toHaveLength(254);
+    expect(SignUpInputSchema.parse({ email: maximumEmail, password: validPassword })).toEqual({
+      email: maximumEmail,
+      password: validPassword,
+    });
+  });
+
+  it("accepts a 1024-character password", () => {
+    const maximumPassword = "a".repeat(1024);
+
+    expect(PasswordUpdateInputSchema.parse({ password: maximumPassword })).toEqual({ password: maximumPassword });
   });
 
   it("rejects unsupported providers and invalid email boundaries", () => {

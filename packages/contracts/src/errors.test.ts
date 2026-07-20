@@ -15,6 +15,20 @@ describe("public API error contract", () => {
     expect(parseApiError(validError)).toEqual(validError);
   });
 
+  it("accepts a one-character message", () => {
+    expect(ApiErrorSchema.parse({ ...validError, message: "a" }).message).toBe("a");
+  });
+
+  it("accepts an eight-character request ID", () => {
+    expect(ApiErrorSchema.parse({ ...validError, requestId: "request1" }).requestId).toBe("request1");
+  });
+
+  it("accepts twenty field errors", () => {
+    const fieldErrors = Array.from({ length: 20 }, () => ({ field: "email", code: "INVALID" }));
+
+    expect(ApiErrorSchema.parse({ ...validError, fieldErrors }).fieldErrors).toEqual(fieldErrors);
+  });
+
   it("rejects invalid codes and string length boundaries", () => {
     expect(() => ApiErrorSchema.parse({ ...validError, code: "AUTH_UNKNOWN" })).toThrow();
     expect(() => ApiErrorSchema.parse({ ...validError, message: "a".repeat(301) })).toThrow();
