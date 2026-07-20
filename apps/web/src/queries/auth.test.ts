@@ -4,6 +4,7 @@ const module = await import("./auth.js").catch(() => ({} as Record<string, unkno
 const getCurrentUser = module.getCurrentUser as ((client: unknown) => Promise<unknown>) | undefined;
 const currentUserQueryOptions = module.currentUserQueryOptions as ((client: unknown) => Record<string, unknown>) | undefined;
 const signInMutationOptions = module.signInMutationOptions as ((client: unknown) => Record<string, unknown>) | undefined;
+const oauthStartMutationOptions = module.oauthStartMutationOptions as ((client: unknown) => { mutationFn: (input: unknown) => Promise<unknown> }) | undefined;
 
 const user = { id: "123e4567-e89b-12d3-a456-426614174001", email: "person@example.test", emailVerified: true };
 
@@ -67,5 +68,18 @@ describe("authentication queries", () => {
     expect(signInMutationOptions!(client)).toMatchObject({ retry: false });
     expect(signInMutationOptions!(client).mutationFn).toBeTypeOf("function");
     expect(JSON.stringify(currentUserQueryOptions!(client))).not.toMatch(/token|selector/iu);
+  });
+
+  it("accepts only the fixed same-origin OAuth handoff path", async () => {
+    expect(oauthStartMutationOptions).toBeTypeOf("function");
+    const client = {
+      get: vi.fn(() => result({ csrfToken: "csrf-token" })),
+      post: vi.fn()
+        .mockReturnValueOnce(result({ authorizationPath: "/api/auth/oauth/google/continue?returnPath=%2Fapp" }))
+        .mockReturnValueOnce(result({ authorizationUrl: "https://provider.example.test/authorize?state=secret" })),
+    };
+    await expect(oauthStartMutationOptions!(client).mutationFn({ provider: "google", returnPath: "/app" })).resolves.toEqual({ authorizationPath: "/api/auth/oauth/google/continue?returnPath=%2Fapp" });
+    await expect(oauthStartMutationOptions!(client).mutationFn({ provider: "google", returnPath: "/app" })).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: false });
+    expect(JSON.stringify(client.post.mock.calls)).not.toContain("provider.example.test");
   });
 });

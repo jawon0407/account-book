@@ -19,8 +19,9 @@ function client(value: BrowserApiClient | typeof apiClient): BrowserApiClient {
 }
 
 /** Fetches a short-lived CSRF token without persisting it outside the current call. */
-export async function getCsrfToken(http: BrowserApiClient | typeof apiClient = apiClient): Promise<string> {
-  const parsed = CsrfResponseSchema.safeParse(await client(http).get("auth/csrf").json<unknown>());
+export async function getCsrfToken(http: BrowserApiClient | typeof apiClient = apiClient, context: "default" | "interaction" = "default"): Promise<string> {
+  const path = context === "interaction" ? "auth/csrf?context=interaction" : "auth/csrf";
+  const parsed = CsrfResponseSchema.safeParse(await client(http).get(path).json<unknown>());
   if (!parsed.success) throw new Error("AUTH_RESPONSE_INVALID");
   return parsed.data.csrfToken;
 }
@@ -34,6 +35,6 @@ export async function getCsrfToken(http: BrowserApiClient | typeof apiClient = a
  */
 export async function postWithCsrf(path: string, json: unknown, http: BrowserApiClient | typeof apiClient = apiClient): Promise<unknown> {
   if (!MUTATION_PATHS.has(path)) throw new Error("AUTH_CLIENT_PATH_INVALID");
-  const csrfToken = await getCsrfToken(http);
+  const csrfToken = await getCsrfToken(http, path === "auth/password/update" ? "interaction" : "default");
   return client(http).post(path, { json, headers: { "X-CSRF-Token": csrfToken } }).json<unknown>();
 }

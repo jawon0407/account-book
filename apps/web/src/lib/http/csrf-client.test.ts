@@ -28,4 +28,15 @@ describe("CSRF browser client", () => {
     const source = await readFile(fileURLToPath(new URL("./csrf-client.ts", import.meta.url)), "utf8");
     expect(source).not.toMatch(/localStorage|sessionStorage|indexedDB/iu);
   });
+
+  it("requests interaction-bound CSRF only for password update", async () => {
+    expect(postWithCsrf).toBeTypeOf("function");
+    const client = {
+      get: vi.fn(() => result({ csrfToken: "interaction-csrf" })),
+      post: vi.fn(() => result({ updated: true })),
+    };
+    await postWithCsrf!("auth/password/update", { password: "b".repeat(12) }, client);
+    expect(client.get).toHaveBeenCalledWith("auth/csrf?context=interaction");
+    expect(client.post).toHaveBeenCalledWith("auth/password/update", expect.objectContaining({ headers: { "X-CSRF-Token": "interaction-csrf" } }));
+  });
 });

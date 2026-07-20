@@ -1,5 +1,6 @@
 import "server-only";
 
+import { createHash } from "node:crypto";
 import { createDatabaseClient } from "@account-book/database";
 import { EmailAuthService } from "./auth/email-auth-service.js";
 import { FakeAuthProvider } from "./auth/fake-auth-provider.js";
@@ -12,6 +13,8 @@ import { SessionService } from "./session/session-service.js";
 import type { TokenKeyring } from "./security/token-envelope.js";
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+let sharedDatabase: ReturnType<typeof createDatabaseClient> | undefined;
+let sharedDatabaseFingerprint: string | undefined;
 
 /** The only authentication adapter modes permitted by the server container. */
 export type AuthAdapterMode = "supabase" | "fake";
@@ -88,6 +91,17 @@ function keyring(environment: Readonly<Record<string, string | undefined>>): Tok
   return { currentKeyId, keys };
 }
 
+function databaseClient(connectionString: string): ReturnType<typeof createDatabaseClient> {
+  const fingerprint = createHash("sha256").update(connectionString).digest("base64url");
+  if (sharedDatabase === undefined) {
+    sharedDatabase = createDatabaseClient(connectionString);
+    sharedDatabaseFingerprint = fingerprint;
+  } else if (sharedDatabaseFingerprint !== fingerprint) {
+    return invalidConfiguration();
+  }
+  return sharedDatabase;
+}
+
 /** The request-owned dependency graph exposed to the route adapter. */
 export type RequestContainer = Readonly<{ authController: AuthController }>;
 
@@ -104,7 +118,7 @@ export function createRequestContainer(environment: Readonly<Record<string, stri
     const apiInternalUrl = serverUrl(required(environment, "API_INTERNAL_URL"), new Set(["http:", "https:"]), true);
     const tokenKeyring = keyring(environment);
     const csrfKey = canonicalKey(required(environment, "AUTH_CSRF_HMAC_KEY"));
-    const repository = new PostgresAuthRepository(createDatabaseClient(databaseUrl));
+    const repository = new PostgresAuthRepository(databaseClient(databaseUrl));
     const provider = runtime.mode === "fake"
       ? new FakeAuthProvider()
       : new SupabaseAuthAdapter({
@@ -119,7 +133,7 @@ export function createRequestContainer(environment: Readonly<Record<string, stri
       authController: new AuthController({
         configuredOrigin: runtime.origin,
         apiInternalUrl,
-        secureCookies: runtime.origin.protocol === "https:",
+        secureCookies: true,
         csrfKey,
         now: () => new Date(),
         email,

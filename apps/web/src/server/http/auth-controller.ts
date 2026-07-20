@@ -31,7 +31,9 @@ import type { SessionService } from "../session/session-service.js";
 const MAX_BODY_BYTES = 16_384;
 const MAX_UPSTREAM_BYTES = 65_536;
 const REFRESH_THRESHOLD_MS = 60_000;
-const OAuthStartBodySchema = z.object({ returnPath: z.enum(["/app", "/settings/security"]) }).strict();
+const ReturnPathSchema = z.enum(["/app", "/settings/security"]);
+const CsrfContextSchema = z.enum(["session", "interaction"]);
+const OAuthStartBodySchema = z.object({ returnPath: ReturnPathSchema }).strict();
 const EmptyBodySchema = z.object({}).strict();
 
 type PublicSession = Readonly<{
@@ -59,7 +61,7 @@ type SessionBoundary = Pick<SessionService, "refresh" | "revokeCurrent" | "markR
 export type AuthControllerDependencies = Readonly<{
   configuredOrigin: URL;
   apiInternalUrl: URL;
-  secureCookies: boolean;
+  secureCookies: true;
   csrfKey: Uint8Array;
   now: () => Date;
   createInteractionSelector?: () => string;
@@ -122,11 +124,16 @@ function errorResponse(error: unknown): Response {
       status = 403;
     }
   }
+  return safeAuthFailure(code, status);
+}
+
+/** Creates a fixed public error envelope with explicitly constrained retry semantics. */
+export function safeAuthFailure(code: ApiError["code"], status: number, retryable = code === "AUTH_PROVIDER_UNAVAILABLE" && status === 503): Response {
   const body: ApiError = {
     code,
     message: message(code),
     requestId: randomUUID(),
-    retryable: code === "AUTH_PROVIDER_UNAVAILABLE" && status === 503,
+    retryable,
     fieldErrors: [],
   };
   return json(body, status);
@@ -159,6 +166,14 @@ function redirect(origin: URL, path: "/app" | "/settings/security", cookies: rea
   return new Response(null, { status: 303, headers });
 }
 
+function providerRedirect(value: URL): Response {
+  const target = new URL(value.toString());
+  if (target.protocol !== "https:" || target.username !== "" || target.password !== "" || target.hash !== "") return fail("AUTH_OAUTH_TRANSACTION_INVALID", 400);
+  const headers = noStoreHeaders();
+  headers.set("Location", target.toString());
+  return new Response(null, { status: 303, headers });
+}
+
 function serializedCookie(value: AuthCookie & Partial<Readonly<{ maxAge: 0 }>>): string {
   const attributes = [`${value.name}=${value.value}`, "HttpOnly"];
   if (value.secure) attributes.push("Secure");
@@ -181,13 +196,39 @@ function cookie(request: Request, name: typeof SESSION_COOKIE_NAME | typeof INTE
   }
 }
 
+async function boundedJson(stream: ReadableStream<Uint8Array> | null, stated: string | null, maximum: number, code: ApiError["code"], status: number): Promise<unknown> {
+  if (stated !== null && (!/^(?:0|[1-9][0-9]*)$/u.test(stated) || Number(stated) > maximum)) {
+    try { await stream?.cancel(); } catch { /* The fixed boundary error still wins. */ }
+    return fail(code, status);
+  }
+  if (stream === null) return fail(code, status);
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let received = 0;
+  let text = "";
+  try {
+    while (true) {
+      const chunk = await reader.read();
+      if (chunk.done) break;
+      received += chunk.value.byteLength;
+      if (received > maximum) {
+        await reader.cancel();
+        return fail(code, status);
+      }
+      text += decoder.decode(chunk.value, { stream: true });
+    }
+    text += decoder.decode();
+  } catch (error) {
+    if (error instanceof BoundaryError) throw error;
+    return fail(code, status);
+  } finally {
+    reader.releaseLock();
+  }
+  try { return JSON.parse(text) as unknown; } catch { return fail(code, status); }
+}
+
 async function body(request: Request): Promise<unknown> {
-  const stated = request.headers.get("Content-Length");
-  if (stated !== null && (!/^(?:0|[1-9][0-9]*)$/u.test(stated) || Number(stated) > MAX_BODY_BYTES)) return fail("AUTH_INVALID_CREDENTIALS", 422);
-  let text: string;
-  try { text = await request.text(); } catch { return fail("AUTH_INVALID_CREDENTIALS", 422); }
-  if (Buffer.byteLength(text, "utf8") > MAX_BODY_BYTES) return fail("AUTH_INVALID_CREDENTIALS", 422);
-  try { return JSON.parse(text) as unknown; } catch { return fail("AUTH_INVALID_CREDENTIALS", 422); }
+  return boundedJson(request.body, request.headers.get("Content-Length"), MAX_BODY_BYTES, "AUTH_INVALID_CREDENTIALS", 422);
 }
 
 function parse<T>(schema: z.ZodType<T>, input: unknown): T {
@@ -202,11 +243,7 @@ function callbackValue(value: string | null): string {
 }
 
 async function upstreamJson(response: Response): Promise<unknown> {
-  const stated = response.headers.get("Content-Length");
-  if (stated !== null && (!/^(?:0|[1-9][0-9]*)$/u.test(stated) || Number(stated) > MAX_UPSTREAM_BYTES)) return fail("AUTH_PROVIDER_UNAVAILABLE", 502);
-  const text = await response.text();
-  if (Buffer.byteLength(text, "utf8") > MAX_UPSTREAM_BYTES) return fail("AUTH_PROVIDER_UNAVAILABLE", 502);
-  try { return JSON.parse(text) as unknown; } catch { return fail("AUTH_PROVIDER_UNAVAILABLE", 502); }
+  return boundedJson(response.body, response.headers.get("Content-Length"), MAX_UPSTREAM_BYTES, "AUTH_PROVIDER_UNAVAILABLE", 502);
 }
 
 /**
@@ -225,6 +262,7 @@ export class AuthController {
    * @throws A safe configuration error before a request can use an unsafe URL or key.
    */
   public constructor(private readonly dependencies: AuthControllerDependencies) {
+    if (dependencies.secureCookies !== true) throw new Error("AUTH_CONFIGURATION_INVALID");
     this.origin = new URL(dependencies.configuredOrigin.toString());
     this.apiMeUrl = new URL("/v1/me", dependencies.apiInternalUrl);
     this.fetcher = dependencies.fetcher ?? fetch;
@@ -234,7 +272,14 @@ export class AuthController {
   /** Issues a selector-bound CSRF token, creating a pre-auth selector only when no valid cookie exists. */
   public async csrf(request: Request): Promise<Response> {
     try {
-      let selected = cookie(request, SESSION_COOKIE_NAME) ?? cookie(request, INTERACTION_COOKIE_NAME);
+      const search = new URL(request.url).searchParams;
+      if ([...search.keys()].some((key) => key !== "context") || search.getAll("context").length > 1) return fail("AUTH_INVALID_CREDENTIALS", 422);
+      const requested = search.get("context");
+      const context = requested === null ? null : CsrfContextSchema.safeParse(requested);
+      if (context !== null && !context.success) return fail("AUTH_INVALID_CREDENTIALS", 422);
+      let selected = context === null
+        ? cookie(request, SESSION_COOKIE_NAME) ?? cookie(request, INTERACTION_COOKIE_NAME)
+        : cookie(request, context.data === "session" ? SESSION_COOKIE_NAME : INTERACTION_COOKIE_NAME);
       const cookies: string[] = [];
       if (selected === null) {
         selected = this.createInteractionSelector();
@@ -264,7 +309,7 @@ export class AuthController {
     } catch (error) { return errorResponse(error); }
   }
 
-  /** Starts one allowlisted provider transaction using configured callback origin and a fresh interaction. */
+  /** Returns only a fixed same-origin navigation path after creating a fresh interaction. */
   public async oauthStart(request: Request, parameters: Readonly<{ provider?: string }> = {}): Promise<Response> {
     try {
       this.verifyMutation(request);
@@ -272,13 +317,29 @@ export class AuthController {
       if (!provider.success) return fail("AUTH_OAUTH_TRANSACTION_INVALID", 422);
       const input = parse(OAuthStartBodySchema, await body(request));
       const selected = this.createInteractionSelector();
+      const query = new URLSearchParams({ returnPath: input.returnPath });
+      return json({ authorizationPath: `/api/auth/oauth/${provider.data}/continue?${query.toString()}` }, 200, [serializedCookie(interactionCookie(selected, this.dependencies.secureCookies))]);
+    } catch (error) { return errorResponse(error); }
+  }
+
+  /** Creates the server-owned OAuth transaction only during an exact same-origin document navigation. */
+  public async oauthContinue(request: Request, parameters: Readonly<{ provider?: string }> = {}): Promise<Response> {
+    try {
+      if (request.headers.get("Sec-Fetch-Site") !== "same-origin" || request.headers.get("Sec-Fetch-Mode") !== "navigate" || request.headers.get("Sec-Fetch-Dest") !== "document") return fail("AUTH_OAUTH_TRANSACTION_INVALID", 400);
+      const selected = this.interactionSelector(request);
+      const provider = AuthProviderSchema.safeParse(parameters.provider);
+      if (!provider.success) return fail("AUTH_OAUTH_TRANSACTION_INVALID", 400);
+      const search = new URL(request.url).searchParams;
+      if ([...search.keys()].some((key) => key !== "returnPath") || search.getAll("returnPath").length !== 1) return fail("AUTH_OAUTH_TRANSACTION_INVALID", 400);
+      const returnPath = ReturnPathSchema.safeParse(search.get("returnPath"));
+      if (!returnPath.success) return fail("AUTH_OAUTH_TRANSACTION_INVALID", 400);
       const result = await this.dependencies.oauth.start(provider.data, {
         callbackBaseUrl: new URL("/api/auth/callback", this.origin),
         interactionSelector: selected,
-        returnPath: input.returnPath,
+        returnPath: returnPath.data,
         now: safeNow(this.dependencies.now),
       });
-      return json({ authorizationUrl: result.authorizationUrl.toString() }, 200, [serializedCookie(interactionCookie(selected, this.dependencies.secureCookies))]);
+      return providerRedirect(result.authorizationUrl);
     } catch (error) { return errorResponse(error); }
   }
 
@@ -329,11 +390,14 @@ export class AuthController {
   /** Rotates a provider token pair only after a session-bound CSRF POST. */
   public async refresh(request: Request): Promise<Response> {
     try {
-      const selected = this.verifyMutation(request, true);
+      const selected = this.verifyMutation(request, "session");
       parse(EmptyBodySchema, await body(request));
       await this.dependencies.sessions.refresh(selected, safeNow(this.dependencies.now));
       return json({ refreshed: true });
-    } catch (error) { return errorResponse(error); }
+    } catch (error) {
+      if (error !== null && typeof error === "object" && (error as { message?: unknown }).message === "AUTH_SESSION_OPERATION_FAILED") return errorResponse(new BoundaryError("AUTH_SESSION_EXPIRED", 401));
+      return errorResponse(error);
+    }
   }
 
   /** Exchanges a recovery code into a limited server-side context without creating an app session. */
@@ -351,7 +415,7 @@ export class AuthController {
   /** Consumes a limited recovery context, then removes its interaction cookie. */
   public async passwordUpdate(request: Request): Promise<Response> {
     try {
-      const selected = this.verifyMutation(request);
+      const selected = this.verifyMutation(request, "interaction");
       const input = parse(PasswordUpdateInputSchema, await body(request));
       await this.dependencies.recovery.update(input, this.recoveryContext(selected));
       return json({ updated: true }, 200, [serializedCookie(clearAuthCookie(INTERACTION_COOKIE_NAME, this.dependencies.secureCookies))]);
@@ -376,7 +440,7 @@ export class AuthController {
   public async signOut(request: Request): Promise<Response> {
     const cleared = serializedCookie(clearAuthCookie(SESSION_COOKIE_NAME, this.dependencies.secureCookies));
     try {
-      const selected = this.verifyMutation(request, true);
+      const selected = this.verifyMutation(request, "session");
       const now = safeNow(this.dependencies.now);
       const resolved = await this.dependencies.sessions.resolve(selected, now);
       await this.dependencies.sessions.revokeCurrent(selected, now);
@@ -421,8 +485,12 @@ export class AuthController {
     }
   }
 
-  private verifyMutation(request: Request, sessionOnly = false): string {
-    const selected = sessionOnly ? cookie(request, SESSION_COOKIE_NAME) : cookie(request, SESSION_COOKIE_NAME) ?? cookie(request, INTERACTION_COOKIE_NAME);
+  private verifyMutation(request: Request, selectorKind: "any" | "session" | "interaction" = "any"): string {
+    const selected = selectorKind === "session"
+      ? cookie(request, SESSION_COOKIE_NAME)
+      : selectorKind === "interaction"
+        ? cookie(request, INTERACTION_COOKIE_NAME)
+        : cookie(request, SESSION_COOKIE_NAME) ?? cookie(request, INTERACTION_COOKIE_NAME);
     if (selected === null) return fail("AUTH_CSRF_REJECTED", 403);
     verifyCsrfRequest(request, { selector: selected }, {
       now: safeNow(this.dependencies.now),

@@ -20,7 +20,6 @@ const AcceptedSchema = z.object({ accepted: z.literal(true) }).strict();
 const SignedOutSchema = z.object({ signedOut: z.literal(true) }).strict();
 const UpdatedSchema = z.object({ updated: z.literal(true) }).strict();
 const SignInResponseSchema = z.object({ user: CurrentUserSchema, expiresAt: z.iso.datetime(), absoluteExpiresAt: z.iso.datetime() }).strict();
-const OAuthStartResponseSchema = z.object({ authorizationUrl: z.url() }).strict();
 
 function client(value: BrowserApiClient | typeof apiClient): BrowserApiClient {
   return value as unknown as BrowserApiClient;
@@ -94,7 +93,10 @@ export function passwordUpdateMutationOptions(http: BrowserApiClient | typeof ap
 /** Typed OAuth-start mutation using only approved provider and return-path values. */
 export function oauthStartMutationOptions(http: BrowserApiClient | typeof apiClient = apiClient) {
   return mutationOptions({
-    mutationFn: (input: Readonly<{ provider: AuthProvider; returnPath: "/app" | "/settings/security" }>) => parsedMutation(`auth/oauth/${input.provider}/start`, { returnPath: input.returnPath }, OAuthStartResponseSchema, http),
+    mutationFn: (input: Readonly<{ provider: AuthProvider; returnPath: "/app" | "/settings/security" }>) => {
+      const authorizationPath = `/api/auth/oauth/${input.provider}/continue?${new URLSearchParams({ returnPath: input.returnPath }).toString()}`;
+      return parsedMutation(`auth/oauth/${input.provider}/start`, { returnPath: input.returnPath }, z.object({ authorizationPath: z.literal(authorizationPath) }).strict(), http);
+    },
     retry: false,
   });
 }

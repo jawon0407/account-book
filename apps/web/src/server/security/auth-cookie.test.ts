@@ -35,11 +35,11 @@ describe("auth cookies", () => {
       path: "/",
       priority: "high",
     });
-    expect(interactionCookie?.(selector, false)).toEqual({
+    expect(interactionCookie?.(selector, true)).toEqual({
       name: "__Host-ab_interaction",
       value: selector,
       httpOnly: true,
-      secure: false,
+      secure: true,
       sameSite: "lax",
       path: "/",
       priority: "high",
@@ -58,11 +58,11 @@ describe("auth cookies", () => {
       priority: "high",
       maxAge: 0,
     });
-    expect(clearAuthCookie?.("__Host-ab_interaction", false)).toEqual({
+    expect(clearAuthCookie?.("__Host-ab_interaction", true)).toEqual({
       name: "__Host-ab_interaction",
       value: "",
       httpOnly: true,
-      secure: false,
+      secure: true,
       sameSite: "lax",
       path: "/",
       priority: "high",
@@ -97,7 +97,7 @@ describe("auth cookies", () => {
     },
   );
 
-  it.each(["true", 1, null, undefined])("rejects a non-boolean secure flag", (secure) => {
+  it.each([false, "true", 1, null, undefined])("rejects any secure flag other than literal true", (secure) => {
     expectInvalid(() => sessionCookie?.(selector, secure as unknown as boolean), String(secure));
   });
 });

@@ -48,3 +48,21 @@ Start HEAD: `164eddb`
   include set. Live Supabase/disposable PostgreSQL integration was not run
   because credentials and a disposable database were unavailable, so staging
   validation remains a release requirement.
+- Task 10 independent-review hardening: complete (follow-up hardening change).
+  Chunked request/upstream bodies now use bounded incremental readers and are
+  canceled immediately over 16/64 KiB. One lazy infrastructure-only database
+  client is reused for an unchanged connection fingerprint while repository,
+  service, controller, provider, and session state remain request scoped.
+  OAuth POST responses contain only an exact same-origin `authorizationPath`;
+  provider URL/state is created only by the new verified document-navigation
+  GET `/api/auth/oauth/:provider/continue` and returned as a 303 Location.
+  Every route explicitly exports safe no-store 405 handlers for unsupported
+  GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS methods, and adapter construction,
+  params, and controller throws become fixed 503 envelopes. Interaction-bound
+  CSRF now remains selected when session and recovery cookies coexist, refresh
+  operation failure maps to non-retryable session expiry, and every `__Host-`
+  cookie is Secure even on loopback. Review RED matrices and corrected-test
+  mutation checks are recorded in the Task 10 report; final web verification is
+  22 files / 373 tests. Optional coverage still exits 1 at the unchanged Task
+  5-9 include set's 91.78% branches, and live provider/database integration
+  remains unexecuted and release-blocking.

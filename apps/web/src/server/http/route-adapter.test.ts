@@ -3,6 +3,13 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 const module = await import("./route-adapter.js").catch(() => ({} as Record<string, unknown>));
 const handleAuthRoute = module.handleAuthRoute as ((operation: string, request: Request, context: unknown, factory: () => unknown) => Promise<Response>) | undefined;
+const unsupportedAuthRoute = module.unsupportedAuthRoute as ((request: Request) => Promise<Response> | Response) | undefined;
+
+function expectNoStore(response: Response): void {
+  expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  expect(response.headers.get("Pragma")).toBe("no-cache");
+  expect(response.headers.get("Expires")).toBe("0");
+}
 
 describe("route adapter", () => {
   it("builds a fresh container for every request and forwards only request parameters", async () => {
@@ -19,8 +26,28 @@ describe("route adapter", () => {
     expect(handled).toHaveBeenNthCalledWith(2, second, { provider: "google" });
   });
 
-  it("fails closed for a missing controller operation", async () => {
+  it.each([
+    ["unknown operation", "unknown", () => ({}), () => ({ authController: {} })],
+    ["factory throw", "oauthStart", () => ({}), () => { throw new Error("server-access-jwt"); }],
+    ["params reject", "oauthStart", () => ({ params: Promise.reject(new Error("opaque-selector")) }), () => ({ authController: { oauthStart: vi.fn() } })],
+    ["controller throw", "oauthStart", () => ({}), () => ({ authController: { oauthStart: vi.fn(async () => { throw new Error("refresh-token"); }) } })],
+  ])("maps %s to a safe no-store boundary error", async (_label, operation, context, factory) => {
     expect(handleAuthRoute).toBeTypeOf("function");
-    await expect(handleAuthRoute!("unknown", new Request("https://app.example.test/api"), {}, () => ({ authController: {} }))).rejects.toThrow("AUTH_ROUTE_INVALID");
+    const response = await handleAuthRoute!(operation, new Request("https://app.example.test/api"), context(), factory);
+    expect(response.status).toBe(503);
+    expectNoStore(response);
+    const text = await response.text();
+    expect(JSON.parse(text)).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: false });
+    expect(text).not.toMatch(/server-access-jwt|opaque-selector|refresh-token/iu);
+  });
+
+  it("returns an explicit safe 405 for unsupported methods", async () => {
+    expect(unsupportedAuthRoute).toBeTypeOf("function");
+    const response = await unsupportedAuthRoute!(new Request("https://app.example.test/api/auth/csrf", { method: "HEAD" }));
+    expect(response.status).toBe(405);
+    expectNoStore(response);
+    const text = await response.text();
+    expect(JSON.parse(text)).toMatchObject({ code: "AUTH_INVALID_CREDENTIALS", retryable: false });
+    expect(text).not.toMatch(/token|selector|credential-value/iu);
   });
 });

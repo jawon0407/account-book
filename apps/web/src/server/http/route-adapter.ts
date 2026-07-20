@@ -1,8 +1,9 @@
 import "server-only";
 
 import { createRequestContainer, type RequestContainer } from "../container.js";
+import { safeAuthFailure } from "./auth-controller.js";
 
-const OPERATIONS = new Set(["csrf", "signUp", "signIn", "emailCallback", "oauthStart", "oauthCallback", "session", "refresh", "signOut", "passwordResetRequest", "passwordCallback", "passwordUpdate", "me"]);
+const OPERATIONS = new Set(["csrf", "signUp", "signIn", "emailCallback", "oauthStart", "oauthContinue", "oauthCallback", "session", "refresh", "signOut", "passwordResetRequest", "passwordCallback", "passwordUpdate", "me"]);
 
 type RouteContext = Readonly<{ params?: Promise<Readonly<Record<string, string>>> | Readonly<Record<string, string>> }>;
 type ContainerFactory = () => RequestContainer;
@@ -16,10 +17,20 @@ type ContainerFactory = () => RequestContainer;
  * @returns The controller response without route-level domain logic.
  */
 export async function handleAuthRoute(operation: string, request: Request, context: RouteContext = {}, factory: ContainerFactory = createRequestContainer): Promise<Response> {
-  if (!OPERATIONS.has(operation)) throw new Error("AUTH_ROUTE_INVALID");
-  const container = factory();
-  const candidate = (container.authController as unknown as Record<string, unknown>)[operation];
-  if (typeof candidate !== "function") throw new Error("AUTH_ROUTE_INVALID");
-  const parameters = context.params === undefined ? {} : await context.params;
-  return (candidate as (request: Request, parameters: Readonly<Record<string, string>>) => Promise<Response>).call(container.authController, request, parameters);
+  try {
+    if (!OPERATIONS.has(operation)) throw new Error("AUTH_ROUTE_INVALID");
+    const container = factory();
+    const candidate = (container.authController as unknown as Record<string, unknown>)[operation];
+    if (typeof candidate !== "function") throw new Error("AUTH_ROUTE_INVALID");
+    const parameters = context.params === undefined ? {} : await context.params;
+    return await (candidate as (request: Request, parameters: Readonly<Record<string, string>>) => Promise<Response>).call(container.authController, request, parameters);
+  } catch {
+    return safeAuthFailure("AUTH_PROVIDER_UNAVAILABLE", 503, false);
+  }
+}
+
+/** Explicitly rejects every route method not selected by a route module. */
+export function unsupportedAuthRoute(request: Request): Response {
+  void request;
+  return safeAuthFailure("AUTH_INVALID_CREDENTIALS", 405);
 }

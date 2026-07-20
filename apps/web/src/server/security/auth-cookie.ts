@@ -10,7 +10,7 @@ export type AuthCookie = Readonly<{
   name: typeof SESSION_COOKIE_NAME | typeof INTERACTION_COOKIE_NAME;
   value: string;
   httpOnly: true;
-  secure: boolean;
+  secure: true;
   sameSite: "lax";
   path: "/";
   priority: "high";
@@ -32,8 +32,8 @@ function selector(value: unknown): string {
 }
 
 function cookie(name: AuthCookie["name"], value: string, secure: unknown): AuthCookie {
-  if (typeof secure !== "boolean") return invalidCookie();
-  return { name, value: selector(value), httpOnly: true, secure, sameSite: "lax", path: "/", priority: "high" };
+  if (secure !== true) return invalidCookie();
+  return { name, value: selector(value), httpOnly: true, secure: true, sameSite: "lax", path: "/", priority: "high" };
 }
 
 /** Creates the host-only HttpOnly cookie for a validated opaque session selector. */
@@ -48,6 +48,6 @@ export function interactionCookie(value: string, secure: boolean): AuthCookie {
 
 /** Removes only a known authentication cookie while preserving its host-only scope. */
 export function clearAuthCookie(name: AuthCookie["name"], secure: boolean): AuthCookie & Readonly<{ maxAge: 0 }> {
-  if ((name !== SESSION_COOKIE_NAME && name !== INTERACTION_COOKIE_NAME) || typeof secure !== "boolean") return invalidCookie();
-  return { name, value: "", httpOnly: true, secure, sameSite: "lax", path: "/", priority: "high", maxAge: 0 };
+  if ((name !== SESSION_COOKIE_NAME && name !== INTERACTION_COOKIE_NAME) || secure !== true) return invalidCookie();
+  return { name, value: "", httpOnly: true, secure: true, sameSite: "lax", path: "/", priority: "high", maxAge: 0 };
 }

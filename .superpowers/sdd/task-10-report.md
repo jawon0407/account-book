@@ -74,3 +74,42 @@ Next.js 16 App Router에 13개 인증/user 경계를 연결했다. 각 요청은
 실제 Supabase와 disposable PostgreSQL integration은 실행하지 않았다. 필요한 credential과 폐기 가능한 DB가 제공되지 않았기 때문이다. 따라서 배포 전 staging에서 email/OAuth/recovery callback, Secure cookie, token refresh CAS, local-first logout pending 처리, 내부 `/v1/me` 연결을 실제 provider/DB와 검증해야 한다. 이 live 검증은 release blocker다.
 
 또한 coverage 100% gate 복구와 Task 10 신규 경계의 instrumentation 편입이 남아 있다. request마다 조립되는 DB/provider graph의 실제 connection 자원 사용량도 staging 부하에서 확인해야 한다. push는 수행하지 않았다.
+
+## 독립 리뷰 수정 — BFF 경계 강화
+
+기준 commit `fc7462c`에 대한 독립 리뷰의 Needs changes 항목을 별도 RED → GREEN으로 수정했다.
+
+### 추가 RED 증거
+
+- chunked body: Content-Length가 없는 request 16 KiB 초과와 upstream 64 KiB 초과 stream이 모두 끝까지 소비되고 cancel되지 않아 controller 15 tests 중 2개가 실패했다.
+- DB infrastructure: 동일 환경의 두 request가 `createDatabaseClient`를 두 번 호출해 container 13 tests 중 1개가 실패했다.
+- OAuth handoff: POST가 즉시 `oauth.start`를 호출해 provider URL/state를 JSON으로 반환하여 controller 15 tests 중 1개가 실패했다. client도 state-free `authorizationPath`를 거부하여 query 7 tests 중 1개가 실패했다.
+- route methods/adapter: 새 continue route 부재, 명시 method export 부재, factory/params/controller throw 전파, unsupported handler 부재로 route focused 21 tests 중 20개가 실패했다. params rejection을 test collection 시점에 만들던 최초 fixture는 즉시 수정하고, unhandled rejection 없이 실제 adapter 호출에서 실패하는 RED를 다시 확인했다.
+- recovery/refresh/cookie: dual-cookie interaction CSRF, dual-cookie password update, refresh operation failure, controller Secure=false, cookie Secure=false 총 5개가 40 tests 중 실패했다. CSRF token은 nonce 때문에 equality 비교할 수 있어 selector-bound verifier assertion으로 교정한 뒤, session 선택 mutant에서 정확히 실패하고 복구 후 통과하는 것도 확인했다.
+- password-update client: `auth/csrf`를 호출해 기대한 `auth/csrf?context=interaction`과 달라 3 tests 중 1개가 실패했다.
+- loopback container: Secure 설정을 origin protocol에 다시 의존시키는 mutant에서 loopback container 생성/Set-Cookie 검증이 실패했고, literal Secure 정책 복구 후 통과했다.
+- adapter retryability 자체 review: config/params/unexpected controller 503이 `retryable:true`인 계약 위반을 발견해 기대값을 false로 바꾸자 6 tests 중 4개가 실패했다. adapter 경계만 명시 false로 고정하고 provider 일시 장애의 기존 true semantics는 유지했다.
+
+### 추가 GREEN과 설계
+
+- request와 upstream JSON은 `ReadableStream.getReader()`로 chunk마다 실제 byte 수를 누적한다. 한도를 넘는 순간 reader를 cancel하고 각각 고정 422/502로 종료한다. Content-Length는 조기 거절용 보조 신호일 뿐이며 absent/chunked body도 동일한 실제 한도를 적용한다.
+- module에는 user/session이 없는 database client와 connection-string SHA-256 fingerprint만 lazy 보관한다. 동일 URL의 request는 client/pool 하나를 재사용하지만 repository, provider, session service, use case, controller는 매번 새로 만든다. URL fingerprint 변경은 새 pool을 만들거나 값을 로그에 남기지 않고 `AUTH_CONFIGURATION_INVALID`로 fail closed한다.
+- CSRF POST `/api/auth/oauth/:provider/start`는 fresh interaction cookie와 `/api/auth/oauth/:provider/continue?returnPath=...` 형식의 exact same-origin path만 JSON으로 반환한다. transaction/state/provider URL은 `Sec-Fetch-Site: same-origin`, `Sec-Fetch-Mode: navigate`, `Sec-Fetch-Dest: document`, interaction cookie, provider/returnPath allowlist를 통과한 continue GET에서만 생성하고 303 Location으로 전달한다. TanStack mutation은 input에서 계산한 exact literal authorizationPath만 받는다.
+- 14개 route 모두 지원하지 않는 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS를 공통 handler로 명시 export한다. handler는 safe `ApiError` 405와 no-store 3종을 반환한다. route adapter는 container factory, params Promise, controller throw를 모두 고정 503 envelope로 바꾸며 원래 token/selector/error text를 버린다.
+- `GET /api/auth/csrf?context=interaction`은 strict context enum과 interaction cookie를 사용한다. password update client만 이 context를 요청하고 controller도 interaction selector만 사용하므로 session cookie가 함께 있어도 recovery binding이 유지된다.
+- refresh의 `AUTH_SESSION_OPERATION_FAILED`는 401 `AUTH_SESSION_EXPIRED`, `retryable:false`로 변환한다.
+- `__Host-ab_session`과 `__Host-ab_interaction`은 loopback을 포함해 항상 Secure다. cookie builder와 controller는 false를 거부하고 container는 literal true만 전달한다.
+
+### 독립 리뷰 후 fresh 검증
+
+- review focused matrix: 7 files / 84 tests PASS.
+- required focused command: 22 files / 373 tests PASS.
+- full web suite: 22 files / 373 tests PASS.
+- web typecheck PASS.
+- Next 16.2.10 production build PASS; OAuth continue를 포함한 14개 dynamic BFF route가 생성됐다.
+- final build의 첫 재실행은 이전 local harness 직후 `.next/static` unlink EPERM으로 종료됐지만 worktree-specific Next process 조회 결과는 비어 있었다. 동일 명령의 즉시 재실행은 exit 0이었으므로 코드/build 실패가 아닌 일시적 filesystem lock으로 기록한다.
+- 실제 local Next server HTTP 검증: POST route의 HEAD/OPTIONS/GET과 GET route의 HEAD/POST 5건 모두 405와 no-store 3종 PASS; child process는 종료했고 잔류 프로세스/로그가 없다.
+- security gate 44/44 PASS, root lint warning 0 PASS.
+- optional coverage: 373 tests 자체는 PASS지만 기존 Task 5-9 include set이 branches 91.78%(670/730)라 threshold 100%로 exit 1. 새 controller/container/route/client는 계속 include 밖이다.
+
+실제 Supabase/disposable PostgreSQL integration은 credential과 폐기 가능한 DB가 없어 여전히 실행하지 않았다. callback/redirect, refresh CAS, pool lifecycle, pending logout, Secure cookie를 staging에서 확인하는 release blocker는 유지한다.
