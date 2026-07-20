@@ -1,5 +1,5 @@
 import { and, eq, gt, isNotNull, isNull, sql } from "drizzle-orm";
-import { authRecoveryTransactions, authSessions, emailConfirmationTransactions, oauthTransactions } from "@account-book/database";
+import { authRecoveryTransactions, authSessions, authUserSecurityState, emailConfirmationTransactions, oauthTransactions } from "@account-book/database";
 import type {
   AuthRepository,
   AuthSessionRecord,
@@ -18,9 +18,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 const IDLE_LIFETIME_MS = 7 * DAY_MS;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 
-type AuthTable = typeof authSessions | typeof oauthTransactions | typeof emailConfirmationTransactions | typeof authRecoveryTransactions;
+type AuthTable = typeof authSessions | typeof authUserSecurityState | typeof oauthTransactions | typeof emailConfirmationTransactions | typeof authRecoveryTransactions;
+type InsertOperation = PromiseLike<unknown> & { onConflictDoNothing(): Promise<unknown> };
 type AuthSessionDatabase = Readonly<{
-  insert(table: AuthTable): { values(values: Record<string, unknown>): Promise<unknown> };
+  insert(table: AuthTable): { values(values: Record<string, unknown>): InsertOperation };
   select(): { from(table: typeof authSessions): { where(predicate: unknown): { limit(amount: number): Promise<unknown[]> } } };
   update(table: AuthTable): { set(values: Record<string, unknown>): { where(predicate: unknown): { returning(): Promise<unknown[]> } } };
   transaction<T>(operation: (transaction: AuthSessionDatabase) => Promise<T>): Promise<T>;
@@ -102,7 +103,7 @@ function toOAuthRecord(value: unknown): OAuthTransactionRecord | null {
 function toEmailRecord(value: unknown): EmailConfirmationTransactionRecord | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
-  if (!isUuid(String(row.id)) || !validDigest(row.interactionHash) || !validEnvelope(row.encryptedPkceVerifier) || !validDate(row.createdAt) || !validDate(row.expiresAt) || (row.consumedAt !== null && !validDate(row.consumedAt))) return null;
+  if (!isUuid(String(row.id)) || !validDigest(row.interactionHash) || !validEnvelope(row.encryptedPkceVerifier) || !validDate(row.createdAt) || !validDate(row.expiresAt) || row.expiresAt.getTime() <= row.createdAt.getTime() || (row.consumedAt !== null && (!validDate(row.consumedAt) || row.consumedAt.getTime() < row.createdAt.getTime() || row.consumedAt.getTime() >= row.expiresAt.getTime()))) return null;
   return {
     id: row.id as string,
     interactionHash: Uint8Array.from(row.interactionHash),
@@ -128,7 +129,11 @@ function toRecoveryRecord(value: unknown): RecoveryTransactionRecord | null {
   if (
     !isUuid(String(row.id)) || !validDigest(row.interactionHash) ||
     !(row.encryptedPkceVerifier === null || validEnvelope(row.encryptedPkceVerifier)) || !(row.userId === null || (typeof row.userId === "string" && isUuid(row.userId))) || !(row.encryptedRecoveryToken === null || validEnvelope(row.encryptedRecoveryToken)) ||
-    !validDate(row.createdAt) || !validDate(row.expiresAt) || exchangeClaimedAt === undefined || exchangedAt === undefined || passwordUpdateClaimedAt === undefined || consumedAt === undefined
+    !validDate(row.createdAt) || !validDate(row.expiresAt) || row.expiresAt.getTime() <= row.createdAt.getTime() || exchangeClaimedAt === undefined || exchangedAt === undefined || passwordUpdateClaimedAt === undefined || consumedAt === undefined ||
+    (exchangeClaimedAt !== null && (exchangeClaimedAt.getTime() < row.createdAt.getTime() || exchangeClaimedAt.getTime() >= row.expiresAt.getTime())) ||
+    (exchangedAt !== null && (exchangeClaimedAt === null || exchangedAt.getTime() < exchangeClaimedAt.getTime() || exchangedAt.getTime() >= row.expiresAt.getTime())) ||
+    (passwordUpdateClaimedAt !== null && (exchangedAt === null || passwordUpdateClaimedAt.getTime() < exchangedAt.getTime() || passwordUpdateClaimedAt.getTime() >= row.expiresAt.getTime())) ||
+    (consumedAt !== null && (passwordUpdateClaimedAt === null || consumedAt.getTime() < passwordUpdateClaimedAt.getTime() || consumedAt.getTime() >= row.expiresAt.getTime()))
   ) return null;
   const pending = row.encryptedPkceVerifier !== null && row.userId === null && row.encryptedRecoveryToken === null && exchangedAt === null && passwordUpdateClaimedAt === null && consumedAt === null;
   const exchanged = row.encryptedPkceVerifier === null && typeof row.userId === "string" && row.encryptedRecoveryToken !== null && exchangeClaimedAt !== null && exchangedAt !== null && ((passwordUpdateClaimedAt === null && consumedAt === null) || passwordUpdateClaimedAt !== null);
@@ -152,22 +157,32 @@ function toRecoveryRecord(value: unknown): RecoveryTransactionRecord | null {
 export class PostgresAuthRepository implements AuthRepository {
   public constructor(private readonly database: AuthSessionDatabase) {}
 
-  /** Inserts every encrypted and non-secret column in one statement. */
-  public async create(input: NewSessionRecord): Promise<void> {
-    await this.database.insert(authSessions).values({
-      id: input.id,
-      selectorHash: toBuffer(input.selectorHash),
-      userId: input.userId,
-      supabaseSessionId: input.supabaseSessionId,
-      encryptedAccessToken: input.encryptedAccessToken,
-      encryptedRefreshToken: input.encryptedRefreshToken,
-      accessTokenExpiresAt: new Date(input.accessTokenExpiresAt),
-      createdAt: new Date(input.createdAt),
-      lastSeenAt: new Date(input.lastSeenAt),
-      absoluteExpiresAt: new Date(input.absoluteExpiresAt),
-      revokedAt: input.revokedAt === null ? null : new Date(input.revokedAt),
-      revocationPendingAt: input.revocationPendingAt === null ? null : new Date(input.revocationPendingAt),
-      rotationVersion: input.rotationVersion,
+  /** Serializes on the user's issuance gate and inserts only when the provider JWT is still accepted. */
+  public async createSession(input: NewSessionRecord, providerIssuedAtSeconds: number): Promise<boolean> {
+    if (!isUuid(input.userId) || !Number.isSafeInteger(providerIssuedAtSeconds) || providerIssuedAtSeconds <= 0) return false;
+    return this.database.transaction(async (transaction) => {
+      await transaction.insert(authUserSecurityState).values({ userId: input.userId, minimumAcceptedIat: 0 }).onConflictDoNothing();
+      const gates = await transaction.update(authUserSecurityState).set({
+        minimumAcceptedIat: sql`${authUserSecurityState.minimumAcceptedIat}`,
+      }).where(eq(authUserSecurityState.userId, input.userId)).returning();
+      const minimumAcceptedIat = (gates[0] as Record<string, unknown> | undefined)?.minimumAcceptedIat;
+      if (typeof minimumAcceptedIat !== "number" || !Number.isSafeInteger(minimumAcceptedIat) || minimumAcceptedIat < 0 || providerIssuedAtSeconds < minimumAcceptedIat) return false;
+      await transaction.insert(authSessions).values({
+        id: input.id,
+        selectorHash: toBuffer(input.selectorHash),
+        userId: input.userId,
+        supabaseSessionId: input.supabaseSessionId,
+        encryptedAccessToken: input.encryptedAccessToken,
+        encryptedRefreshToken: input.encryptedRefreshToken,
+        accessTokenExpiresAt: new Date(input.accessTokenExpiresAt),
+        createdAt: new Date(input.createdAt),
+        lastSeenAt: new Date(input.lastSeenAt),
+        absoluteExpiresAt: new Date(input.absoluteExpiresAt),
+        revokedAt: input.revokedAt === null ? null : new Date(input.revokedAt),
+        revocationPendingAt: input.revocationPendingAt === null ? null : new Date(input.revocationPendingAt),
+        rotationVersion: input.rotationVersion,
+      });
+      return true;
     });
   }
 
@@ -382,6 +397,11 @@ export class PostgresAuthRepository implements AuthRepository {
         gt(authRecoveryTransactions.expiresAt, input.now),
       )).returning();
       if (rows.length !== 1) return false;
+      await transaction.insert(authUserSecurityState).values({ userId: input.userId, minimumAcceptedIat: 0 }).onConflictDoNothing();
+      const gates = await transaction.update(authUserSecurityState).set({
+        minimumAcceptedIat: sql`greatest(${authUserSecurityState.minimumAcceptedIat}, floor(extract(epoch from clock_timestamp()))::bigint + 1)`,
+      }).where(eq(authUserSecurityState.userId, input.userId)).returning();
+      if (gates.length !== 1) throw new Error("AUTH_USER_SECURITY_STATE_LOCK_FAILED");
       await transaction.update(authSessions).set({ revokedAt: new Date(input.now) }).where(and(
         eq(authSessions.userId, input.userId),
         isNull(authSessions.revokedAt),

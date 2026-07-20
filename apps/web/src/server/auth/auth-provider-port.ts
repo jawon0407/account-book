@@ -19,6 +19,7 @@ export type AuthTokenPair = Readonly<{
   refreshToken: string;
   userId: string;
   supabaseSessionId: string;
+  issuedAtSeconds: number;
   accessTokenExpiresAt: Date;
   user: CurrentUser;
 }>;
@@ -38,6 +39,10 @@ export type AuthProviderErrorCode =
 
 /** Fixed provider boundary error; it intentionally excludes provider details and request values. */
 export class AuthProviderError extends Error {
+  /**
+   * Creates a provider-boundary error containing only an allowlisted code.
+   * @param code - The fixed failure code safe to expose to another server layer.
+   */
   public constructor(public readonly code: AuthProviderErrorCode = "AUTH_PROVIDER_UNAVAILABLE") {
     super(code);
     this.name = "AuthProviderError";
@@ -46,14 +51,79 @@ export class AuthProviderError extends Error {
 
 /** Server-only port that prevents Supabase SDK details and provider tokens reaching routes or UI code. */
 export interface AuthProviderPort {
+  /**
+   * Starts verified-email signup with server-owned PKCE continuity.
+   * @param input - Validated email and password input.
+   * @param redirectUrl - Trusted confirmation callback URL.
+   * @param codeChallenge - Canonical S256 PKCE challenge.
+   * @returns An enumeration-resistant verification acknowledgement.
+   * @throws {@link AuthProviderError} with a fixed auth failure code.
+   */
   signUp(input: SignUpInput, redirectUrl: URL, codeChallenge: string): Promise<EmailAuthResult>;
+  /**
+   * Exchanges email credentials for one verified provider session.
+   * @param input - Validated email and password input.
+   * @returns A complete server-only provider token pair.
+   * @throws {@link AuthProviderError} with a fixed credential, verification, rate, or availability code.
+   */
   signInWithPassword(input: SignInInput): Promise<AuthTokenPair>;
+  /**
+   * Exchanges an email-confirmation code using its server-held verifier.
+   * @param input - Confirmation code and matching PKCE verifier.
+   * @returns A complete verified server-only provider token pair.
+   * @throws {@link AuthProviderError} with a fixed transaction or availability code.
+   */
   confirmEmail(input: EmailConfirmationInput): Promise<AuthTokenPair>;
+  /**
+   * Builds the provider authorization URL without persisting browser state in the SDK.
+   * @param input - Approved provider, trusted redirect, and canonical challenge.
+   * @returns The validated HTTPS-or-loopback authorization URL.
+   * @throws {@link AuthProviderError} with a fixed transaction or availability code.
+   */
   startOAuth(input: OAuthStartInput): Promise<OAuthStartResult>;
+  /**
+   * Exchanges one OAuth callback code using its server-held verifier.
+   * @param input - OAuth code and matching PKCE verifier.
+   * @returns A complete verified server-only provider token pair.
+   * @throws {@link AuthProviderError} with a fixed transaction, rate, or availability code.
+   */
   exchangeOAuthCode(input: OAuthExchangeInput): Promise<AuthTokenPair>;
+  /**
+   * Refreshes one server-held provider refresh token.
+   * @param refreshToken - The decrypted provider refresh token.
+   * @returns A complete replacement provider token pair.
+   * @throws {@link AuthProviderError} with a fixed credential, rate, or availability code.
+   */
   refresh(refreshToken: string): Promise<AuthTokenPair>;
+  /**
+   * Revokes one provider session using its complete token pair.
+   * @param accessToken - The decrypted provider access token.
+   * @param refreshToken - The decrypted provider refresh token.
+   * @returns Completion after the provider accepts revocation.
+   * @throws {@link AuthProviderError} with a fixed auth failure code.
+   */
   signOut(accessToken: string, refreshToken: string): Promise<void>;
+  /**
+   * Requests password-recovery delivery with server-owned PKCE continuity.
+   * @param email - The validated recovery email.
+   * @param redirectUrl - Trusted recovery callback URL.
+   * @param codeChallenge - Canonical S256 PKCE challenge.
+   * @returns Completion after the enumeration-resistant provider request.
+   * @throws {@link AuthProviderError} with a fixed credential, rate, or availability code.
+   */
   requestPasswordReset(email: string, redirectUrl: URL, codeChallenge: string): Promise<void>;
+  /**
+   * Exchanges one recovery callback code using its server-held verifier.
+   * @param input - Recovery code and matching PKCE verifier.
+   * @returns Verified server-only recovery credentials and public user data.
+   * @throws {@link AuthProviderError} with a fixed transaction, rate, or availability code.
+   */
   exchangeRecoveryCode(input: RecoveryExchangeInput): Promise<RecoveryContext>;
+  /**
+   * Updates a recovered user's password after verifying token ownership.
+   * @param input - Recovery credentials, expected user, and validated new password.
+   * @returns Completion after the matching provider user is updated.
+   * @throws {@link AuthProviderError} with a fixed credential, transaction, or availability code.
+   */
   updatePassword(input: PasswordUpdateAtProviderInput): Promise<void>;
 }

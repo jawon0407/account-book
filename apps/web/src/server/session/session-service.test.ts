@@ -23,6 +23,7 @@ type TokenPair = Readonly<{
   refreshToken: string;
   userId: string;
   supabaseSessionId: string;
+  issuedAtSeconds: number;
   accessTokenExpiresAt: Date;
 }>;
 
@@ -68,6 +69,7 @@ function tokenPair(overrides: Partial<TokenPair> = {}): TokenPair {
     refreshToken: "provider-refresh-token",
     userId,
     supabaseSessionId: providerSessionId,
+    issuedAtSeconds: Math.floor(now.getTime() / 1000),
     accessTokenExpiresAt: new Date(now.getTime() + 60_000),
     ...overrides,
   };
@@ -88,13 +90,22 @@ function copyRecord(record: SessionRecord): SessionRecord {
 
 class TestRepository {
   public record: SessionRecord | null = null;
-  public readonly calls = { create: 0, find: 0, rotate: 0, revoke: 0, revokeAll: 0, pending: 0 };
+  public minimumAcceptedIat = 0;
+  public readonly calls = { createSession: 0, legacyCreate: 0, find: 0, rotate: 0, revoke: 0, revokeAll: 0, pending: 0 };
   public fail = false;
 
   public async create(input: SessionRecord): Promise<void> {
-    this.calls.create += 1;
+    this.calls.legacyCreate += 1;
     if (this.fail) throw new Error("database-secret");
     this.record = copyRecord(input);
+  }
+
+  public async createSession(input: SessionRecord, providerIssuedAtSeconds: number): Promise<boolean> {
+    this.calls.createSession += 1;
+    if (this.fail) throw new Error("database-secret");
+    if (providerIssuedAtSeconds < this.minimumAcceptedIat) return false;
+    this.record = copyRecord(input);
+    return true;
   }
 
   public async findActiveBySelectorHash(hash: Uint8Array): Promise<SessionRecord | null> {
@@ -151,6 +162,51 @@ class TestRepository {
   }
 }
 
+class SerializedSecurityRepository extends TestRepository {
+  private tail: Promise<void> = Promise.resolve();
+  private readonly pauses: Partial<Record<"session" | "recovery", { reached: () => void; release: Promise<void> }>> = {};
+
+  public pauseNext(kind: "session" | "recovery"): Readonly<{ reached: Promise<void>; release: () => void }> {
+    let reached!: () => void;
+    let release!: () => void;
+    const reachedPromise = new Promise<void>((resolve) => { reached = resolve; });
+    const releasePromise = new Promise<void>((resolve) => { release = resolve; });
+    this.pauses[kind] = { reached, release: releasePromise };
+    return { reached: reachedPromise, release };
+  }
+
+  public override async createSession(input: SessionRecord, providerIssuedAtSeconds: number): Promise<boolean> {
+    return this.exclusive(async () => {
+      await this.pauseAt("session");
+      return super.createSession(input, providerIssuedAtSeconds);
+    });
+  }
+
+  public async completeRecovery(user: string, completedAt: Date): Promise<void> {
+    await this.exclusive(async () => {
+      await this.pauseAt("recovery");
+      this.minimumAcceptedIat = Math.max(this.minimumAcceptedIat, Math.floor(completedAt.getTime() / 1000) + 1);
+      if (this.record?.userId === user && this.record.revokedAt === null) this.record = { ...this.record, revokedAt: new Date(completedAt) };
+    });
+  }
+
+  private async exclusive<T>(operation: () => Promise<T>): Promise<T> {
+    const previous = this.tail;
+    let release!: () => void;
+    this.tail = new Promise<void>((resolve) => { release = resolve; });
+    await previous;
+    try { return await operation(); } finally { release(); }
+  }
+
+  private async pauseAt(kind: "session" | "recovery"): Promise<void> {
+    const pause = this.pauses[kind];
+    if (pause === undefined) return;
+    delete this.pauses[kind];
+    pause.reached();
+    await pause.release;
+  }
+}
+
 function service(repository = new TestRepository(), refresher = vi.fn(async () => tokenPair({ accessToken: "new-access", refreshToken: "new-refresh" }))) {
   expect(SessionService).toBeTypeOf("function");
   return { repository, refresher, service: new SessionService!(repository, keyring, refresher, () => id) };
@@ -195,6 +251,9 @@ describe("SessionService", () => {
     await expectSafeFailure(() => subject.create(tokenPair({ accessToken: "" }), now));
     await expectSafeFailure(() => subject.create(tokenPair({ refreshToken: "" }), now));
     await expectSafeFailure(() => subject.create(tokenPair({ supabaseSessionId: "not-a-uuid" }), now), "not-a-uuid");
+    await expectSafeFailure(() => subject.create(tokenPair({ issuedAtSeconds: 0 }), now));
+    await expectSafeFailure(() => subject.create(tokenPair({ issuedAtSeconds: 1.5 }), now));
+    await expectSafeFailure(() => subject.create(tokenPair({ issuedAtSeconds: Math.floor(now.getTime() / 1000) + 1 }), now));
     await expectSafeFailure(() => subject.create(tokenPair({ accessTokenExpiresAt: new Date("invalid") }), now));
     await expectSafeFailure(() => subject.create(tokenPair(), new Date("invalid")));
     const nearMaximumNow = new Date(8_640_000_000_000_000 - 1);
@@ -204,6 +263,49 @@ describe("SessionService", () => {
 
     const defaultIdService = new SessionService!(new TestRepository(), keyring, async () => tokenPair());
     await expect(defaultIdService.create(tokenPair(), now)).resolves.toMatchObject({ selector: expect.any(String) });
+  });
+
+  it("persists through the per-user issuance gate and rejects a provider token below its minimum", async () => {
+    const { repository, service: subject } = service();
+    const issuedAtSeconds = Math.floor(now.getTime() / 1000);
+    repository.minimumAcceptedIat = issuedAtSeconds + 1;
+
+    await expectSafeFailure(() => subject.create(tokenPair({ issuedAtSeconds }), now));
+    expect(repository.calls.createSession).toBe(1);
+    expect(repository.calls.legacyCreate).toBe(0);
+    expect(repository.record).toBeNull();
+
+    repository.minimumAcceptedIat = issuedAtSeconds;
+    await expect(subject.create(tokenPair({ issuedAtSeconds }), now)).resolves.toMatchObject({ sessionId: id });
+    expect(repository.calls.createSession).toBe(2);
+  });
+
+  it("leaves no stale session alive under either deterministic recovery race ordering", async () => {
+    const issuedAtSeconds = Math.floor(now.getTime() / 1000);
+
+    const sessionFirstRepository = new SerializedSecurityRepository();
+    const sessionFirst = service(sessionFirstRepository).service;
+    const sessionPause = sessionFirstRepository.pauseNext("session");
+    const sessionCreation = sessionFirst.create(tokenPair({ issuedAtSeconds }), now);
+    await sessionPause.reached;
+    const recoveryAfterSession = sessionFirstRepository.completeRecovery(userId, now);
+    sessionPause.release();
+    await expect(sessionCreation).resolves.toMatchObject({ userId });
+    await recoveryAfterSession;
+    expect(sessionFirstRepository.record?.revokedAt).toEqual(now);
+    expect(sessionFirstRepository.minimumAcceptedIat).toBe(issuedAtSeconds + 1);
+
+    const recoveryFirstRepository = new SerializedSecurityRepository();
+    const recoveryFirst = service(recoveryFirstRepository).service;
+    const recoveryPause = recoveryFirstRepository.pauseNext("recovery");
+    const recoveryBeforeSession = recoveryFirstRepository.completeRecovery(userId, now);
+    await recoveryPause.reached;
+    const staleCreation = recoveryFirst.create(tokenPair({ issuedAtSeconds }), now);
+    recoveryPause.release();
+    await recoveryBeforeSession;
+    await expectSafeFailure(() => staleCreation);
+    expect(recoveryFirstRepository.record).toBeNull();
+    expect(recoveryFirstRepository.minimumAcceptedIat).toBe(issuedAtSeconds + 1);
   });
 
   it("resolves without writes or refreshes", async () => {

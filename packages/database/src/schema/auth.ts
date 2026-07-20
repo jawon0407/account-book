@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm/sql";
 import {
+  bigint,
   check,
   customType,
   integer,
@@ -17,6 +18,17 @@ const bytea = customType<{ data: Buffer; driverData: Buffer }>({
 });
 
 const appPrivate = pgSchema("app_private");
+
+export const authUserSecurityState = appPrivate.table(
+  "auth_user_security_state",
+  {
+    userId: uuid("user_id").primaryKey(),
+    minimumAcceptedIat: bigint("minimum_accepted_iat", { mode: "number" }).notNull().default(0),
+  },
+  (table) => [
+    check("auth_user_security_state_minimum_iat_nonnegative", sql`${table.minimumAcceptedIat} >= 0`),
+  ],
+);
 
 export const authSessions = appPrivate.table(
   "auth_sessions",

@@ -26,6 +26,7 @@ export type SessionTokenPair = Readonly<{
   refreshToken: string;
   userId: string;
   supabaseSessionId: string;
+  issuedAtSeconds: number;
   accessTokenExpiresAt: Date;
 }>;
 
@@ -79,8 +80,10 @@ function validTokenPair(value: SessionTokenPair, now: Date): SessionTokenPair {
     typeof value.refreshToken !== "string" || value.refreshToken.length === 0,
     !validUuid(value.userId),
     !validUuid(value.supabaseSessionId),
+    !Number.isSafeInteger(value.issuedAtSeconds) || value.issuedAtSeconds <= 0 || value.issuedAtSeconds > Math.floor(now.getTime() / 1000),
     !validDate(value.accessTokenExpiresAt),
     validDate(value.accessTokenExpiresAt) && value.accessTokenExpiresAt.getTime() <= now.getTime(),
+    validDate(value.accessTokenExpiresAt) && value.accessTokenExpiresAt.getTime() <= value.issuedAtSeconds * 1000,
   ].every((invalid) => !invalid);
   if (!valid) return fail();
   return value;
@@ -145,7 +148,7 @@ export class SessionService {
         revocationPendingAt: null,
         rotationVersion: 0,
       };
-      await this.repository.create(record);
+      if (!await this.repository.createSession(record, pair.issuedAtSeconds)) return fail();
       return { selector, sessionId: id, userId: pair.userId, accessTokenExpiresAt: new Date(pair.accessTokenExpiresAt), absoluteExpiresAt };
     } catch {
       return fail();

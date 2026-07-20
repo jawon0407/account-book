@@ -24,6 +24,7 @@ const tokens = {
   refreshToken: "provider-refresh-token",
   userId,
   supabaseSessionId: providerSessionId,
+  issuedAtSeconds: Math.floor(now.getTime() / 1000),
   accessTokenExpiresAt: new Date(now.getTime() + 60_000),
   user: { id: userId, email: "person@example.test", emailVerified: true },
 };
@@ -116,6 +117,16 @@ describe("OAuthService", () => {
     expect(result).toEqual({ authorizationUrl: new URL("https://provider.example.test/authorize") });
     const serialized = JSON.stringify({ result, record });
     for (const secret of [state, interaction, verifier]) expect(serialized).not.toContain(secret);
+  });
+
+  it("accepts an exact loopback HTTP authorize URL and rejects arbitrary HTTP", async () => {
+    const loopback = setup();
+    loopback.provider.startOAuth.mockResolvedValueOnce({ authorizationUrl: new URL("http://localhost:54321/auth/v1/authorize") });
+    await expect(loopback.service.start("google", loopback.startContext)).resolves.toEqual({ authorizationUrl: new URL("http://localhost:54321/auth/v1/authorize") });
+
+    const publicHttp = setup();
+    publicHttp.provider.startOAuth.mockResolvedValueOnce({ authorizationUrl: new URL("http://provider.example.test/authorize") });
+    await expect(publicHttp.service.start("google", publicHttp.startContext)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
   });
 
   it("claims before exchange and returns only opaque session metadata plus the stored return path", async () => {

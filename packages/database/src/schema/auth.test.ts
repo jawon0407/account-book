@@ -4,18 +4,28 @@ import {
   authRateLimits,
   authRecoveryTransactions,
   authSessions,
+  authUserSecurityState,
   createDatabaseClient,
   emailConfirmationTransactions,
   oauthTransactions,
 } from "../index.js";
 
 describe("private authentication database schema", () => {
-  it("exports the five app_private tables", () => {
+  it("exports the six app_private tables", () => {
     expect(authSessions[Symbol.for("drizzle:Name")]).toBe("auth_sessions");
     expect(oauthTransactions[Symbol.for("drizzle:Name")]).toBe("oauth_transactions");
     expect(authRecoveryTransactions[Symbol.for("drizzle:Name")]).toBe("auth_recovery_transactions");
     expect(emailConfirmationTransactions[Symbol.for("drizzle:Name")]).toBe("email_confirmation_transactions");
     expect(authRateLimits[Symbol.for("drizzle:Name")]).toBe("auth_rate_limits");
+    expect(authUserSecurityState[Symbol.for("drizzle:Name")]).toBe("auth_user_security_state");
+  });
+
+  it("stores one nonnegative minimum accepted provider issuance time per user", () => {
+    const config = getTableConfig(authUserSecurityState);
+    const byName = Object.fromEntries(config.columns.map((column) => [column.name, column]));
+    expect(byName.user_id?.primary).toBe(true);
+    expect(byName.minimum_accepted_iat?.notNull).toBe(true);
+    expect(config.checks.map((constraint) => constraint.name)).toContain("auth_user_security_state_minimum_iat_nonnegative");
   });
 
   it("models nullable recovery stages and explicit claim timestamps", () => {

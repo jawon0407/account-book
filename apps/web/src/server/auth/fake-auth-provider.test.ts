@@ -14,7 +14,7 @@ it("is explicit test-only configuration with deterministic call capture", async 
 it("implements every provider operation only from explicit deterministic results", async () => {
   const fake = new FakeAuthProvider();
   const user = { id: "123e4567-e89b-12d3-a456-426614174001", email: "person@example.test", emailVerified: true };
-  const pair = { accessToken: "access", refreshToken: "refresh", userId: user.id, supabaseSessionId: "123e4567-e89b-12d3-a456-426614174002", accessTokenExpiresAt: new Date(Date.now() + 60_000), user };
+  const pair = { accessToken: "access", refreshToken: "refresh", userId: user.id, supabaseSessionId: "123e4567-e89b-12d3-a456-426614174002", issuedAtSeconds: Math.floor(Date.now() / 1000), accessTokenExpiresAt: new Date(Date.now() + 60_000), user };
   fake.signUpResult = { status: "authenticated", tokens: pair };
   fake.signInResult = pair; fake.confirmationResult = pair; fake.oauthStartResult = { authorizationUrl: new URL("https://provider.example.test") };
   fake.oauthExchangeResult = pair; fake.refreshResult = pair; fake.recoveryResult = { accessToken: "access", refreshToken: "refresh", user };

@@ -7,7 +7,7 @@ type TokenEnvelope = Readonly<{ version: 1; keyId: string; iv: string; ciphertex
 const repositoryModule = await import("./postgres-auth-repository.js").catch(() => ({} as Record<string, unknown>));
 const PostgresAuthRepository = repositoryModule.PostgresAuthRepository as
   | (new (database: FakeDatabase) => {
-      create(input: Record<string, unknown>): Promise<void>;
+      createSession(input: Record<string, unknown>, providerIssuedAtSeconds: number): Promise<boolean>;
       findActiveBySelectorHash(hash: Uint8Array, now: Date): Promise<unknown>;
       rotate(input: Record<string, unknown>): Promise<boolean>;
       revokeBySelectorHash(hash: Uint8Array, now: Date): Promise<boolean>;
@@ -51,12 +51,17 @@ function session(overrides: Record<string, unknown> = {}): Record<string, unknow
 }
 
 class FakeDatabase {
-  public readonly calls: Array<{ kind: string; table?: string | undefined; values?: Record<string, unknown>; predicates?: unknown }> = [];
+  public readonly calls: Array<{ kind: string; table?: string | undefined; values?: Record<string, unknown>; predicates?: unknown; conflict?: boolean }> = [];
   public affectedRows: unknown[] = [{}];
+  public securityRows: unknown[] = [{ minimumAcceptedIat: 0 }];
   public rows: unknown[] = [];
 
-  public insert(table?: object): { values: (values: Record<string, unknown>) => Promise<void> } {
-    return { values: async (values) => { this.calls.push({ kind: "insert", table: table?.[Symbol.for("drizzle:Name") as never] as string | undefined, values }); } };
+  public insert(table?: object): { values: (values: Record<string, unknown>) => Promise<void> & { onConflictDoNothing: () => Promise<void> } } {
+    return { values: (values) => {
+      const call: { kind: string; table?: string | undefined; values: Record<string, unknown>; conflict?: boolean } = { kind: "insert", table: table?.[Symbol.for("drizzle:Name") as never] as string | undefined, values };
+      this.calls.push(call);
+      return Object.assign(Promise.resolve(), { onConflictDoNothing: async () => { call.conflict = true; } });
+    } };
   }
 
   public select(): { from: () => { where: (predicates: unknown) => { limit: () => Promise<unknown[]> } } } {
@@ -65,7 +70,11 @@ class FakeDatabase {
 
   public update(table?: object): { set: (values: Record<string, unknown>) => { where: (predicates: unknown) => { returning: () => Promise<unknown[]> } } } {
     return {
-      set: (values) => ({ where: (predicates) => ({ returning: async () => { this.calls.push({ kind: "update", table: table?.[Symbol.for("drizzle:Name") as never] as string | undefined, values, predicates }); return this.affectedRows; } }) }),
+      set: (values) => ({ where: (predicates) => ({ returning: async () => {
+        const tableName = table?.[Symbol.for("drizzle:Name") as never] as string | undefined;
+        this.calls.push({ kind: "update", table: tableName, values, predicates });
+        return tableName === "auth_user_security_state" ? this.securityRows : this.affectedRows;
+      } }) }),
     };
   }
 
@@ -84,14 +93,18 @@ function subject(database = new FakeDatabase()) {
 }
 
 describe("PostgresAuthRepository", () => {
-  it("inserts an exact encrypted allowlist and copies the mutable selector digest", async () => {
+  it("locks the user issuance gate before inserting an exact encrypted session allowlist", async () => {
     const { database, repository } = subject();
     const input = Object.assign(session(), { accessToken: "tainted-access-token", refreshToken: "tainted-refresh-token", extra: "tainted-extra" });
     const digest = input.selectorHash as Uint8Array;
-    await repository.create(input);
+    await expect(repository.createSession(input, Math.floor(now.getTime() / 1000))).resolves.toBe(true);
     digest.fill(0);
 
-    const values = database.calls[0]?.values;
+    expect(database.calls).toHaveLength(3);
+    expect(database.calls[0]).toMatchObject({ kind: "insert", table: "auth_user_security_state", values: { userId, minimumAcceptedIat: 0 }, conflict: true });
+    expect(database.calls[1]).toMatchObject({ kind: "update", table: "auth_user_security_state" });
+    expect(query(database.calls[1]?.predicates).sql).toContain('"user_id" =');
+    const values = database.calls[2]?.values;
     expect(values?.selectorHash).toEqual(expect.any(Buffer));
     expect(values?.selectorHash).not.toEqual(digest);
     expect(Object.keys(values ?? {}).sort()).toEqual([
@@ -100,6 +113,18 @@ describe("PostgresAuthRepository", () => {
     expect(values).not.toHaveProperty("accessToken");
     expect(values).not.toHaveProperty("refreshToken");
     expect(JSON.stringify(values)).not.toContain("tainted-");
+  });
+
+  it("rejects stale or noncanonical issuance times without inserting a session", async () => {
+    const { database, repository } = subject();
+    const issuedAtSeconds = Math.floor(now.getTime() / 1000);
+    database.securityRows = [{ minimumAcceptedIat: issuedAtSeconds + 1 }];
+    await expect(repository.createSession(session(), issuedAtSeconds)).resolves.toBe(false);
+    expect(database.calls.map((call) => call.table)).toEqual(["auth_user_security_state", "auth_user_security_state"]);
+
+    database.calls.length = 0;
+    await expect(repository.createSession(session(), 1.5)).resolves.toBe(false);
+    expect(database.calls).toHaveLength(0);
   });
 
   it("finds only an active exact selector under both expiry policies", async () => {
@@ -207,8 +232,8 @@ describe("PostgresAuthRepository", () => {
 
   it("copies optional revocation timestamps on insert", async () => {
     const { database, repository } = subject();
-    await repository.create(session({ revokedAt: now, revocationPendingAt: now }));
-    expect(database.calls[0]?.values).toMatchObject({ revokedAt: now, revocationPendingAt: now });
+    await repository.createSession(session({ revokedAt: now, revocationPendingAt: now }), Math.floor(now.getTime() / 1000));
+    expect(database.calls[2]?.values).toMatchObject({ revokedAt: now, revocationPendingAt: now });
   });
 
   it("maps non-null optional timestamps from a database row", async () => {
@@ -268,6 +293,28 @@ describe("PostgresAuthRepository", () => {
     expect(statement).not.toContain(" or ");
   });
 
+  it("fails closed for impossible email and recovery transaction chronology", async () => {
+    const { database, repository } = subject();
+    const interactionHash = randomBytes(32);
+    database.affectedRows = [{ id, interactionHash, encryptedPkceVerifier: envelope, createdAt: now, expiresAt: now, consumedAt: now }];
+    await expect(repository.claimEmailConfirmationTransaction(interactionHash, new Date(now.getTime() - 1))).resolves.toBeNull();
+
+    database.affectedRows = [{
+      id,
+      interactionHash,
+      encryptedPkceVerifier: envelope,
+      userId: null,
+      encryptedRecoveryToken: null,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + 900_000),
+      exchangeClaimedAt: new Date(now.getTime() - 1),
+      exchangedAt: null,
+      passwordUpdateClaimedAt: null,
+      consumedAt: null,
+    }];
+    await expect(repository.claimRecoveryExchange(interactionHash, now)).resolves.toBeNull();
+  });
+
   it("claims and promotes recovery exchange with auditable single-statement CAS predicates", async () => {
     const { database, repository } = subject();
     const interactionHash = randomBytes(32);
@@ -323,12 +370,19 @@ describe("PostgresAuthRepository", () => {
     database.calls.length = 0;
     database.affectedRows = [{}];
     await expect(repository.consumeRecoveryAndRevokeSessions({ transactionId: id, userId, expectedPasswordUpdateClaimedAt: now, now })).resolves.toBe(true);
-    expect(database.calls).toHaveLength(2);
+    expect(database.calls).toHaveLength(4);
     expect(database.calls[0]).toMatchObject({ table: "auth_recovery_transactions", values: { consumedAt: now } });
-    expect(database.calls[1]).toMatchObject({ table: "auth_sessions", values: { revokedAt: now } });
+    expect(database.calls[1]).toMatchObject({ table: "auth_user_security_state", values: { userId, minimumAcceptedIat: 0 }, conflict: true });
+    expect(database.calls[2]).toMatchObject({ table: "auth_user_security_state" });
+    const issuanceGate = query(database.calls[2]?.values?.minimumAcceptedIat);
+    expect(issuanceGate.sql).toContain("greatest");
+    expect(issuanceGate.sql).toContain("clock_timestamp()");
+    expect(issuanceGate.sql).toContain("+ 1");
+    expect(issuanceGate.params).toEqual([]);
+    expect(database.calls[3]).toMatchObject({ table: "auth_sessions", values: { revokedAt: now } });
     const consumeSql = query(database.calls[0]?.predicates).sql;
     for (const fragment of ['"id" =', '"user_id" =', '"password_update_claimed_at" =', '"consumed_at" is null', '"expires_at" >']) expect(consumeSql).toContain(fragment);
-    const revokeSql = query(database.calls[1]?.predicates).sql;
+    const revokeSql = query(database.calls[3]?.predicates).sql;
     expect(revokeSql).toContain('"user_id" =');
     expect(revokeSql).toContain('"revoked_at" is null');
   });

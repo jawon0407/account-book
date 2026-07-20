@@ -33,6 +33,8 @@ const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/u;
 const AUTH_OPTIONS = { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false, flowType: "pkce" } as const;
 const SIGNUP_EXISTENCE_CODES = new Set(["user_already_exists", "email_exists", "user_already_registered", "email_already_exists", "user_already_exist"]);
 const RESET_ABSENT_CODES = new Set(["user_not_found", "email_not_found", "user_not_exist", "email_not_exists", "user_does_not_exist"]);
+const PKCE_TRANSACTION_CODES = new Set(["invalid_grant", "bad_code_verifier", "flow_state_expired", "flow_state_not_found", "otp_expired", "otp_disabled"]);
+const EXPECTED_DISCLOSURE_STATUSES = new Set([400, 422]);
 
 /** Validated public Supabase endpoint and anon key; service-role credentials are deliberately absent. */
 export type SupabaseServerConfig = Readonly<{ url: string; anonKey: string }>;
@@ -74,12 +76,17 @@ function providerCode(value: unknown): string {
 }
 function mappedProviderError(value: unknown, status?: number, pkce = false): AuthProviderError {
   const error = object(value);
-  const providerStatus = typeof error.status === "number" ? error.status : status;
+  const isHttp = status !== undefined;
+  const providerStatus = status ?? (typeof error.status === "number" ? error.status : undefined);
   const code = typeof error.code === "string" ? error.code : "";
   const message = typeof error.message === "string" ? error.message.toLowerCase() : "";
-  if (providerStatus === 429 || code === "over_request_rate_limit" || code === "rate_limit_exceeded") return new AuthProviderError("AUTH_RATE_LIMITED");
-  if (code === "email_not_confirmed" || message === "email not confirmed") return new AuthProviderError("AUTH_EMAIL_VERIFICATION_REQUIRED");
-  if (pkce && (providerStatus === 400 || providerStatus === 401 || ["invalid_grant", "bad_code_verifier", "flow_state_expired", "flow_state_not_found", "otp_expired", "otp_disabled"].includes(code))) return new AuthProviderError("AUTH_OAUTH_TRANSACTION_INVALID");
+  if (providerStatus === 429 || (!isHttp && (code === "over_request_rate_limit" || code === "rate_limit_exceeded"))) return new AuthProviderError("AUTH_RATE_LIMITED");
+  if (!isHttp && (code === "email_not_confirmed" || message === "email not confirmed")) return new AuthProviderError("AUTH_EMAIL_VERIFICATION_REQUIRED");
+  if (pkce) {
+    if ((providerStatus === 400 || providerStatus === 401) && PKCE_TRANSACTION_CODES.has(code)) return new AuthProviderError("AUTH_OAUTH_TRANSACTION_INVALID");
+    return new AuthProviderError();
+  }
+  if (isHttp) return new AuthProviderError();
   if (providerStatus === 400 || providerStatus === 401 || ["invalid_credentials", "invalid_grant", "bad_code_verifier"].includes(code)) return new AuthProviderError("AUTH_INVALID_CREDENTIALS");
   if (["flow_state_expired", "flow_state_not_found", "otp_expired", "otp_disabled", "same_password"].includes(code)) return new AuthProviderError("AUTH_OAUTH_TRANSACTION_INVALID");
   return new AuthProviderError();
@@ -99,7 +106,7 @@ function canonicalSegment(value: unknown): string {
   if (decoded.length === 0 || decoded.toString("base64url") !== value) return fail();
   return value;
 }
-function jwtClaims(accessToken: string): Readonly<{ userId: string; sessionId: string; expiresAt: number }> {
+function jwtClaims(accessToken: string): Readonly<{ userId: string; sessionId: string; issuedAt: number; expiresAt: number }> {
   const parts = accessToken.split(".");
   if (parts.length !== 3) return fail();
   try {
@@ -107,12 +114,17 @@ function jwtClaims(accessToken: string): Readonly<{ userId: string; sessionId: s
     const payload = canonicalSegment(parts[1]!);
     canonicalSegment(parts[2]!);
     const claims = object(JSON.parse(Buffer.from(payload, "base64url").toString("utf8")));
+    const issuedAt = claims.iat;
     const expiresAt = claims.exp;
-    if (typeof expiresAt !== "number" || !Number.isSafeInteger(expiresAt) || expiresAt * 1000 <= Date.now()) return fail();
-    return { userId: uuid(claims.sub), sessionId: uuid(claims.session_id), expiresAt };
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    if (
+      typeof issuedAt !== "number" || !Number.isSafeInteger(issuedAt) || issuedAt <= 0 || issuedAt > nowSeconds ||
+      typeof expiresAt !== "number" || !Number.isSafeInteger(expiresAt) || expiresAt <= issuedAt || expiresAt <= nowSeconds
+    ) return fail();
+    return { userId: uuid(claims.sub), sessionId: uuid(claims.session_id), issuedAt, expiresAt };
   } catch { return fail(); }
 }
-function tokenPair(sessionValue: unknown): AuthTokenPair {
+function commonTokenPair(sessionValue: unknown): Readonly<{ session: Record<string, unknown>; pair: AuthTokenPair; claims: ReturnType<typeof jwtClaims> }> {
   const session = object(sessionValue);
   const accessToken = token(session.access_token);
   const refreshToken = token(session.refresh_token);
@@ -123,9 +135,21 @@ function tokenPair(sessionValue: unknown): AuthTokenPair {
   if (!parsedUser.success || !parsedUser.data.emailVerified) return fail("AUTH_EMAIL_VERIFICATION_REQUIRED");
   const claims = jwtClaims(accessToken);
   const userId = uuid(user.id);
-  const expiresAt = typeof session.expires_at === "number" && Number.isSafeInteger(session.expires_at) ? new Date(session.expires_at * 1000) : new Date("invalid");
-  if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now() || claims.userId !== userId || claims.expiresAt !== session.expires_at) return fail();
-  return { accessToken, refreshToken, userId, supabaseSessionId: claims.sessionId, accessTokenExpiresAt: expiresAt, user: parsedUser.data };
+  if (claims.userId !== userId) return fail();
+  const pair = { accessToken, refreshToken, userId, supabaseSessionId: claims.sessionId, issuedAtSeconds: claims.issuedAt, accessTokenExpiresAt: new Date(claims.expiresAt * 1000), user: parsedUser.data };
+  return { session, pair, claims };
+}
+function tokenPair(sessionValue: unknown): AuthTokenPair {
+  const { session, pair, claims } = commonTokenPair(sessionValue);
+  if (typeof session.expires_at !== "number" || !Number.isSafeInteger(session.expires_at) || claims.expiresAt !== session.expires_at) return fail();
+  return pair;
+}
+function rawTokenPair(sessionValue: unknown): AuthTokenPair {
+  const { session, pair, claims } = commonTokenPair(sessionValue);
+  const expiresIn = session.expires_in;
+  if (session.token_type !== "bearer" || typeof expiresIn !== "number" || !Number.isSafeInteger(expiresIn) || expiresIn <= 0 || claims.expiresAt - claims.issuedAt !== expiresIn) return fail();
+  if (session.expires_at !== undefined && (typeof session.expires_at !== "number" || !Number.isSafeInteger(session.expires_at) || session.expires_at !== claims.expiresAt)) return fail();
+  return pair;
 }
 function code(value: unknown): string {
   try { return nonEmpty(value, 4096); } catch { return fail("AUTH_OAUTH_TRANSACTION_INVALID"); }
@@ -150,14 +174,27 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
   private readonly factory: SupabaseClientFactory;
   private readonly fetcher: SupabaseFetch;
 
-  /** Validates public configuration and installs request-scoped SDK and HTTP test seams. */
+  /**
+   * Validates public configuration and installs request-scoped SDK and HTTP seams.
+   * @param configInput - Public Supabase URL and anon key; service-role credentials are forbidden.
+   * @param factory - Optional factory for fresh non-persistent SDK clients.
+   * @param fetcher - Optional fetch implementation for direct server-owned PKCE requests.
+   * @throws {@link AuthProviderError} with `AUTH_PROVIDER_UNAVAILABLE` for unsafe configuration.
+   */
   public constructor(configInput: SupabaseServerConfig, factory?: SupabaseClientFactory, fetcher: SupabaseFetch = fetch) {
     this.config = config(configInput);
     this.factory = factory ?? ((url, anonKey, auth) => createClient(url, anonKey, { auth }) as unknown as SupabaseClient);
     this.fetcher = fetcher;
   }
 
-  /** Posts signup with a trusted redirect and supplied S256 challenge; malformed/provider failures are fixed errors. */
+  /**
+   * Posts signup with a trusted redirect and supplied S256 challenge.
+   * @param input - Validated email and password input.
+   * @param redirectUrl - Trusted HTTPS-or-loopback confirmation callback.
+   * @param codeChallenge - Canonical S256 PKCE challenge.
+   * @returns An enumeration-resistant verification acknowledgement.
+   * @throws {@link AuthProviderError} with a fixed credential, rate, or availability code.
+   */
   public async signUp(input: SignUpInput, redirectUrl: URL, codeChallenge: string): Promise<EmailAuthResult> {
     try {
       const parsed = SignUpInputSchema.safeParse(input);
@@ -165,14 +202,19 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
       const callback = safeUrl(redirectUrl, true);
       const result = await this.post("signup", { email: parsed.data.email, password: parsed.data.password, code_challenge: challenge(codeChallenge), code_challenge_method: "s256" }, callback);
       if (!result.ok) {
-        if (SIGNUP_EXISTENCE_CODES.has(providerCode(result.body))) return { status: "verification_required" };
+        if (EXPECTED_DISCLOSURE_STATUSES.has(result.status) && SIGNUP_EXISTENCE_CODES.has(providerCode(result.body))) return { status: "verification_required" };
         throw mappedProviderError(result.body, result.status);
       }
       return { status: "verification_required" };
     } catch (error) { return this.rethrow(error); }
   }
 
-  /** Exchanges valid email credentials through a fresh non-persistent SDK client. */
+  /**
+   * Exchanges email credentials through a fresh non-persistent SDK client.
+   * @param input - Validated email and password input.
+   * @returns A strictly parsed, verified provider token pair.
+   * @throws {@link AuthProviderError} with a fixed credential, verification, rate, or availability code.
+   */
   public async signInWithPassword(input: SignInInput): Promise<AuthTokenPair> {
     try {
       const parsed = SignInInputSchema.safeParse(input);
@@ -181,12 +223,22 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
     } catch (error) { return this.rethrow(error); }
   }
 
-  /** Exchanges one email-confirmation code with its matching server-owned verifier. */
+  /**
+   * Exchanges one email-confirmation code with its matching server-owned verifier.
+   * @param input - Confirmation code and canonical PKCE verifier.
+   * @returns A strictly parsed raw provider token pair.
+   * @throws {@link AuthProviderError} with a fixed transaction, rate, verification, or availability code.
+   */
   public async confirmEmail(input: EmailConfirmationInput): Promise<AuthTokenPair> {
     return this.exchange(input?.code, input?.codeVerifier);
   }
 
-  /** Constructs a validated Supabase authorize URL from the approved provider and S256 challenge. */
+  /**
+   * Constructs a Supabase authorize URL from the approved provider and S256 challenge.
+   * @param input - Approved provider, trusted redirect, and canonical challenge.
+   * @returns A validated HTTPS-or-loopback provider authorization URL.
+   * @throws {@link AuthProviderError} with a fixed transaction or availability code.
+   */
   public async startOAuth(input: OAuthStartInput): Promise<OAuthStartResult> {
     try {
       const provider = AuthProviderSchema.safeParse(input?.provider);
@@ -200,17 +252,33 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
     } catch (error) { return this.rethrow(error); }
   }
 
-  /** Exchanges one OAuth callback code with its matching server-owned verifier. */
+  /**
+   * Exchanges one OAuth callback code with its matching server-owned verifier.
+   * @param input - OAuth code and canonical PKCE verifier.
+   * @returns A strictly parsed raw provider token pair.
+   * @throws {@link AuthProviderError} with a fixed transaction, rate, verification, or availability code.
+   */
   public async exchangeOAuthCode(input: OAuthExchangeInput): Promise<AuthTokenPair> {
     return this.exchange(input?.code, input?.codeVerifier);
   }
 
-  /** Refreshes a server-held refresh token through a fresh non-persistent SDK client. */
+  /**
+   * Refreshes a server-held token through a fresh non-persistent SDK client.
+   * @param refreshToken - Decrypted provider refresh token.
+   * @returns A strictly parsed replacement provider token pair.
+   * @throws {@link AuthProviderError} with a fixed credential, verification, rate, or availability code.
+   */
   public async refresh(refreshToken: string): Promise<AuthTokenPair> {
     try { return tokenPair(dataOf(await this.client().auth.refreshSession({ refresh_token: token(refreshToken) })).session); } catch (error) { return this.rethrow(error); }
   }
 
-  /** Revokes a provider session through a fresh non-persistent SDK client. */
+  /**
+   * Revokes a provider session through a fresh non-persistent SDK client.
+   * @param accessToken - Decrypted provider access token.
+   * @param refreshToken - Decrypted provider refresh token.
+   * @returns Completion after provider revocation succeeds.
+   * @throws {@link AuthProviderError} with a fixed auth failure code.
+   */
   public async signOut(accessToken: string, refreshToken: string): Promise<void> {
     try {
       const client = this.client();
@@ -219,23 +287,40 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
     } catch (error) { return this.rethrow(error); }
   }
 
-  /** Posts password-recovery delivery with a trusted redirect and supplied S256 challenge. */
+  /**
+   * Posts password-recovery delivery with a trusted redirect and S256 challenge.
+   * @param email - Validated recovery email.
+   * @param redirectUrl - Trusted HTTPS-or-loopback recovery callback.
+   * @param codeChallenge - Canonical S256 PKCE challenge.
+   * @returns Completion after the enumeration-resistant provider request.
+   * @throws {@link AuthProviderError} with a fixed credential, rate, or availability code.
+   */
   public async requestPasswordReset(email: string, redirectUrl: URL, codeChallenge: string): Promise<void> {
     try {
       const parsed = PasswordResetRequestInputSchema.safeParse({ email });
       if (!parsed.success) return fail("AUTH_INVALID_CREDENTIALS");
       const result = await this.post("recover", { email: parsed.data.email, code_challenge: challenge(codeChallenge), code_challenge_method: "s256" }, safeUrl(redirectUrl, true));
-      if (!result.ok && !RESET_ABSENT_CODES.has(providerCode(result.body))) throw mappedProviderError(result.body, result.status);
+      if (!result.ok && !(EXPECTED_DISCLOSURE_STATUSES.has(result.status) && RESET_ABSENT_CODES.has(providerCode(result.body)))) throw mappedProviderError(result.body, result.status);
     } catch (error) { return this.rethrow(error); }
   }
 
-  /** Exchanges one recovery callback code with its matching server-owned verifier. */
+  /**
+   * Exchanges one recovery callback code with its matching server-owned verifier.
+   * @param input - Recovery code and canonical PKCE verifier.
+   * @returns Verified server-only recovery credentials and public user data.
+   * @throws {@link AuthProviderError} with a fixed transaction, rate, verification, or availability code.
+   */
   public async exchangeRecoveryCode(input: RecoveryExchangeInput): Promise<RecoveryContext> {
     const pair = await this.exchange(input?.code, input?.codeVerifier);
     return { accessToken: pair.accessToken, refreshToken: pair.refreshToken, user: pair.user };
   }
 
-  /** Verifies recovered credentials belong to the expected user before updating one password. */
+  /**
+   * Verifies recovered credentials belong to the expected user before updating a password.
+   * @param input - Recovery tokens, expected user identifier, and validated new password.
+   * @returns Completion after the matching provider user is updated.
+   * @throws {@link AuthProviderError} with a fixed credential, transaction, verification, or availability code.
+   */
   public async updatePassword(input: PasswordUpdateAtProviderInput): Promise<void> {
     try {
       const password = PasswordUpdateInputSchema.safeParse({ password: input?.password });
@@ -254,7 +339,7 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
       url.searchParams.set("grant_type", "pkce");
       const result = await this.request(url, { auth_code: code(authCode), code_verifier: verifier(codeVerifier) });
       if (!result.ok) throw mappedProviderError(result.body, result.status, true);
-      return tokenPair(result.body);
+      return rawTokenPair(result.body);
     } catch (error) { return this.rethrow(error); }
   }
 

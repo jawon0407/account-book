@@ -98,7 +98,7 @@ export type ConsumeRecoveryInput = Readonly<{
 
 /** Server-only persistence boundary; plaintext provider tokens never cross this port. */
 export interface AuthRepository {
-  create(input: NewSessionRecord): Promise<void>;
+  createSession(input: NewSessionRecord, providerIssuedAtSeconds: number): Promise<boolean>;
   findActiveBySelectorHash(hash: Uint8Array, now: Date): Promise<AuthSessionRecord | null>;
   rotate(input: RotateSessionInput): Promise<boolean>;
   revokeBySelectorHash(hash: Uint8Array, now: Date): Promise<boolean>;

@@ -24,6 +24,7 @@ const tokens = {
   refreshToken: "provider-refresh-token",
   userId,
   supabaseSessionId: providerSessionId,
+  issuedAtSeconds: Math.floor(now.getTime() / 1000),
   accessTokenExpiresAt: new Date(now.getTime() + 60_000),
   user: { id: userId, email: "person@example.test", emailVerified: true },
 };

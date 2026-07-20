@@ -52,7 +52,8 @@ function validCallbackBase(value: unknown): URL {
 function validAuthorizeUrl(value: unknown): URL {
   if (!(value instanceof URL)) return fail("AUTH_PROVIDER_UNAVAILABLE");
   const url = new URL(value.toString());
-  if (url.protocol !== "https:" || url.username !== "" || url.password !== "" || url.hash !== "") return fail("AUTH_PROVIDER_UNAVAILABLE");
+  const local = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (!(url.protocol === "https:" || (local && url.protocol === "http:")) || url.username !== "" || url.password !== "" || url.hash !== "") return fail("AUTH_PROVIDER_UNAVAILABLE");
   return url;
 }
 function shifted(date: Date, milliseconds: number): Date {
@@ -69,7 +70,8 @@ function trustedPair(value: AuthTokenPair, now: Date): AuthTokenPair {
   if (
     !user.success || !user.data.emailVerified || user.data.id !== value?.userId || !validUuid(value?.userId) || !validUuid(value?.supabaseSessionId) ||
     typeof value?.accessToken !== "string" || value.accessToken.length === 0 || typeof value?.refreshToken !== "string" || value.refreshToken.length === 0 ||
-    !validDate(value?.accessTokenExpiresAt) || value.accessTokenExpiresAt.getTime() <= now.getTime()
+    !Number.isSafeInteger(value?.issuedAtSeconds) || value.issuedAtSeconds <= 0 || value.issuedAtSeconds > Math.floor(now.getTime() / 1000) ||
+    !validDate(value?.accessTokenExpiresAt) || value.accessTokenExpiresAt.getTime() <= now.getTime() || value.accessTokenExpiresAt.getTime() <= value.issuedAtSeconds * 1000
   ) return fail("AUTH_PROVIDER_UNAVAILABLE");
   return value;
 }
@@ -159,7 +161,7 @@ export class OAuthService {
       const codeVerifier = decryptToken(record.encryptedPkceVerifier, { recordId: record.id, tokenKind: "pkce" }, this.keyring);
       derivePkceChallenge(codeVerifier);
       const pair = trustedPair(await this.provider.exchangeOAuthCode({ code, codeVerifier }), context.now);
-      const created = await this.sessions.create({ accessToken: pair.accessToken, refreshToken: pair.refreshToken, userId: pair.userId, supabaseSessionId: pair.supabaseSessionId, accessTokenExpiresAt: pair.accessTokenExpiresAt }, context.now);
+      const created = await this.sessions.create({ accessToken: pair.accessToken, refreshToken: pair.refreshToken, userId: pair.userId, supabaseSessionId: pair.supabaseSessionId, issuedAtSeconds: pair.issuedAtSeconds, accessTokenExpiresAt: pair.accessTokenExpiresAt }, context.now);
       return { selector: created.selector, user: pair.user, accessTokenExpiresAt: created.accessTokenExpiresAt, absoluteExpiresAt: created.absoluteExpiresAt, returnPath: record.returnPath };
     } catch (error) {
       if (error instanceof OAuthServiceError || error instanceof AuthProviderError) return providerFailure(error);

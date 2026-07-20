@@ -4,14 +4,15 @@ vi.mock("server-only", () => ({}));
 const { SupabaseAuthAdapter } = await import("./supabase-auth-adapter.js");
 const { AuthProviderError } = await import("./auth-provider-port.js");
 
-const nowSeconds = Math.floor(Date.now() / 1000) + 3600;
+const issuedAtSeconds = Math.floor(Date.now() / 1000);
+const nowSeconds = issuedAtSeconds + 3600;
 const userId = "123e4567-e89b-12d3-a456-426614174001";
 const sessionId = "123e4567-e89b-12d3-a456-426614174002";
 const verifier = "v".repeat(43);
 const challenge = "A".repeat(43);
 
 function jwt(claims: Record<string, unknown> = {}) {
-  return `${Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url")}.${Buffer.from(JSON.stringify({ session_id: sessionId, sub: userId, exp: nowSeconds, ...claims })).toString("base64url")}.${Buffer.from("signature").toString("base64url")}`;
+  return `${Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url")}.${Buffer.from(JSON.stringify({ session_id: sessionId, sub: userId, iat: issuedAtSeconds, exp: nowSeconds, ...claims })).toString("base64url")}.${Buffer.from("signature").toString("base64url")}`;
 }
 
 const accessToken = jwt();
@@ -21,6 +22,7 @@ const session = {
   expires_at: nowSeconds,
   user: { id: userId, email: "person@example.test", email_confirmed_at: "2026-07-20T00:00:00.000Z" },
 };
+const rawSession = { ...session, token_type: "bearer", expires_in: 3600 };
 const ok = (data: unknown) => ({ data, error: null });
 
 function client(overrides: Partial<Record<string, unknown>> = {}) {
@@ -87,7 +89,7 @@ describe("SupabaseAuthAdapter explicit server PKCE boundary", () => {
   });
 
   it("posts signup, token exchange, and recovery requests with exact server-set inputs", async () => {
-    const setup = adapter([jsonResponse({ user: { id: userId } }), jsonResponse(session), jsonResponse(session), jsonResponse({}), jsonResponse(session)]);
+    const setup = adapter([jsonResponse({ user: { id: userId } }), jsonResponse(rawSession), jsonResponse(rawSession), jsonResponse({}), jsonResponse(rawSession)]);
     const confirmationUrl = new URL("https://app.example.test/auth/confirm");
     const recoveryUrl = new URL("https://app.example.test/auth/recovery");
 
@@ -126,8 +128,8 @@ describe("SupabaseAuthAdapter explicit server PKCE boundary", () => {
   });
 
   it("returns validated provider sessions from every direct PKCE exchange", async () => {
-    const setup = adapter([jsonResponse(session), jsonResponse(session), jsonResponse(session)]);
-    await expect(setup.adapter.confirmEmail({ code: "code", codeVerifier: verifier })).resolves.toMatchObject({ userId, supabaseSessionId: sessionId });
+    const setup = adapter([jsonResponse(rawSession), jsonResponse({ ...rawSession, expires_at: undefined }), jsonResponse(rawSession)]);
+    await expect(setup.adapter.confirmEmail({ code: "code", codeVerifier: verifier })).resolves.toMatchObject({ userId, supabaseSessionId: sessionId, issuedAtSeconds });
     await expect(setup.adapter.exchangeOAuthCode({ code: "code", codeVerifier: verifier })).resolves.toMatchObject({ userId, supabaseSessionId: sessionId });
     await expect(setup.adapter.exchangeRecoveryCode({ code: "code", codeVerifier: verifier })).resolves.toMatchObject({ user: { id: userId, emailVerified: true } });
   });
@@ -146,9 +148,23 @@ describe("SupabaseAuthAdapter explicit server PKCE boundary", () => {
   });
 
   it.each([
+    ["missing JWT issuance", { access_token: jwt({ iat: undefined }) }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["mismatched JWT subject", { access_token: jwt({ sub: "123e4567-e89b-12d3-a456-426614174099" }) }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["missing JWT session", { access_token: jwt({ session_id: undefined }) }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["mismatched absolute expiry", { expires_at: nowSeconds + 1 }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["unconfirmed email", { user: { ...session.user, email_confirmed_at: null } }, "AUTH_EMAIL_VERIFICATION_REQUIRED"],
+  ] as const)("rejects an SDK-normalized session with %s", async (_label, override, expected) => {
+    const malformed = { ...session, ...override };
+    const setup = adapter([], client({ signInWithPassword: vi.fn(async () => ok({ session: malformed })) }));
+    await expectSafeError(() => setup.adapter.signInWithPassword({ email: "person@example.test", password: "a".repeat(12) }), expected);
+  });
+
+  it.each([
     { body: { code: "bad_code_verifier", message: "secret provider text" }, status: 400, expected: "AUTH_OAUTH_TRANSACTION_INVALID" },
     { body: { code: "over_request_rate_limit" }, status: 429, expected: "AUTH_RATE_LIMITED" },
     { body: { code: "unexpected" }, status: 503, expected: "AUTH_PROVIDER_UNAVAILABLE" },
+    { body: { code: "unexpected", status: 400 }, status: 503, expected: "AUTH_PROVIDER_UNAVAILABLE" },
+    { body: { code: "configuration_error" }, status: 400, expected: "AUTH_PROVIDER_UNAVAILABLE" },
   ])("maps PKCE HTTP failures to fixed safe errors", async ({ body, status, expected }) => {
     const setup = adapter([jsonResponse(body, status)]);
     await expectSafeError(() => setup.adapter.exchangeOAuthCode({ code: "secret-code", codeVerifier: verifier }), expected, "secret-code", verifier, "secret provider text");
@@ -162,6 +178,22 @@ describe("SupabaseAuthAdapter explicit server PKCE boundary", () => {
     },
   );
 
+  it("does not collapse signup existence codes returned with an unrelated HTTP status", async () => {
+    const setup = adapter([jsonResponse({ code: "user_already_exists", status: 400 }, 503)]);
+    await expectSafeError(
+      () => setup.adapter.signUp({ email: "person@example.test", password: "a".repeat(12) }, new URL("https://app.example.test/confirm"), challenge),
+      "AUTH_PROVIDER_UNAVAILABLE",
+    );
+  });
+
+  it("rejects unrelated signup failures instead of treating every 400 as credential invalid", async () => {
+    const setup = adapter([jsonResponse({ code: "configuration_error" }, 400)]);
+    await expectSafeError(
+      () => setup.adapter.signUp({ email: "person@example.test", password: "a".repeat(12) }, new URL("https://app.example.test/confirm"), challenge),
+      "AUTH_PROVIDER_UNAVAILABLE",
+    );
+  });
+
   it.each(["user_not_found", "email_not_found", "user_not_exist", "email_not_exists"])(
     "preserves the recovery acknowledgement for absent-account code %s",
     async (code) => {
@@ -170,10 +202,44 @@ describe("SupabaseAuthAdapter explicit server PKCE boundary", () => {
     },
   );
 
+  it("does not collapse recovery absence codes returned with an unrelated HTTP status", async () => {
+    const setup = adapter([jsonResponse({ code: "user_not_found", status: 400 }, 503)]);
+    await expectSafeError(
+      () => setup.adapter.requestPasswordReset("absent@example.test", new URL("https://app.example.test/recovery"), challenge),
+      "AUTH_PROVIDER_UNAVAILABLE",
+    );
+  });
+
+  it("rejects unrelated recovery failures instead of treating every 400 as credential invalid", async () => {
+    const setup = adapter([jsonResponse({ code: "configuration_error" }, 400)]);
+    await expectSafeError(
+      () => setup.adapter.requestPasswordReset("person@example.test", new URL("https://app.example.test/recovery"), challenge),
+      "AUTH_PROVIDER_UNAVAILABLE",
+    );
+  });
+
+  it.each([
+    ["non-canonical token type", { token_type: "Bearer" }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["missing token type", { token_type: undefined }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["non-positive lifetime", { expires_in: 0 }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["fractional lifetime", { expires_in: 3600.5 }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["lifetime inconsistent with JWT", { expires_in: 3599 }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["missing issued-at", { access_token: jwt({ iat: undefined }) }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["fractional issued-at", { access_token: jwt({ iat: issuedAtSeconds + 0.5 }) }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["expiry before issued-at", { access_token: jwt({ exp: issuedAtSeconds }) }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["inconsistent optional absolute expiry", { expires_at: nowSeconds + 1 }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["mismatched subject", { access_token: jwt({ sub: "123e4567-e89b-12d3-a456-426614174099" }) }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["missing provider session", { access_token: jwt({ session_id: undefined }) }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["unconfirmed email", { user: { ...session.user, email_confirmed_at: null } }, "AUTH_EMAIL_VERIFICATION_REQUIRED"],
+  ] as const)("rejects a raw PKCE token response with %s", async (_label, override, expected) => {
+    const setup = adapter([jsonResponse({ ...rawSession, ...override })]);
+    await expectSafeError(() => setup.adapter.exchangeOAuthCode({ code: "code", codeVerifier: verifier }), expected);
+  });
+
   it("rejects malformed HTTP JSON and incomplete token material", async () => {
     const malformedJson = new Response("not-json", { status: 200, headers: { "content-type": "application/json" } });
     await expectSafeError(() => adapter([malformedJson]).adapter.exchangeOAuthCode({ code: "code", codeVerifier: verifier }), "AUTH_PROVIDER_UNAVAILABLE");
-    await expectSafeError(() => adapter([jsonResponse({ ...session, refresh_token: "" })]).adapter.exchangeOAuthCode({ code: "code", codeVerifier: verifier }), "AUTH_PROVIDER_UNAVAILABLE", accessToken);
+    await expectSafeError(() => adapter([jsonResponse({ ...rawSession, refresh_token: "" })]).adapter.exchangeOAuthCode({ code: "code", codeVerifier: verifier }), "AUTH_PROVIDER_UNAVAILABLE", accessToken);
     await expectSafeError(() => adapter([jsonResponse([])]).adapter.requestPasswordReset("person@example.test", new URL("https://app.example.test/recovery"), challenge), "AUTH_PROVIDER_UNAVAILABLE");
   });
 
