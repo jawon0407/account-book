@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 import { dirname, join, relative } from "node:path";
@@ -127,14 +128,16 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
 });
 
 test("workspace policy detects unapproved local TypeScript config overrides", () => {
-  const helperPath = join(rootDir, "packages", "contracts", "tsconfig.local.json");
+  const helperName = `tsconfig.${process.pid}-${randomUUID()}.json`;
+  const helperPath = join(rootDir, "packages", "contracts", helperName);
+  const helperRelativePath = `packages/contracts/${helperName}`;
   writeFileSync(helperPath, '{"compilerOptions":{"skipLibCheck":true}}\n', "utf8");
   try {
     const packageLocalSkipLibCheck = workspaceTsconfigFiles()
       .filter((path) => JSON.parse(readFileSync(path, "utf8")).compilerOptions?.skipLibCheck === true)
       .map((path) => path.slice(rootDir.length + 1).replaceAll("\\", "/"))
       .sort();
-    assert.notDeepEqual(packageLocalSkipLibCheck, approvedPackageLocalSkipLibCheck);
+    assert.equal(packageLocalSkipLibCheck.includes(helperRelativePath), true);
   } finally {
     rmSync(helperPath, { force: true });
   }
