@@ -229,7 +229,7 @@ provider 비밀번호 변경이 실패하면 row는 update-claimed 상태로 남
 - cookie 이름은 `__Host-ab_session`, `__Host-ab_interaction` 두 개뿐이다.
 - cookie builder는 `HttpOnly: true`, `SameSite: "lax"`, `Path: "/"`, `Priority: "high"`를 고정하고 `Domain`을 제공하지 않는다.
 - `Secure`는 caller가 boolean으로 전달한다. 운영에서 true로 강제하는 route 설정은 Task 10 범위다.
-- CSRF token은 selector, 32바이트 HMAC key, 새 32바이트 nonce에 묶이고 정확히 5분 뒤 만료한다.
+- CSRF token은 selector, 32바이트 HMAC key, 새 32바이트 nonce에 묶인다. 발급 시각을 초 단위로 내림한 값에 300초를 더한 expiry 경계부터 거부하므로 실제 유효 시간은 최대 300초다.
 - state-changing request validator는 대문자 `POST`, JSON content type, exact `Origin` 또는 same-origin `Referer`, `Sec-Fetch-Site: same-origin | none`, 제한된 mode, 비어 있는 destination, 단일 `X-CSRF-Token`을 모두 요구한다.
 - allowed origin 문자열은 URL의 exact `origin`과 같아야 하며 path·query·fragment·credential·공백·control character를 허용하지 않는다.
 

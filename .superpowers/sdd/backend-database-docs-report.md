@@ -267,3 +267,29 @@ Tutorial은 만들지 않았다. 현재 실제 BFF endpoint/UI가 없어 사용�
 4. Task 10 route가 실제 `Set-Cookie`, CSRF/origin enforcement, no-store header와 local-first logout orchestration을 조립해야 한다.
 5. `auth_rate_limits` use case는 아직 구현되지 않았다.
 6. 설치된 `gstack-redact` package가 필요한 engine module 없이 배치되어 별도 redaction scan을 실행하지 못했다.
+
+## 독립 리뷰 후속 수정
+
+독립 리뷰의 `Needs changes` 결과를 production source와 migration에 다시 대조했다. 후속 범위는 문서 네 파일뿐이며 production, test, migration, package 설정은 변경하지 않았다.
+
+### 반영한 지적
+
+1. `docs/guides/backend-auth-operations.ko.md`의 disposable DB 실행 예시에서 command line에 연결값을 직접 쓰는 방식을 제거했다. 승인된 secret manager를 우선하고, 로컬 PowerShell 7 fallback은 `Read-Host -MaskInput`, process-scoped environment, `try/finally` cleanup을 사용한다. `SecureString`을 plain string으로 재변환하는 패턴과 실제 credential 형식 예시는 넣지 않았다.
+2. `docs/database/auth-schema.ko.md`의 malformed row 설명을 계층별로 수정했다. session repository mapper는 구조·digest·object·date·version만 검사하고 ID는 string 여부만 본다. UUID·session chronology·idle/absolute 수명은 `SessionService.validRecord`, envelope의 cryptographic shape와 AAD는 복호화 단계가 검사한다. OAuth·confirmation·recovery mapper의 직접 검증 범위도 별도로 기록했다.
+3. DB reference에 Drizzle 명시 metadata 이름 20개와 migration 001→003의 constraint/index catalog를 분리해 추가했다. migration 001 inline declaration의 자동 생성 이름은 “기대 이름”으로 표시하고 실제 환경에서는 `pg_constraint`, `pg_indexes` read-only query 결과를 권위 있게 사용하도록 했다.
+4. CSRF 수명 표현을 “정확히 5분”에서 “발급 시각을 초 단위로 내림한 expiry 기준 최대 300초”로 바로잡았다.
+5. 운영 가이드의 완료 기준에 worktree 검사뿐 아니라 base-to-HEAD `git diff --check`와 `git show --check HEAD`를 추가해 clean checkout에서도 committed diff를 검사한다.
+
+### 후속 검증 증거
+
+- 수정 파일 strict UTF-8 decode: PASS
+- public 문서 상대 Markdown link: PASS
+- source identifier·TTL·return path·repository operation consistency: PASS
+- 미완료 표식·credential marker 검색: PASS
+- `service_role` 검색 결과: 권한 revoke/grant와 disposable-role 문맥만 존재
+- `git diff --check`: PASS
+- `git diff --cached --check`: PASS
+- `git diff --check c37d5797e7a4e6787c2259a5ba4d937594d3c41b..HEAD`: PASS
+- `git show --check HEAD`: PASS
+- Node `v22.15.1`, pnpm `11.9.0`, `pnpm test:security-gate`: PASS, 44/44
+- live Supabase와 disposable PostgreSQL: 실행 조건이 없어 계속 미실행

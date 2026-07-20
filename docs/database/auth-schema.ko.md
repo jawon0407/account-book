@@ -17,6 +17,54 @@
 
 Drizzle export 이름은 각각 `authUserSecurityState`, `authSessions`, `oauthTransactions`, `authRecoveryTransactions`, `emailConfirmationTransactions`, `authRateLimits`다.
 
+## constraint와 index 이름
+
+Drizzle의 명시적 metadata 이름과 migration이 실제 PostgreSQL catalog에 만드는 이름은 같은 개념이 아니다. [`auth.ts`](../../packages/database/src/schema/auth.ts)의 `check(...)` 이름은 애플리케이션 모델 이름이다. 반면 SQL migration 001의 inline `PRIMARY KEY`, `UNIQUE`, 이름 없는 `CHECK`는 PostgreSQL이 이름을 자동 생성한다. 운영 판단에는 migration 적용 후 catalog 조회 결과를 사용한다.
+
+### Drizzle 명시 metadata 이름
+
+| table | check/index 이름 |
+| --- | --- |
+| `auth_user_security_state` | `auth_user_security_state_minimum_iat_nonnegative` |
+| `auth_sessions` | `auth_sessions_selector_hash_length`, `auth_sessions_rotation_version_nonnegative`, `auth_sessions_absolute_expiry`, `auth_sessions_provider_session_unique` |
+| `oauth_transactions` | `oauth_transactions_state_hash_length`, `oauth_transactions_interaction_hash_length`, `oauth_transactions_provider`, `oauth_transactions_return_path`, `oauth_transactions_expiry` |
+| `auth_recovery_transactions` | `auth_recovery_transactions_interaction_hash_length`, `auth_recovery_transactions_expiry`, `auth_recovery_transactions_stage`, `auth_recovery_transactions_stage_order` |
+| `email_confirmation_transactions` | `email_confirmation_transactions_interaction_hash_length`, `email_confirmation_transactions_expiry` |
+| `auth_rate_limits` | `auth_rate_limits_fingerprint_length`, `auth_rate_limits_kind`, `auth_rate_limits_window_seconds_positive`, `auth_rate_limits_count_nonnegative` |
+
+`.primaryKey()`, `.unique()`, 복합 `primaryKey(...)`에는 이 source가 별도 이름을 지정하지 않는다. 위 목록에서 `auth_sessions_provider_session_unique`만 Drizzle과 migration 양쪽에 명시된 standalone partial unique index다.
+
+### migration 001→003 이후 PostgreSQL catalog
+
+아래에서 “자동”은 migration SQL에 이름을 고정하지 않아 PostgreSQL naming convention으로 생성되는 이름이다. 괄호의 이름은 현재 SQL chain에서 기대되는 catalog 이름이며, 복원본·수동 변경·다른 PostgreSQL 동작을 단정하는 근거로 사용하지 않는다.
+
+| table | 종류 | migration/live catalog 이름 |
+| --- | --- | --- |
+| `auth_user_security_state` | primary key / check | 자동 `auth_user_security_state_pkey`; 명시 `auth_user_security_state_minimum_iat_nonnegative` |
+| `auth_sessions` | primary key / unique / checks | 자동 `auth_sessions_pkey`, `auth_sessions_selector_hash_key`, `auth_sessions_selector_hash_check`, `auth_sessions_rotation_version_check`, `auth_sessions_check` |
+| `auth_sessions` | standalone partial unique index | 명시 `auth_sessions_provider_session_unique` |
+| `oauth_transactions` | primary key / unique / checks | 자동 `oauth_transactions_pkey`, `oauth_transactions_state_hash_key`, `oauth_transactions_interaction_hash_key`, `oauth_transactions_state_hash_check`, `oauth_transactions_interaction_hash_check`, `oauth_transactions_provider_check`, `oauth_transactions_check` |
+| `oauth_transactions` | final return-path check | 001의 자동 `oauth_transactions_return_path_check`를 002가 drop하고 명시 `oauth_transactions_return_path`를 추가 |
+| `auth_recovery_transactions` | primary key / unique / checks | 자동 `auth_recovery_transactions_pkey`, `auth_recovery_transactions_interaction_hash_key`, `auth_recovery_transactions_interaction_hash_check`, `auth_recovery_transactions_check`; 002 명시 `auth_recovery_transactions_stage`, `auth_recovery_transactions_stage_order` |
+| `email_confirmation_transactions` | primary key / unique / checks | 자동 `email_confirmation_transactions_pkey`, `email_confirmation_transactions_interaction_hash_key`, `email_confirmation_transactions_interaction_hash_check`, `email_confirmation_transactions_check` |
+| `auth_rate_limits` | primary key / checks | 자동 `auth_rate_limits_pkey`, `auth_rate_limits_fingerprint_check`, `auth_rate_limits_kind_check`, `auth_rate_limits_window_seconds_check`, `auth_rate_limits_count_check` |
+
+`PRIMARY KEY`와 `UNIQUE` constraint는 같은 이름의 backing index를 만든다. standalone partial index는 `pg_constraint`가 아니라 `pg_indexes`에서 확인한다. 적용 환경의 권위 있는 목록은 다음 read-only query로 확인한다.
+
+```sql
+select c.conrelid::regclass as table_name, c.conname, c.contype,
+       pg_get_constraintdef(c.oid) as definition
+from pg_constraint c
+join pg_namespace n on n.oid = c.connamespace
+where n.nspname = 'app_private'
+order by c.conrelid::regclass::text, c.conname;
+
+select schemaname, tablename, indexname, indexdef
+from pg_indexes
+where schemaname = 'app_private'
+order by tablename, indexname;
+```
+
 ## schema와 role 권한
 
 ### `app_private`
@@ -206,7 +254,13 @@ OAuth, email confirmation, recovery exchange, recovery password update는 provid
 
 ### malformed row fail-closed
 
-PostgreSQL adapter는 query 결과를 domain record로 허용하기 전에 UUID, digest 길이, provider, return path, envelope object, timestamp와 recovery chronology를 검사한다. 하나라도 맞지 않으면 row를 반환하지 않는다. `SessionService`는 그 위에서 session 수명과 암호화 envelope까지 다시 검사한다.
+검증 책임은 record 종류와 계층에 따라 나뉜다.
+
+- session mapper `toRecord`는 row/object shape, 32바이트 selector digest, token envelope가 배열이 아닌 object인지, timestamp 타입, nullable revoke 시각, nonnegative rotation version을 검사한다. 여기서는 session·user·provider session ID가 **문자열인지**만 확인하며 UUID 형식이나 시간 순서는 검사하지 않는다.
+- `SessionService.validRecord`가 세 session ID의 UUID 형식, selector digest, revoke 상태, `created_at <= last_seen_at <= absolute_expires_at`, idle 7일, absolute 최대 30일과 현재 만료 경계를 검증한다. 이어지는 token 복호화가 envelope version·key ID·nonce/tag 길이와 record ID/token kind AAD를 검증한다.
+- OAuth, email confirmation, recovery transaction mapper는 각 transaction ID UUID, digest, 허용 provider/return path, 필요한 timestamp와 row stage를 직접 검사한다. email/recovery mapper는 chronology도 검사하고, recovery의 nullable `user_id`가 있으면 UUID인지 확인한다. 각 use-case service는 exact 10분/15분 수명, 현재 만료, binding과 복호화된 envelope를 추가 검증한다.
+
+어느 계층에서든 실패하면 malformed row를 성공 경로로 전달하지 않는다. 다만 repository가 모든 session UUID와 service-level 수명 규칙까지 검사한다고 해석하면 안 된다.
 
 ## migration 순서
 

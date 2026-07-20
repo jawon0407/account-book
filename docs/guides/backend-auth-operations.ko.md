@@ -136,13 +136,25 @@ git config --local --get core.hooksPath
 2. 연결 사용자가 정확히 `postgres` owner인지 확인한다.
 3. `anon`, `authenticated`, `service_role`, `app_session_bff` role을 만들고 지울 수 있는 격리 환경인지 확인한다.
 4. backup이 아니라 언제든 버릴 수 있는 DB인지 다시 확인한다.
-5. 두 opt-in 변수를 현재 shell process에만 주입한다. 실제 연결값을 작업 기록에 복사하지 않는다.
+5. 조직이 승인한 secret manager가 있으면 그 도구로 `pnpm test:db` 자식 process에만 `TEST_DATABASE_URL`을 주입한다. secret manager를 사용할 수 없는 로컬 PowerShell 7 환경에서는 command line이나 PSReadLine history에 연결값을 쓰지 않고, masked prompt로 받은 값을 현재 process에 필요한 동안만 설정한다. `Read-Host -AsSecureString` 결과를 다시 plain string으로 변환하는 우회는 사용하지 않는다.
 
    ```powershell
-   $env:TEST_DATABASE_URL = "<폐기 가능한 PostgreSQL 연결값>"
-   $env:TEST_DATABASE_DISPOSABLE = "true"
-   pnpm test:db
+   $testDatabaseUrl = Read-Host -MaskInput -Prompt "Disposable PostgreSQL URL"
+   try {
+     [Environment]::SetEnvironmentVariable("TEST_DATABASE_URL", $testDatabaseUrl, "Process")
+     [Environment]::SetEnvironmentVariable("TEST_DATABASE_DISPOSABLE", "true", "Process")
+
+     pnpm test:db
+     if ($LASTEXITCODE -ne 0) { throw "Database test failed with exit code $LASTEXITCODE" }
+   }
+   finally {
+     [Environment]::SetEnvironmentVariable("TEST_DATABASE_URL", $null, "Process")
+     [Environment]::SetEnvironmentVariable("TEST_DATABASE_DISPOSABLE", $null, "Process")
+     $testDatabaseUrl = $null
+   }
    ```
+
+   `Read-Host -MaskInput`은 입력을 화면에서 가리고 PSReadLine command history에 넣지 않지만, 반환값과 process 환경 변수는 test 실행 중 평문 메모리에 존재한다. 따라서 shared terminal에서는 실행하지 않고, test가 끝나면 `finally`가 성공·실패 모두에서 두 환경 변수를 제거하게 둔다. transcript나 shell session recording이 켜져 있다면 먼저 끈다.
 
 ### 현재 test coverage
 
@@ -247,7 +259,12 @@ pnpm typecheck
 pnpm lint
 pnpm test:security-gate
 git diff --check
+$base = git merge-base HEAD origin/main
+git diff --check "$base..HEAD"
+git show --check --oneline --stat HEAD
 ```
+
+첫 `git diff --check`는 아직 commit하지 않은 worktree/index 변경을 검사한다. base-to-HEAD 검사는 clean checkout에서도 현재 branch의 모든 committed 변경을 검사한다. 이 저장소의 기본 base는 `origin/main`이며, 다른 PR target을 사용한다면 그 remote branch로 바꾼다. 마지막 명령은 최신 commit 자체의 whitespace 오류도 별도로 확인한다.
 
 `pnpm test:db`와 live Supabase smoke는 별도 상태로 기록한다. 실행 조건이 없으면 “통과”가 아니라 “미실행”이다.
 
