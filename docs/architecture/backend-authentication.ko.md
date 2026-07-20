@@ -1,0 +1,279 @@
+# 인증 백엔드 아키텍처
+
+> **English Summary:** The implemented server layer provides opaque sessions, server-owned PKCE, encrypted provider credentials, one-shot authentication transactions, strict Supabase response parsing, and PostgreSQL compare-and-swap operations. Next.js BFF routes, HTTP cache headers, cookie issuance, rate-limit use cases, and live provider wiring remain follow-up work.
+
+이 문서는 현재 코드에 구현된 인증 도메인과 저장소가 왜 이런 경계를 택했는지 설명한다. HTTP 엔드포인트가 이미 존재한다고 가정하지 않는다. 구현 근거는 [`apps/web/src/server`](../../apps/web/src/server/)와 [인증 DB 스키마](../database/auth-schema.ko.md)다.
+
+## 현재 구현 범위
+
+| 상태 | 범위 |
+| --- | --- |
+| 구현됨 | 인증 계약, Supabase server-only adapter, 이메일 가입·로그인·확인 서비스, OAuth 시작·완료 서비스, 비밀번호 복구 시작·교환·변경 서비스, 불투명 세션 서비스, 암호화·PKCE·CSRF·Origin 검증 도구, PostgreSQL 저장소 |
+| 스키마만 구현됨 | `auth_rate_limits` 테이블. 이를 사용하는 rate-limit use case는 없다. |
+| Task 10 후속 | Next.js BFF route/controller/container, canonical configured origin, 시작마다 새 interaction cookie 발급, 실제 `Set-Cookie`, no-store 응답, CSRF·Origin 검증과 use case의 HTTP 조립 |
+| 아직 없음 | 인증 UI, NestJS API/JWT guard, 관리자 페이지, 실제 BFF endpoint |
+| 이 작업 공간에서 미검증 | 실제 Supabase Auth와 disposable PostgreSQL에 대한 live 통합 검증 |
+
+## 문제와 선택
+
+브라우저가 Supabase token을 직접 보관하면 XSS나 브라우저 저장소 유출이 곧 provider session 탈취로 이어진다. 반대로 모든 token을 서버에 두면 요청마다 저장소 조회가 필요하고 서버가 암호화 키와 세션 수명을 책임져야 한다. 이 구현은 후자의 비용을 선택했다.
+
+- **same-origin BFF**: 브라우저의 인증 진입점을 같은 origin의 서버로 제한한다. 현재는 이를 뒷받침하는 도메인 코드만 있고 route는 Task 10 범위다.
+- **opaque session**: 브라우저에는 의미 없는 256비트 selector만 두고, DB에는 그 SHA-256 digest만 저장한다.
+- **server-owned PKCE**: PKCE verifier를 브라우저나 Supabase SDK 저장소에 맡기지 않고 서버에서 생성·암호화한다.
+- **AES-256-GCM envelope**: token 평문을 DB에 저장하지 않고 record ID와 token kind를 AAD(추가 인증 데이터)에 결합한다.
+- **interaction binding**: 인증 시작 브라우저와 callback 브라우저가 같은지 별도 selector digest로 묶는다.
+- **claim-before-exchange**: 외부 provider 호출 전에 DB 행의 소비권을 먼저 획득해 replay와 동시 실행을 막는다.
+
+## 모듈과 신뢰 경계
+
+```mermaid
+flowchart LR
+  Browser["Browser\n신뢰하지 않는 경계"]
+  BFF["Next.js BFF route\nTask 10 후속"]
+  Guard["cookie · CSRF · Origin\n구현된 도구, 미조립"]
+  UseCase["EmailAuthService · OAuthService\nPasswordRecoveryService · SessionService"]
+  Adapter["SupabaseAuthAdapter\nserver-only"]
+  Supabase["Supabase Auth\n외부 신뢰 경계"]
+  Repo["PostgresAuthRepository"]
+  DB["PostgreSQL app_private\n암호화 token · digest"]
+
+  Browser -->|"향후 same-origin 요청\nopaque cookie만"| BFF
+  BFF --> Guard
+  Guard --> UseCase
+  UseCase -->|"검증된 입력"| Adapter
+  Adapter -->|"HTTPS · anon/publishable key\nPKCE code exchange"| Supabase
+  UseCase --> Repo
+  Repo -->|"단일 조건 update · transaction"| DB
+```
+
+브라우저와 HTTP header는 신뢰하지 않는다. BFF도 아직 없으므로 서비스에 전달되는 callback URL, 시간, interaction selector는 현재 호출자가 신뢰 경계 안에서 구성해야 한다. Supabase adapter는 공급자 응답을 그대로 신뢰하지 않고 사용자 UUID, session UUID, email 확인 시각, JWT `iat`·`exp`, token lifetime 일관성을 다시 검사한다. 다만 JWT 서명을 독립 검증하는 NestJS guard는 아직 구현되지 않았다.
+
+## 비밀값과 selector의 위치
+
+| 값 | 생성·유입 | 허용되는 위치 | 금지되는 위치 |
+| --- | --- | --- | --- |
+| Supabase access token | Supabase 응답 | 서버 메모리에서 짧게 사용, `auth_sessions.encrypted_access_token` envelope | 브라우저 응답·cookie·URL·로그·평문 DB |
+| Supabase refresh token | Supabase 응답 | 서버 메모리, `auth_sessions.encrypted_refresh_token` envelope | 브라우저 저장소·cookie·URL·로그·평문 DB |
+| recovery credential pair | recovery code 교환 결과 | canonical JSON으로 만든 뒤 `auth_recovery_transactions.encrypted_recovery_token` envelope | 일반 app session, 브라우저, URL, 로그 |
+| PKCE verifier | 서버 CSPRNG | `encrypted_pkce_verifier` envelope, provider code 교환 직전 서버 메모리 | 브라우저, SDK persistence, URL, 로그, 평문 DB |
+| PKCE challenge | verifier의 S256 digest | Supabase signup/recover/authorize 요청 | verifier를 대신하는 비밀 저장소로 사용하지 않음 |
+| OAuth `state` | 서버 CSPRNG | provider 왕복 URL의 protocol 값, DB에는 `state_hash`만 | cookie·브라우저 영구 저장소·평문 DB·로그 |
+| interaction selector | 향후 BFF가 서버에서 생성 | `__Host-ab_interaction` HttpOnly cookie, 서비스 호출 시 서버 문맥 | 요청 body/query, DB 평문, 로그. Task 10은 호출자가 고른 값의 수용·재사용을 금지해야 함 |
+| session selector | `SessionService` CSPRNG | `__Host-ab_session` HttpOnly cookie, lookup 시 서버 메모리 | DB 평문, 브라우저 JavaScript 저장소, 로그 |
+
+`state`는 OAuth protocol상 redirect URL을 왕복하지만 저장 시에는 32바이트 digest만 남는다. interaction selector와 session selector는 둘 다 canonical base64url 43자이며 원본의 역할이 다르다.
+
+## 암호화 envelope
+
+[`token-envelope.ts`](../../apps/web/src/server/security/token-envelope.ts)는 AES-256-GCM을 사용한다.
+
+- key는 정확히 32바이트다.
+- 매 암호화에 새 12바이트 IV를 만든다.
+- authentication tag는 16바이트다.
+- envelope 필드는 정확히 `version`, `keyId`, `iv`, `ciphertext`, `tag` 다섯 개다.
+- 현재 version은 `1`이다.
+- AAD는 `v1\0<recordId>\0<tokenKind>`이며 `tokenKind`는 `access | refresh | pkce | recovery`다.
+- 쓰기는 `currentKeyId`만 사용하고, 읽기는 keyring에 남은 이전 key도 허용해 점진적 key rotation을 지원한다.
+- envelope 형식, key lookup, tag, AAD 중 하나라도 맞지 않으면 `TOKEN_ENVELOPE_INVALID` 하나로 실패한다. 평문 fallback은 없다.
+
+이 선택은 DB 유출만으로 token을 바로 사용할 수 없게 하고 row 간 ciphertext 바꿔치기를 막는다. 대신 BFF의 keyring이 유출되면 저장 token이 위험해지므로 key 접근 제한과 전체 세션 폐기 절차가 필요하다.
+
+## 이메일 가입·로그인·확인
+
+구현은 [`EmailAuthService`](../../apps/web/src/server/auth/email-auth-service.ts)가 담당한다.
+
+### 가입
+
+1. `SignUpInputSchema`가 이메일과 12~1024자 비밀번호를 strict하게 검증한다.
+2. caller가 제공한 trusted confirmation URL, interaction selector, 시각을 검사한다.
+3. 서버가 transaction UUID와 PKCE verifier를 만든다.
+4. interaction selector는 SHA-256으로 바꾸고 verifier는 `tokenKind: "pkce"`로 암호화한다.
+5. 15분 수명의 `email_confirmation_transactions` 행을 **provider 요청 전에** 만든다.
+6. Supabase signup에는 callback URL과 S256 challenge만 보낸다.
+7. 신규 계정, 이미 존재하는 계정, 예상 밖의 즉시 인증 결과 모두 공개 결과는 `{ accepted: true }`다. signup 경로는 app session을 만들지 않는다.
+
+### 비밀번호 로그인
+
+1. 입력을 strict 검증한 뒤 Supabase의 request-scoped non-persistent client로 로그인한다.
+2. provider promise가 끝난 뒤 새 시각을 샘플링한다.
+3. email 확인, 사용자 UUID와 JWT `sub` 일치, session UUID, `iat`·`exp`를 검사한다.
+4. token pair를 `SessionService.create`에 전달한다.
+5. 반환값은 opaque selector, 공개 사용자, access 만료와 absolute 만료뿐이다.
+
+### 이메일 확인
+
+1. callback code를 길이·공백·control character 기준으로 먼저 검사한다.
+2. interaction digest가 일치하고 아직 소비되지 않았으며 만료 전인 행을 조건부 update로 먼저 claim한다.
+3. 저장 행이 정확히 15분 수명이고 digest·시각·envelope 불변식을 만족하는지 다시 검사한다.
+4. verifier를 복호화하고 code와 함께 Supabase PKCE token endpoint로 보낸다.
+5. 검증된 token pair로 opaque session을 만든다.
+
+provider 교환이 실패해도 claim은 되돌리지 않는다. 사용자는 새 인증 흐름을 시작해야 하며, 같은 code를 다시 provider까지 전달하지 않는다.
+
+## OAuth 시작·완료
+
+구현은 [`OAuthService`](../../apps/web/src/server/auth/oauth-service.ts)가 담당한다.
+
+### 시작
+
+1. provider는 `google | kakao | naver`만 허용한다.
+2. return path는 정확히 `/app` 또는 `/settings/security`만 허용한다.
+3. callback base URL은 HTTPS 또는 loopback HTTP만 허용하며 사용자 정보·fragment와 기존 `provider`·`state` query를 거부한다.
+4. 서버가 `state`, PKCE verifier, transaction UUID를 새로 만든다.
+5. `state`와 interaction selector는 각각 32바이트 digest로, verifier는 암호화 envelope로 저장한다.
+6. transaction은 정확히 10분 후 만료한다.
+7. callback URL에 검증된 provider와 새 `state`를 추가한 뒤 Supabase authorize URL을 만든다.
+
+Supabase provider mapping은 Google `google`, Kakao `kakao`, Naver `custom:naver`로 고정된다.
+
+### 완료
+
+1. callback의 provider, `state`, code와 기존 interaction selector를 먼저 검증한다.
+2. provider·`state_hash`·`interaction_hash`가 모두 일치하고 미소비·미만료인 행 하나를 먼저 claim한다.
+3. 반환 행의 digest, 10분 수명, provider, return path를 다시 검사한다.
+4. verifier를 복호화해 code를 교환한다.
+5. provider 완료 뒤의 시각으로 token pair를 검증하고 opaque session을 만든다.
+6. redirect 대상은 요청 값이 아니라 DB에 저장된 두 allowlisted return path 중 하나다.
+
+잘못된 browser, provider, state, 만료, replay는 provider 호출 전에 차단된다. 동시 callback 중 하나만 provider에 도달한다.
+
+## 세션 조회·refresh·revoke
+
+[`SessionService`](../../apps/web/src/server/session/session-service.ts)와 [`PostgresAuthRepository`](../../apps/web/src/server/persistence/postgres-auth-repository.ts)가 정책을 나눠 가진다.
+
+### 생성과 조회
+
+- 생성 시 absolute 만료는 정확히 30일 뒤다.
+- 활성 조회는 `revoked_at IS NULL`, `absolute_expires_at > now`, `last_seen_at > now - 7 days`를 모두 요구한다.
+- idle 7일 경계와 absolute 만료 경계는 활성으로 인정하지 않는다.
+- 단순 `resolve`는 `last_seen_at`을 갱신하거나 provider token을 refresh하지 않는다.
+- DB에서 읽은 row가 UUID, digest 길이, 시각 순서, 수명, rotation version 중 하나라도 어기면 하나의 고정 오류로 실패한다.
+
+### refresh
+
+1. 현재 selector로 활성 session을 load하고 refresh token을 복호화한다.
+2. Supabase에 refresh를 요청한다.
+3. provider 완료 뒤 새 시각을 샘플링해 replacement token pair를 검증한다.
+4. replacement `userId`가 기존 사용자와 다르면 DB에 쓰지 않는다.
+5. `id`, 이전 `rotation_version`, 이전 `supabase_session_id`, active/idle/absolute 조건을 한 update에 넣는다.
+6. 한 요청만 두 encrypted token과 provider session ID를 함께 교체하고 version을 1 증가시킨다. 패자는 `{ status: "superseded" }`를 받는다.
+
+### revoke
+
+현재 구현된 primitive는 다음과 같다.
+
+- selector digest로 현재 local session을 한 번만 revoke한다.
+- 사용자 UUID의 모든 active local session을 revoke한다.
+- local revoke 뒤 외부 revoke 재시도가 필요하면 `revocation_pending_at`을 기록한다.
+- provider port에는 `signOut(accessToken, refreshToken)`이 있다.
+
+이 primitive를 “local revoke → cookie 제거 → provider sign-out → 실패 시 pending 표시” 순서로 묶는 HTTP use case와 route는 아직 없다. 따라서 실제 로그아웃 endpoint가 구현됐다고 해석하면 안 된다.
+
+## 비밀번호 복구 상태기계
+
+구현은 [`PasswordRecoveryService`](../../apps/web/src/server/auth/password-recovery-service.ts)가 담당한다. 일반 app session을 발급하지 않는다.
+
+### 시작
+
+1. 이메일을 strict 검증한다.
+2. interaction digest와 encrypted PKCE verifier가 든 pending row를 만든다.
+3. 수명은 정확히 15분이다.
+4. Supabase recovery 요청에는 callback URL과 challenge만 보낸다.
+5. 계정 존재 여부와 무관하게 공개 결과는 `{ accepted: true }`다.
+
+### code 교환
+
+1. pending row의 `exchange_claimed_at`을 먼저 설정한다.
+2. verifier를 복호화해 recovery code를 교환한다.
+3. verified email 사용자와 provider credential pair를 검증한다.
+4. credential을 key 순서가 고정된 canonical JSON으로 만들고 `tokenKind: "recovery"`로 암호화한다.
+5. claim timestamp를 CAS 조건으로 verifier를 지우고 사용자·encrypted recovery credential·`exchanged_at`을 설정한다.
+6. 공개 결과는 `{ ready: true }`뿐이다.
+
+### 비밀번호 변경
+
+1. 새 비밀번호를 12~1024자로 검증한다.
+2. exchanged row의 `password_update_claimed_at`을 먼저 설정한다.
+3. recovery credential을 복호화하고 provider session의 user가 저장 user와 같은지 확인한다.
+4. provider 비밀번호 변경이 성공한 뒤에만 recovery consume, 사용자 issuance gate 전진, 모든 local session revoke를 한 DB transaction으로 수행한다.
+5. 공개 결과는 `{ updated: true }`뿐이다.
+
+provider 비밀번호 변경이 실패하면 row는 update-claimed 상태로 남고 consume/revoke는 실행하지 않는다. 같은 transaction의 재사용을 허용하지 않는 보안 선택이다.
+
+## 비밀번호 변경과 진행 중 로그인 경쟁 조건
+
+`auth_user_security_state.minimum_accepted_iat`는 사용자별로 허용할 최소 provider JWT `iat`를 저장한다. 세션 생성과 recovery 완료는 같은 사용자 행을 update해 row lock을 공유한다.
+
+### 순서 A: 세션 생성이 먼저 lock을 얻음
+
+1. `createSession`이 사용자 security row를 만들거나 확인하고 no-op update로 lock한다.
+2. token의 `iat >= minimum_accepted_iat`를 확인하고 session을 insert한 뒤 commit한다.
+3. recovery transaction이 같은 row를 lock하고 `clock_timestamp()`의 다음 정수 초로 minimum을 올린다.
+4. 같은 transaction에서 방금 생성된 것을 포함한 모든 active session을 revoke한다.
+
+결과: 먼저 생성된 stale session도 살아남지 않는다.
+
+### 순서 B: recovery가 먼저 lock을 얻음
+
+1. recovery transaction이 minimum을 DB 현재 시각의 다음 정수 초로 올리고 모든 active session을 revoke한 뒤 commit한다.
+2. 기다리던 `createSession`이 lock을 얻는다.
+3. recovery 이전에 발급된 token의 `iat`는 새 minimum보다 작으므로 insert하지 않는다.
+
+결과: 비밀번호 변경 전에 시작해 provider 응답만 늦게 도착한 로그인도 stale session을 만들 수 없다. 같은 초에 발급된 token까지 보수적으로 거부하는 것이 trade-off다.
+
+## 요청 방어와 cookie 정책
+
+### 구현된 순수 도구
+
+- cookie 이름은 `__Host-ab_session`, `__Host-ab_interaction` 두 개뿐이다.
+- cookie builder는 `HttpOnly: true`, `SameSite: "lax"`, `Path: "/"`, `Priority: "high"`를 고정하고 `Domain`을 제공하지 않는다.
+- `Secure`는 caller가 boolean으로 전달한다. 운영에서 true로 강제하는 route 설정은 Task 10 범위다.
+- CSRF token은 selector, 32바이트 HMAC key, 새 32바이트 nonce에 묶이고 정확히 5분 뒤 만료한다.
+- state-changing request validator는 대문자 `POST`, JSON content type, exact `Origin` 또는 same-origin `Referer`, `Sec-Fetch-Site: same-origin | none`, 제한된 mode, 비어 있는 destination, 단일 `X-CSRF-Token`을 모두 요구한다.
+- allowed origin 문자열은 URL의 exact `origin`과 같아야 하며 path·query·fragment·credential·공백·control character를 허용하지 않는다.
+
+### 아직 HTTP에 조립되지 않은 정책
+
+실제 `Set-Cookie`, cookie 삭제, CSRF 발급 route, request validator 호출, `Cache-Control: private, no-store`, `Pragma: no-cache`, `Expires: 0`은 현재 응답에 적용되지 않는다. route 자체가 없기 때문이다. 이 정책은 설계 기준이지만 구현 완료 상태는 아니다.
+
+Task 10은 특히 다음을 지켜야 한다.
+
+1. callback URL을 request host나 forwarding header로 만들지 않고 하나의 canonical configured application origin만 사용한다.
+2. 이메일 가입, OAuth 시작, recovery 시작마다 caller 값의 수용이나 기존 값 재사용 없이 새 interaction selector를 만들고 hardened cookie로 발급한다.
+3. interaction/session selector는 cookie에서만 받고 body·query로 받지 않는다.
+4. browser에는 opaque selector만 전달하고 provider token, verifier, recovery credential, transaction 내부 값을 전달하지 않는다.
+
+## 고정 오류와 비노출
+
+provider boundary가 허용하는 오류 코드는 다음 다섯 개다.
+
+- `AUTH_INVALID_CREDENTIALS`
+- `AUTH_EMAIL_VERIFICATION_REQUIRED`
+- `AUTH_OAUTH_TRANSACTION_INVALID`
+- `AUTH_RATE_LIMITED`
+- `AUTH_PROVIDER_UNAVAILABLE`
+
+세션 서비스는 내부 원인과 관계없이 `AUTH_SESSION_OPERATION_FAILED`, CSRF/request boundary는 `AUTH_CSRF_REJECTED`, envelope은 `TOKEN_ENVELOPE_INVALID`로 실패한다. 외부 provider message, code 원문, email, selector, token, SQL 오류를 error message에 붙이지 않는다. `packages/contracts`의 공개 API 오류 enum에는 세션 관련 `AUTH_SESSION_EXPIRED`와 `AUTH_SESSION_REFRESH_REQUIRED`도 있지만 이를 반환할 BFF는 아직 없다.
+
+가입과 recovery 시작은 명시적으로 인식한 account existence/absence provider code만 동일 acknowledgement로 축약한다. 실제 HTTP status가 body 안의 가짜 status보다 우선하며, 429는 body가 malformed여도 `AUTH_RATE_LIMITED`로 매핑한다.
+
+## trade-off와 잔여 위험
+
+| 선택 | 얻는 것 | 비용·잔여 위험 |
+| --- | --- | --- |
+| DB-backed opaque session | 즉시 local revoke, browser token 비노출 | 매 요청 DB 의존성과 암호화 key 운영 |
+| claim-before-exchange | replay·동시 provider 호출 차단 | 일시적 provider 실패도 transaction을 소모해 사용자가 다시 시작해야 함 |
+| server-owned PKCE | SDK/browser persistence 제거 | 서버 transaction 저장과 callback 조립 책임 증가 |
+| exact provider/return path | open redirect와 provider 혼동 축소 | 새 provider/path 추가 시 코드·DB constraint·migration 동시 변경 필요 |
+| strict malformed-row rejection | 손상·공격 데이터의 fail-closed 처리 | 자동 복구 대신 인증 재시작 또는 운영 조사 필요 |
+| shared per-user issuance gate | 비밀번호 변경과 늦은 로그인 race 차단 | 같은 초 token까지 거부할 수 있고 사용자별 lock 경합 발생 |
+| local-first revoke primitive | 외부 장애 중에도 local 접근 차단 가능 | 외부 revoke orchestration과 retry worker는 아직 없음 |
+
+## 관련 문서
+
+- [인증 데이터베이스 스키마](../database/auth-schema.ko.md)
+- [인증 백엔드 운영 가이드](../guides/backend-auth-operations.ko.md)
+- [보안 아키텍처와 위협 모델](../security/security-architecture.md)
+- [구현 설계](../superpowers/specs/2026-07-20-security-auth-foundation-design.md)
+- [SQL migration 001](../../supabase/migrations/202607200001_security_auth_foundation.sql), [002](../../supabase/migrations/202607200002_server_pkce_transactions.sql), [003](../../supabase/migrations/202607200003_user_security_state.sql)

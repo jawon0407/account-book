@@ -4,7 +4,7 @@ PC와 모바일에서 사용할 수 있는 보안 우선 동기화형 개인 가
 
 ## Current Stage
 
-프로젝트 구조와 개발·보안 기준을 확정하는 단계입니다. 애플리케이션 기능은 `feature/*` 브랜치에서 별도 계획과 테스트를 통해 구현합니다.
+인증 기반 Task 9까지 완료되어 server-side 인증 도메인, PostgreSQL opaque session 저장소, server-owned PKCE와 password recovery 상태기계가 구현되었습니다. Next.js BFF route·UI·NestJS API와 실제 Supabase/disposable PostgreSQL 통합 검증은 아직 완료되지 않았습니다.
 
 ## Planned Stack
 
@@ -20,6 +20,9 @@ PC와 모바일에서 사용할 수 있는 보안 우선 동기화형 개인 가
 - [Design system](DESIGN.md)
 - [Security policy](SECURITY.md)
 - [Security architecture](docs/security/security-architecture.md)
+- [Authentication backend architecture (한국어)](docs/architecture/backend-authentication.ko.md)
+- [Authentication database schema (한국어)](docs/database/auth-schema.ko.md)
+- [Authentication backend operations (한국어)](docs/guides/backend-auth-operations.ko.md)
 - [Approved application specification](docs/superpowers/specs/2026-07-16-account-book-app-design.md)
 - [Testing guide](docs/guides/testing.md)
 
