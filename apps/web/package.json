@@ -11,6 +11,8 @@
   "dependencies": {
     "@account-book/contracts": "workspace:*",
     "@account-book/database": "workspace:*",
-    "drizzle-orm": "0.45.2"
+    "@supabase/supabase-js": "2.110.7",
+    "drizzle-orm": "0.45.2",
+    "server-only": "0.0.1"
   }
 }
