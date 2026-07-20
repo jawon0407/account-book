@@ -199,6 +199,15 @@ UI와 Route Handler는 위 use case를 호출할 뿐 Supabase 또는 SQL 세부 
 
 만료된 bucket은 제한된 batch로 정리한다. Supabase 자체 rate limit을 유지하면서 BFF에서도 로그인, 가입, 비밀번호 재설정과 OAuth 시작을 제한한다.
 
+### 7.4 `app_private.auth_recovery_transactions`
+
+- 브라우저 interaction selector의 32-byte hash
+- Supabase 사용자 UUID
+- 서버에서만 복호화하는 제한 recovery token envelope
+- 생성·만료·소비 시각
+
+recovery 거래는 기존 `__Host-ab_interaction` cookie에 바인딩하고 15분 후 만료한다. 별도 recovery cookie를 만들지 않으며, 비밀번호 변경 성공 시 거래를 한 번만 소비하고 사용자의 기존 app session을 모두 폐기한다.
+
 ## 8. 암호화와 키 관리
 
 - Node.js의 검증된 crypto API로 AES-256-GCM을 사용한다.
