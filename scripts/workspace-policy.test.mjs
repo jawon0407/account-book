@@ -87,7 +87,7 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
   const eslintConfig = readFileSync(eslintConfigPath, "utf8");
   assert.match(eslintConfig, /import tseslint from "typescript-eslint"/);
   assert.match(eslintConfig, /\.\{ts,tsx\}/);
-  for (const ignoredPath of [".agents/**", ".codex/**", ".superpowers/**", ".worktrees/**"]) {
+  for (const ignoredPath of ["**/dist/**", ".agents/**", ".codex/**", ".superpowers/**", ".worktrees/**"]) {
     assert.equal(eslintConfig.includes(`"${ignoredPath}"`), true);
   }
   assert.match(eslintConfig, /tseslint\.configs\.recommended\.map/);
