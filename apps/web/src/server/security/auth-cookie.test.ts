@@ -9,6 +9,16 @@ const INTERACTION_COOKIE_NAME = cookieModule.INTERACTION_COOKIE_NAME as string |
 
 const selector = Buffer.alloc(32, 7).toString("base64url");
 
+function expectInvalid(action: () => unknown, supplied?: string): void {
+  expect(action).toThrow("AUTH_COOKIE_INVALID");
+  try {
+    action();
+  } catch (error) {
+    expect((error as Error).message).toBe("AUTH_COOKIE_INVALID");
+    if (supplied !== undefined && supplied !== "") expect((error as Error).message).not.toContain(supplied);
+  }
+}
+
 describe("auth cookies", () => {
   it("creates exact host-only HttpOnly cookies for canonical selectors", () => {
     expect(sessionCookie).toBeTypeOf("function");
@@ -73,12 +83,7 @@ describe("auth cookies", () => {
     "_".repeat(43),
   ])("rejects an invalid cookie selector without echoing it", (invalid) => {
     for (const buildCookie of [sessionCookie, interactionCookie]) {
-      expect(() => buildCookie?.(invalid, true)).toThrow("AUTH_COOKIE_INVALID");
-      if (invalid !== "") {
-        expect(() => buildCookie?.(invalid, true)).toThrowError(
-          expect.not.objectContaining({ message: expect.stringContaining(invalid) }),
-        );
-      }
+      expectInvalid(() => buildCookie?.(invalid, true), invalid);
     }
   });
 
@@ -88,14 +93,11 @@ describe("auth cookies", () => {
       if (invalid === "__Host-ab_session") {
         return;
       }
-      expect(() => clearAuthCookie?.(invalid as string, true)).toThrow("AUTH_COOKIE_INVALID");
-      expect(() => clearAuthCookie?.(invalid as string, true)).toThrowError(
-        expect.not.objectContaining({ message: expect.not.stringContaining("AUTH_COOKIE_INVALID") }),
-      );
+      expectInvalid(() => clearAuthCookie?.(invalid as string, true), String(invalid));
     },
   );
 
   it.each(["true", 1, null, undefined])("rejects a non-boolean secure flag", (secure) => {
-    expect(() => sessionCookie?.(selector, secure as unknown as boolean)).toThrow("AUTH_COOKIE_INVALID");
+    expectInvalid(() => sessionCookie?.(selector, secure as unknown as boolean), String(secure));
   });
 });

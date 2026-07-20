@@ -74,7 +74,11 @@ describe("state-changing request boundary", () => {
     ["missing fetch site", request({ ...validHeaders(), "Sec-Fetch-Site": "" })],
     ["invalid fetch site", request({ ...validHeaders(), "Sec-Fetch-Site": "other" })],
     ["navigation", request({ ...validHeaders(), "Sec-Fetch-Mode": "navigate" })],
+    ["coalesced navigation mode", rawRequest({ ...validHeaders(), "Sec-Fetch-Mode": "navigate, cors" })],
+    ["case-variant mode", rawRequest({ ...validHeaders(), "Sec-Fetch-Mode": "CORS" })],
+    ["unknown mode", rawRequest({ ...validHeaders(), "Sec-Fetch-Mode": "websocket" })],
     ["resource destination", request({ ...validHeaders(), "Sec-Fetch-Dest": "document" })],
+    ["coalesced resource destination", rawRequest({ ...validHeaders(), "Sec-Fetch-Dest": "empty, document" })],
   ])("rejects a %s request", (_name, input) => {
     expectRejected(input);
   });
@@ -94,6 +98,11 @@ describe("state-changing request boundary", () => {
     expectRejected(rawRequest({ ...validHeaders(), Origin: origin }), origin);
   });
 
+  it.each(["\r", "\n", "\t", "\0", "\x7f"])('rejects an Origin containing a control character without echoing it', (control) => {
+    const origin = `https://app.example.${control}test`;
+    expectRejected(rawRequest({ ...validHeaders(), Origin: origin }), origin);
+  });
+
   it.each([
     "",
     "https://attacker.invalid/path",
@@ -104,6 +113,14 @@ describe("state-changing request boundary", () => {
     delete headers.Origin;
     if (referer !== "") headers.Referer = referer;
     expectRejected(request(headers), referer);
+  });
+
+  it.each(["\r", "\n", "\t", "\0", "\x7f"])('rejects a Referer containing a control character without echoing it', (control) => {
+    const headers = validHeaders();
+    delete headers.Origin;
+    const referer = `https://app.example.${control}test/path`;
+    headers.Referer = referer;
+    expectRejected(rawRequest(headers), referer);
   });
 
   it.each([
@@ -120,7 +137,24 @@ describe("state-changing request boundary", () => {
     expectRejected(request(validHeaders()), "", { ...policy, allowedOrigins: new Set() });
   });
 
+  it.each(["\r", "\n", "\t", "\0", "\x7f"])('rejects an allowed-origin configuration containing a control character', (control) => {
+    expectRejected(request(validHeaders()), "", { ...policy, allowedOrigins: new Set([`https://app.example.${control}test`]) });
+  });
+
+  it.each([
+    ["content type", "Content-Type", "application/json\n"],
+    ["fetch site", "Sec-Fetch-Site", "same-origin\t"],
+    ["fetch mode", "Sec-Fetch-Mode", "cors\r"],
+    ["fetch destination", "Sec-Fetch-Dest", "\0"],
+    ["CSRF token", "X-CSRF-Token", `${validToken()}\n`],
+  ])("rejects a %s header containing a control character", (_name, headerName, value) => {
+    expectRejected(rawRequest({ ...validHeaders(), [headerName]: value }), value);
+  });
+
   it("accepts Fetch Metadata none and absent mode/dest after all required checks", () => {
     expect(() => verifyCsrfRequest?.(request({ ...validHeaders(), "Sec-Fetch-Site": "none" }), context, policy)).not.toThrow();
+    expect(() => verifyCsrfRequest?.(request({ ...validHeaders(), "Sec-Fetch-Mode": "cors" }), context, policy)).not.toThrow();
+    expect(() => verifyCsrfRequest?.(request({ ...validHeaders(), "Sec-Fetch-Mode": "same-origin" }), context, policy)).not.toThrow();
+    expect(() => verifyCsrfRequest?.(request({ ...validHeaders(), "Sec-Fetch-Mode": "no-cors" }), context, policy)).not.toThrow();
   });
 });

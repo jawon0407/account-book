@@ -1,5 +1,7 @@
 import { AuthRequestRejectedError, verifyCsrfToken } from "./csrf.js";
 
+const FETCH_MODES = new Set(["cors", "no-cors", "same-origin"]);
+
 /** A framework-neutral request shape compatible with standard Request and Headers objects. */
 export type AuthRequest = Readonly<{
   method: string;
@@ -19,8 +21,15 @@ function rejected(): never {
   throw new AuthRequestRejectedError();
 }
 
+function hasControlCharacter(value: string): boolean {
+  return Array.from(value).some((character) => {
+    const code = character.charCodeAt(0);
+    return code <= 31 || code === 127;
+  });
+}
+
 function exactOrigin(value: unknown): string {
-  if (typeof value !== "string" || value.trim() !== value) return rejected();
+  if (typeof value !== "string" || hasControlCharacter(value) || value.trim() !== value) return rejected();
   try {
     const parsed = new URL(value);
     if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.username || parsed.password || parsed.origin !== value) return rejected();
@@ -43,7 +52,7 @@ function header(request: unknown, name: string): string | null {
   const headers = (request as { headers?: unknown }).headers;
   if (headers === null || typeof headers !== "object" || typeof (headers as { get?: unknown }).get !== "function") return rejected();
   const value = (headers as { get(name: string): unknown }).get(name);
-  if (value !== null && typeof value !== "string") return rejected();
+  if (value !== null && (typeof value !== "string" || hasControlCharacter(value))) return rejected();
   return value;
 }
 
@@ -58,7 +67,7 @@ function allowedOrigin(value: string, origins: ReadonlySet<string>): boolean {
 }
 
 function refererAllowed(value: string | null, origins: ReadonlySet<string>): boolean {
-  if (value === null || value.trim() !== value) return false;
+  if (value === null || hasControlCharacter(value) || value.trim() !== value) return false;
   try {
     const parsed = new URL(value);
     return !parsed.username && !parsed.password && origins.has(parsed.origin);
@@ -77,7 +86,8 @@ export function verifyCsrfRequest(request: AuthRequest, context: Readonly<{ sele
     if (origin === null ? !refererAllowed(header(request, "Referer"), origins) : !allowedOrigin(origin, origins)) return rejected();
     const site = header(request, "Sec-Fetch-Site");
     if (site !== "same-origin" && site !== "none") return rejected();
-    if (header(request, "Sec-Fetch-Mode") === "navigate") return rejected();
+    const mode = header(request, "Sec-Fetch-Mode");
+    if (mode !== null && !FETCH_MODES.has(mode)) return rejected();
     const destination = header(request, "Sec-Fetch-Dest");
     if (destination !== null && destination !== "") return rejected();
     const token = header(request, "X-CSRF-Token");
