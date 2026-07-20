@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -35,14 +35,24 @@ const expectedScripts = {
   verify: "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
 };
 
+const approvedPackageLocalSkipLibCheck = [
+  "apps/web/tsconfig.json",
+  "packages/database/tsconfig.json",
+  "tests/database/tsconfig.json",
+];
+
 function tsconfigFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
     if (entry.isDirectory()) {
       return tsconfigFiles(path);
     }
-    return entry.name === "tsconfig.json" ? [path] : [];
+    return /^tsconfig(?:\..+)?\.json$/u.test(entry.name) ? [path] : [];
   });
+}
+
+function workspaceTsconfigFiles() {
+  return ["apps", "packages", "tests"].flatMap((directory) => tsconfigFiles(join(rootDir, directory)));
 }
 
 test("workspace pins strict TypeScript, boundaries, and verification policy", () => {
@@ -75,16 +85,16 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
     assert.equal(tsconfig.compilerOptions[option], true);
   }
   assert.equal(tsconfig.compilerOptions.skipLibCheck, false);
-  const packageLocalSkipLibCheck = ["apps", "packages", "tests"]
-    .flatMap((directory) => tsconfigFiles(join(rootDir, directory)))
+  const workspaceTsconfigs = workspaceTsconfigFiles();
+  for (const path of workspaceTsconfigs.filter((path) => path.endsWith("tsconfig.json"))) {
+    const packageConfig = JSON.parse(readFileSync(path, "utf8"));
+    assert.equal(packageConfig.extends, relative(dirname(path), tsconfigPath).replaceAll("\\", "/"));
+  }
+  const packageLocalSkipLibCheck = workspaceTsconfigs
     .filter((path) => JSON.parse(readFileSync(path, "utf8")).compilerOptions?.skipLibCheck === true)
     .map((path) => path.slice(rootDir.length + 1).replaceAll("\\", "/"))
     .sort();
-  assert.deepEqual(packageLocalSkipLibCheck, [
-    "apps/web/tsconfig.json",
-    "packages/database/tsconfig.json",
-    "tests/database/tsconfig.json",
-  ]);
+  assert.deepEqual(packageLocalSkipLibCheck, approvedPackageLocalSkipLibCheck);
   for (const boundary of ["apps/*", "packages/*", "tests/*"]) {
     assert.equal(workspace.includes(`  - ${boundary}`), true);
   }
@@ -114,4 +124,18 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
   assert.doesNotMatch(eslintConfig, /\.\.\.tseslint\.configs\.recommended,\s/);
   assert.equal(existsSync(join(rootDir, "packages", "config", "package.json")), false);
   assert.match(readFileSync(configReadmePath, "utf8"), /non-package placeholder/i);
+});
+
+test("workspace policy detects unapproved local TypeScript config overrides", () => {
+  const helperPath = join(rootDir, "packages", "contracts", "tsconfig.local.json");
+  writeFileSync(helperPath, '{"compilerOptions":{"skipLibCheck":true}}\n', "utf8");
+  try {
+    const packageLocalSkipLibCheck = workspaceTsconfigFiles()
+      .filter((path) => JSON.parse(readFileSync(path, "utf8")).compilerOptions?.skipLibCheck === true)
+      .map((path) => path.slice(rootDir.length + 1).replaceAll("\\", "/"))
+      .sort();
+    assert.notDeepEqual(packageLocalSkipLibCheck, approvedPackageLocalSkipLibCheck);
+  } finally {
+    rmSync(helperPath, { force: true });
+  }
 });
