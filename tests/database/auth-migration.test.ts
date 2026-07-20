@@ -39,8 +39,16 @@ async function expectRoleDenied(role: string, table: (typeof privateTables)[numb
   });
 }
 
+async function verifyPostgresOwner(): Promise<void> {
+  const result = await admin.query<{ current_user: string }>("select current_user");
+  if (result.rows[0]?.current_user !== "postgres") {
+    throw new Error("TEST_DATABASE_URL must connect as postgres for disposable migration tests");
+  }
+}
+
 beforeAll(async () => {
   await admin.connect();
+  await verifyPostgresOwner();
   await admin.query("drop schema if exists app_private cascade");
   await admin.query(`
     do $$
@@ -57,7 +65,9 @@ beforeAll(async () => {
   await admin.query("create table app_private.preexisting_probe (id integer primary key)");
   await admin.query("grant all privileges on schema app_private to app_session_bff");
   await admin.query("grant all privileges on app_private.preexisting_probe to app_session_bff");
+  await admin.query("alter default privileges for role postgres in schema app_private grant select on tables to app_session_bff");
   await admin.query(migration);
+  await verifyPostgresOwner();
   await admin.query("create table app_private.after_migration_probe (id integer primary key)");
 });
 
@@ -180,6 +190,7 @@ describe("private authentication migration", () => {
     await expect(admin.query(`insert into app_private.auth_sessions (id, selector_hash, user_id, supabase_session_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at, created_at, last_seen_at, absolute_expires_at) values ('88888888-8888-4888-8888-888888888888', $1, $2, $3, '{}', '{}', now(), now(), now(), now() + interval '1 day')`, [hash("12"), uuid, uuidTwo])).rejects.toThrow(/unique/u);
     await expect(admin.query(`insert into app_private.auth_sessions (id, selector_hash, user_id, supabase_session_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at, created_at, last_seen_at, absolute_expires_at) values ('99999999-9999-4999-8999-999999999999', '\\x11', $1, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', '{}', '{}', now(), now(), now(), now() + interval '1 day')`, [uuid])).rejects.toThrow(/check/u);
     await expect(admin.query(`insert into app_private.auth_sessions (id, selector_hash, user_id, supabase_session_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at, created_at, last_seen_at, absolute_expires_at) values ('aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', $1, $2, 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', '{}', '{}', now(), now(), now(), now())`, [hash("13"), uuid])).rejects.toThrow(/check/u);
+    await expect(admin.query(`insert into app_private.auth_sessions (id, selector_hash, user_id, supabase_session_id, encrypted_access_token, encrypted_refresh_token, access_token_expires_at, created_at, last_seen_at, absolute_expires_at, rotation_version) values ('abababab-abab-4bab-8bab-abababababab', $1, $2, 'bcbcbcbc-bcbc-4cbc-8cbc-bcbcbcbcbcbc', '{}', '{}', now(), now(), now(), now() + interval '1 day', -1)`, [hash("14"), uuid])).rejects.toThrow(/check/u);
   });
 
   it("enforces OAuth and recovery transaction integrity", async () => {
@@ -193,6 +204,7 @@ describe("private authentication migration", () => {
       ["11111111-1111-4111-8111-111111111111", "//evil.example"],
       ["18181818-1818-4818-8818-181818181818", "/\\evil.example"],
       ["19191919-1919-4919-8919-191919191919", "https://evil.example"],
+      ["1a1a1a1a-1a1a-4a1a-8a1a-1a1a1a1a1a1a", `/${"a".repeat(2048)}`],
     ]) {
       await expect(admin.query(`insert into app_private.oauth_transactions (id, state_hash, interaction_hash, provider, encrypted_pkce_verifier, return_path, created_at, expires_at) values ($1, $2, $3, 'google', '{}', $4, now(), now() + interval '1 minute')`, [id, hash("27"), hash("28"), returnPath])).rejects.toThrow(/check/u);
     }
@@ -206,7 +218,8 @@ describe("private authentication migration", () => {
   });
 
   it("enforces rate-limit fingerprint, kind, window, and count checks", async () => {
-    await admin.query("insert into app_private.auth_rate_limits (fingerprint, kind, window_started_at, window_seconds, count) values ($1, 'sign_in', now(), 60, 0)", [hash("41")]);
+    await admin.query("insert into app_private.auth_rate_limits (fingerprint, kind, window_started_at, window_seconds, count) values ($1, 'sign_in', '2026-07-20T00:00:00Z', 60, 0)", [hash("41")]);
+    await expect(admin.query("insert into app_private.auth_rate_limits (fingerprint, kind, window_started_at, window_seconds, count) values ($1, 'sign_in', '2026-07-20T00:00:00Z', 60, 0)", [hash("41")])).rejects.toThrow(/unique/u);
     await expect(admin.query("insert into app_private.auth_rate_limits (fingerprint, kind, window_started_at, window_seconds, count) values ('\\x01', 'sign_up', now(), 60, 0)")).rejects.toThrow(/check/u);
     await expect(admin.query("insert into app_private.auth_rate_limits (fingerprint, kind, window_started_at, window_seconds, count) values ($1, 'unknown', now(), 60, 0)", [hash("42")])).rejects.toThrow(/check/u);
     for (const seconds of [0, -1]) {
