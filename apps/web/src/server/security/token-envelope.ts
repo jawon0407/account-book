@@ -4,6 +4,7 @@ const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/u;
 const KEY_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/u;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const TOKEN_KINDS = new Set(["access", "refresh", "pkce", "recovery"]);
+const ENVELOPE_FIELDS = ["version", "keyId", "iv", "ciphertext", "tag"];
 
 export type TokenContext = Readonly<{
   recordId: string;
@@ -81,8 +82,8 @@ function validEnvelope(value: unknown): TokenEnvelope {
   }
 
   const envelope = value as Record<string, unknown>;
-  const fields = Object.keys(envelope);
-  if (fields.length !== 5 || !["version", "keyId", "iv", "ciphertext", "tag"].every((field) => Object.hasOwn(envelope, field))) {
+  const fields = Reflect.ownKeys(envelope);
+  if (fields.length !== 5 || !fields.every((field) => typeof field === "string" && ENVELOPE_FIELDS.includes(field)) || !ENVELOPE_FIELDS.every((field) => Object.hasOwn(envelope, field))) {
     return invalidTokenEnvelope();
   }
   if (envelope.version !== 1) {

@@ -99,6 +99,16 @@ describe("token envelopes", () => {
     expectSafeFailure(() => decrypt(envelope), "current.key");
   });
 
+  it("rejects non-enumerable and symbol envelope fields", () => {
+    const hiddenFieldEnvelope = encrypt();
+    Object.defineProperty(hiddenFieldEnvelope, "hidden", { value: true });
+    const symbolFieldEnvelope = encrypt();
+    Object.defineProperty(symbolFieldEnvelope, Symbol("hidden"), { value: true });
+
+    expectSafeFailure(() => decrypt(hiddenFieldEnvelope), "hidden");
+    expectSafeFailure(() => decrypt(symbolFieldEnvelope), "hidden");
+  });
+
   it.each([
     [{ currentKeyId: "missing", keys: new Map() } satisfies TokenKeyring, "missing"],
     [{ currentKeyId: "short", keys: new Map([["short", randomBytes(31)]]) } satisfies TokenKeyring, "short"],
