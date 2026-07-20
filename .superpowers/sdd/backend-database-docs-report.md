@@ -293,3 +293,14 @@ Tutorial은 만들지 않았다. 현재 실제 BFF endpoint/UI가 없어 사용�
 - `git show --check HEAD`: PASS
 - Node `v22.15.1`, pnpm `11.9.0`, `pnpm test:security-gate`: PASS, 44/44
 - live Supabase와 disposable PostgreSQL: 실행 조건이 없어 계속 미실행
+
+## Minor 재검토 후속
+
+운영 가이드의 `git diff --check` 설명이 staged 변경까지 포함한다고 읽힐 수 있어 수정했다.
+
+- `git diff --check`: index 대비 unstaged worktree 변경
+- `git diff --cached --check`: HEAD 대비 staged index 변경
+- `git diff --check "$base..HEAD"`: base와 HEAD 사이의 committed branch 전체 변경
+- `git show --check HEAD`: 최신 commit 한 개의 patch
+
+가이드에 staged 전용 명령을 명시적으로 추가했다. 수정 범위는 운영 가이드와 이 보고서뿐이다. 두 파일의 strict UTF-8, 운영 가이드 상대 link, working/cached/base-to-HEAD diff check를 다시 실행해 모두 통과했다.

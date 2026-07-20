@@ -259,12 +259,13 @@ pnpm typecheck
 pnpm lint
 pnpm test:security-gate
 git diff --check
+git diff --cached --check
 $base = git merge-base HEAD origin/main
 git diff --check "$base..HEAD"
 git show --check --oneline --stat HEAD
 ```
 
-첫 `git diff --check`는 아직 commit하지 않은 worktree/index 변경을 검사한다. base-to-HEAD 검사는 clean checkout에서도 현재 branch의 모든 committed 변경을 검사한다. 이 저장소의 기본 base는 `origin/main`이며, 다른 PR target을 사용한다면 그 remote branch로 바꾼다. 마지막 명령은 최신 commit 자체의 whitespace 오류도 별도로 확인한다.
+인자 없는 `git diff --check`는 **index 대비 unstaged worktree 변경**만 검사한다. `git diff --cached --check`는 **HEAD 대비 staged index 변경**을 검사한다. base-to-HEAD 검사는 clean checkout에서도 **base와 현재 HEAD 사이에 commit된 branch 전체 변경**을 검사한다. 이 저장소의 기본 base는 `origin/main`이며, 다른 PR target을 사용한다면 그 remote branch로 바꾼다. 마지막 `git show --check HEAD`는 **최신 commit 한 개의 patch**를 별도로 검사한다.
 
 `pnpm test:db`와 live Supabase smoke는 별도 상태로 기록한다. 실행 조건이 없으면 “통과”가 아니라 “미실행”이다.
 
