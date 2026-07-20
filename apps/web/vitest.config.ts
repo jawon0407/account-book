@@ -10,6 +10,9 @@ export default defineConfig({
         "src/server/security/auth-cookie.ts",
         "src/server/security/csrf.ts",
         "src/server/security/request-origin.ts",
+        "src/server/persistence/auth-repository.ts",
+        "src/server/persistence/postgres-auth-repository.ts",
+        "src/server/session/session-service.ts",
       ],
       exclude: ["src/**/*.test.ts"],
       thresholds: {

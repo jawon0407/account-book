@@ -47,6 +47,9 @@ importers:
       '@account-book/database':
         specifier: workspace:*
         version: link:../../packages/database
+      drizzle-orm:
+        specifier: 0.45.2
+        version: 0.45.2(@types/pg@8.20.0)(pg@8.22.0)
 
   packages/contracts:
     dependencies:
