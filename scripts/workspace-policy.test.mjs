@@ -1,0 +1,97 @@
+import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { test } from "node:test";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const rootDir = join(dirname(fileURLToPath(import.meta.url)), "..");
+const packagePath = join(rootDir, "package.json");
+const tsconfigPath = join(rootDir, "tsconfig.base.json");
+const workspacePath = join(rootDir, "pnpm-workspace.yaml");
+const npmrcPath = join(rootDir, ".npmrc");
+const configReadmePath = join(rootDir, "packages", "config", "README.md");
+const eslintConfigPath = join(rootDir, "eslint.config.mjs");
+
+const expectedDevDependencies = {
+  typescript: "6.0.3",
+  vitest: "4.1.10",
+  "@vitest/coverage-v8": "4.1.10",
+  eslint: "10.7.0",
+  "@eslint/js": "10.0.1",
+  "typescript-eslint": "8.64.0",
+  globals: "17.7.0",
+  prettier: "3.9.5",
+  tsx: "4.23.1",
+  "@types/node": "22.15.1",
+};
+
+const expectedScripts = {
+  "test:workspace": "pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api test",
+  test: "pnpm test:legacy && pnpm test:workspace",
+  "test:db": "pnpm --filter @account-book/database-tests test",
+  lint: "eslint . --max-warnings=0",
+  typecheck: "pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api typecheck",
+  build: "pnpm --filter @account-book/contracts build && pnpm --filter @account-book/database build && pnpm --filter @account-book/api build && pnpm --filter @account-book/web build",
+  verify: "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
+};
+
+test("workspace pins strict TypeScript, boundaries, and verification policy", () => {
+  const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
+  const tsconfig = JSON.parse(readFileSync(tsconfigPath, "utf8"));
+  const workspace = readFileSync(workspacePath, "utf8");
+  const npmrc = readFileSync(npmrcPath, "utf8");
+
+  assert.deepEqual(pkg.devDependencies, expectedDevDependencies);
+  assert.equal(
+    pkg.scripts["test:legacy"],
+    "node --test scripts/verify-structure.test.mjs scripts/workspace-policy.test.mjs scripts/security/*.test.mjs scripts/security-gate.test.mjs scripts/setup-hooks.test.mjs",
+  );
+  for (const [name, command] of Object.entries(expectedScripts)) {
+    assert.equal(pkg.scripts[name], command);
+  }
+  assert.equal(tsconfig.compilerOptions.target, "ES2023");
+  assert.deepEqual(tsconfig.compilerOptions.lib, ["ES2023", "DOM", "DOM.Iterable"]);
+  assert.equal(tsconfig.compilerOptions.module, "NodeNext");
+  assert.equal(tsconfig.compilerOptions.moduleResolution, "NodeNext");
+  for (const option of [
+    "strict",
+    "noUncheckedIndexedAccess",
+    "exactOptionalPropertyTypes",
+    "useUnknownInCatchVariables",
+    "noImplicitOverride",
+    "noFallthroughCasesInSwitch",
+    "verbatimModuleSyntax",
+  ]) {
+    assert.equal(tsconfig.compilerOptions[option], true);
+  }
+  assert.equal(tsconfig.compilerOptions.skipLibCheck, false);
+  for (const boundary of ["apps/*", "packages/*", "tests/*"]) {
+    assert.equal(workspace.includes(`  - ${boundary}`), true);
+  }
+  const allowBuilds = Object.fromEntries(
+    (workspace.match(/^allowBuilds:\r?\n((?: {2}[^\r\n]+\r?\n?)*)/m)?.[1] ?? "")
+      .trim()
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => {
+        const [name, value] = line.trim().split(/:\s*/, 2);
+        return [name, value === "true" ? true : value];
+      }),
+  );
+  assert.deepEqual(allowBuilds, { esbuild: true });
+  for (const policy of ["engine-strict=true", "save-exact=true", "strict-peer-dependencies=true"]) {
+    assert.match(npmrc, new RegExp(`^${policy}$`, "m"));
+  }
+  assert.equal(existsSync(join(rootDir, "eslint.config.mjs")), true);
+  assert.equal(existsSync(join(rootDir, "pnpm-lock.yaml")), true);
+  const eslintConfig = readFileSync(eslintConfigPath, "utf8");
+  assert.match(eslintConfig, /import tseslint from "typescript-eslint"/);
+  assert.match(eslintConfig, /\.\{ts,tsx\}/);
+  for (const ignoredPath of [".agents/**", ".codex/**", ".superpowers/**", ".worktrees/**"]) {
+    assert.equal(eslintConfig.includes(`"${ignoredPath}"`), true);
+  }
+  assert.match(eslintConfig, /tseslint\.configs\.recommended\.map/);
+  assert.doesNotMatch(eslintConfig, /\.\.\.tseslint\.configs\.recommended,\s/);
+  assert.equal(existsSync(join(rootDir, "packages", "config", "package.json")), false);
+  assert.match(readFileSync(configReadmePath, "utf8"), /non-package placeholder/i);
+});

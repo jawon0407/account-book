@@ -27,6 +27,11 @@ export const REQUIRED_PATHS = Object.freeze([
   "SECURITY.md",
   "PRODUCT.md",
   "DESIGN.md",
+  "tsconfig.base.json",
+  "eslint.config.mjs",
+  "pnpm-workspace.yaml",
+  "pnpm-lock.yaml",
+  "package.json",
 ]);
 
 /**

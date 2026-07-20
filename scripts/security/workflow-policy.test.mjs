@@ -84,7 +84,7 @@ function yamlKeyOccurrences(source, key) {
 
 function dangerousPermissionValues(source) {
   const valuePattern =
-    /(?:^|[\s:{,\[])\s*(?:"(?:write|write-all)"|'(?:write|write-all)'|write|write-all)(?=\s*(?:[,}\]]|$))/gu;
+    /(?:^|[\s:{,[])\s*(?:"(?:write|write-all)"|'(?:write|write-all)'|write|write-all)(?=\s*(?:[,}\]]|$))/gu;
   return activeLines(source.split(/\r?\n/u)).flatMap((line) => [
     ...line.matchAll(valuePattern),
   ]);
