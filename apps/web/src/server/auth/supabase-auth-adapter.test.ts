@@ -3,207 +3,209 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("server-only", () => ({}));
 const { SupabaseAuthAdapter } = await import("./supabase-auth-adapter.js");
 const { AuthProviderError } = await import("./auth-provider-port.js");
-const { EmailAuthService } = await import("./email-auth-service.js");
 
 const nowSeconds = Math.floor(Date.now() / 1000) + 3600;
 const userId = "123e4567-e89b-12d3-a456-426614174001";
 const sessionId = "123e4567-e89b-12d3-a456-426614174002";
-function jwt(claims: Record<string, unknown> = {}) { return `${Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url")}.${Buffer.from(JSON.stringify({ session_id: sessionId, sub: userId, exp: nowSeconds, ...claims })).toString("base64url")}.${Buffer.from("signature").toString("base64url")}`; }
+const verifier = "v".repeat(43);
+const challenge = "A".repeat(43);
+
+function jwt(claims: Record<string, unknown> = {}) {
+  return `${Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url")}.${Buffer.from(JSON.stringify({ session_id: sessionId, sub: userId, exp: nowSeconds, ...claims })).toString("base64url")}.${Buffer.from("signature").toString("base64url")}`;
+}
+
 const accessToken = jwt();
-const session = { access_token: accessToken, refresh_token: "refresh-token", expires_at: nowSeconds, user: { id: userId, email: "person@example.test", email_confirmed_at: "2026-07-20T00:00:00.000Z" } };
+const session = {
+  access_token: accessToken,
+  refresh_token: "refresh-token",
+  expires_at: nowSeconds,
+  user: { id: userId, email: "person@example.test", email_confirmed_at: "2026-07-20T00:00:00.000Z" },
+};
 const ok = (data: unknown) => ({ data, error: null });
 
 function client(overrides: Partial<Record<string, unknown>> = {}) {
   const auth = {
-    signUp: vi.fn(async () => ok({ session: null })), signInWithPassword: vi.fn(async () => ok({ session })), exchangeCodeForSession: vi.fn(async () => ok({ session })),
-    signInWithOAuth: vi.fn(async () => ok({ url: "https://provider.example.test/authorize" })), refreshSession: vi.fn(async () => ok({ session })), setSession: vi.fn(async () => ok({ session })),
-    signOut: vi.fn(async () => ({ data: null, error: null })), resetPasswordForEmail: vi.fn(async () => ok({})), updateUser: vi.fn(async () => ok({ user: session.user })),
+    signUp: vi.fn(),
+    signInWithPassword: vi.fn(async () => ok({ session })),
+    exchangeCodeForSession: vi.fn(),
+    signInWithOAuth: vi.fn(),
+    refreshSession: vi.fn(async () => ok({ session })),
+    setSession: vi.fn(async () => ok({ session })),
+    signOut: vi.fn(async () => ({ data: null, error: null })),
+    resetPasswordForEmail: vi.fn(),
+    updateUser: vi.fn(async () => ok({ user: session.user })),
     ...overrides,
   };
   return { auth };
 }
 
-function adapter(subject = client()) {
-  const factory = vi.fn(() => subject);
-  return { subject, factory, adapter: new SupabaseAuthAdapter({ url: "https://project.supabase.co", anonKey: "anon-key" }, factory) };
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-function expectSafeError(action: () => Promise<unknown>, ...secrets: string[]) {
-  return expect(action()).rejects.toSatisfy((error: unknown) => error instanceof AuthProviderError && secrets.every((secret) => !error.message.includes(secret)));
+function adapter(responses: Response[] = [], sdk = client()) {
+  const factory = vi.fn(() => sdk);
+  const fetcher = vi.fn<typeof fetch>(async () => responses.shift() ?? jsonResponse({}));
+  return {
+    sdk,
+    factory,
+    fetcher,
+    adapter: new SupabaseAuthAdapter({ url: "https://project.supabase.co", anonKey: "anon-key" }, factory, fetcher),
+  };
 }
 
-describe("SupabaseAuthAdapter", () => {
-  it("creates a fresh non-persistent PKCE client for every direct provider call", async () => {
+function request(setup: ReturnType<typeof adapter>, index: number) {
+  const call = setup.fetcher.mock.calls[index];
+  expect(call).toBeDefined();
+  return { url: String(call?.[0]), init: call?.[1] as RequestInit };
+}
+
+function expectSafeError(action: () => Promise<unknown>, code: string, ...secrets: string[]) {
+  return expect(action()).rejects.toSatisfy((error: unknown) =>
+    error instanceof AuthProviderError && error.code === code && secrets.every((secret) => !error.message.includes(secret)),
+  );
+}
+
+describe("SupabaseAuthAdapter explicit server PKCE boundary", () => {
+  it.each([
+    ["google", "google"],
+    ["kakao", "kakao"],
+    ["naver", "custom%3Anaver"],
+  ] as const)("maps %s to only its approved authorize provider id", async (provider, providerId) => {
     const setup = adapter();
-    await setup.adapter.signUp({ email: "person@example.test", password: "a".repeat(12) }, new URL("https://app.example.test/confirm"));
+    const result = await setup.adapter.startOAuth({
+      provider,
+      redirectUrl: new URL("https://app.example.test/auth/oauth?provider=google&state=opaque-state"),
+      codeChallenge: challenge,
+    });
+
+    expect(result.authorizationUrl.toString()).toBe(
+      `https://project.supabase.co/auth/v1/authorize?provider=${providerId}&redirect_to=https%3A%2F%2Fapp.example.test%2Fauth%2Foauth%3Fprovider%3Dgoogle%26state%3Dopaque-state&code_challenge=${challenge}&code_challenge_method=s256`,
+    );
+    expect(setup.factory).not.toHaveBeenCalled();
+    expect(setup.fetcher).not.toHaveBeenCalled();
+  });
+
+  it("posts signup, token exchange, and recovery requests with exact server-set inputs", async () => {
+    const setup = adapter([jsonResponse({ user: { id: userId } }), jsonResponse(session), jsonResponse(session), jsonResponse({}), jsonResponse(session)]);
+    const confirmationUrl = new URL("https://app.example.test/auth/confirm");
+    const recoveryUrl = new URL("https://app.example.test/auth/recovery");
+
+    await expect(setup.adapter.signUp({ email: "person@example.test", password: "a".repeat(12) }, confirmationUrl, challenge)).resolves.toEqual({ status: "verification_required" });
+    await setup.adapter.confirmEmail({ code: "confirmation-code", codeVerifier: verifier });
+    await setup.adapter.exchangeOAuthCode({ code: "oauth-code", codeVerifier: verifier });
+    await setup.adapter.requestPasswordReset("person@example.test", recoveryUrl, challenge);
+    await setup.adapter.exchangeRecoveryCode({ code: "recovery-code", codeVerifier: verifier });
+
+    expect(request(setup, 0)).toEqual({
+      url: "https://project.supabase.co/auth/v1/signup?redirect_to=https%3A%2F%2Fapp.example.test%2Fauth%2Fconfirm",
+      init: expect.objectContaining({ method: "POST", body: JSON.stringify({ email: "person@example.test", password: "a".repeat(12), code_challenge: challenge, code_challenge_method: "s256" }) }),
+    });
+    for (const index of [1, 2, 4]) {
+      expect(request(setup, index).url).toBe("https://project.supabase.co/auth/v1/token?grant_type=pkce");
+    }
+    expect(JSON.parse(String(request(setup, 1).init.body))).toEqual({ auth_code: "confirmation-code", code_verifier: verifier });
+    expect(JSON.parse(String(request(setup, 2).init.body))).toEqual({ auth_code: "oauth-code", code_verifier: verifier });
+    expect(request(setup, 3)).toEqual({
+      url: "https://project.supabase.co/auth/v1/recover?redirect_to=https%3A%2F%2Fapp.example.test%2Fauth%2Frecovery",
+      init: expect.objectContaining({ method: "POST", body: JSON.stringify({ email: "person@example.test", code_challenge: challenge, code_challenge_method: "s256" }) }),
+    });
+    expect(JSON.parse(String(request(setup, 4).init.body))).toEqual({ auth_code: "recovery-code", code_verifier: verifier });
+    for (let index = 0; index < 5; index += 1) {
+      expect(request(setup, index).init.headers).toEqual({
+        Accept: "application/json",
+        Authorization: "Bearer anon-key",
+        "Content-Type": "application/json",
+        apikey: "anon-key",
+      });
+    }
+    expect(setup.factory).not.toHaveBeenCalled();
+    for (const method of ["signUp", "exchangeCodeForSession", "signInWithOAuth", "resetPasswordForEmail"] as const) {
+      expect(setup.sdk.auth[method]).not.toHaveBeenCalled();
+    }
+  });
+
+  it("returns validated provider sessions from every direct PKCE exchange", async () => {
+    const setup = adapter([jsonResponse(session), jsonResponse(session), jsonResponse(session)]);
+    await expect(setup.adapter.confirmEmail({ code: "code", codeVerifier: verifier })).resolves.toMatchObject({ userId, supabaseSessionId: sessionId });
+    await expect(setup.adapter.exchangeOAuthCode({ code: "code", codeVerifier: verifier })).resolves.toMatchObject({ userId, supabaseSessionId: sessionId });
+    await expect(setup.adapter.exchangeRecoveryCode({ code: "code", codeVerifier: verifier })).resolves.toMatchObject({ user: { id: userId, emailVerified: true } });
+  });
+
+  it("keeps SDK calls request-scoped and non-persistent for non-PKCE operations", async () => {
+    const setup = adapter();
     await setup.adapter.signInWithPassword({ email: "person@example.test", password: "a".repeat(12) });
-    await setup.adapter.confirmEmail({ code: "confirmation-code" });
-    await setup.adapter.startOAuth({ provider: "naver", redirectUrl: new URL("https://app.example.test/oauth") });
-    await setup.adapter.exchangeOAuthCode({ code: "oauth-code" });
     await setup.adapter.refresh("refresh-token");
     await setup.adapter.signOut(accessToken, "refresh-token");
-    await setup.adapter.requestPasswordReset("person@example.test", new URL("https://app.example.test/recovery"));
-    await setup.adapter.exchangeRecoveryCode({ code: "recovery-code" });
-    await setup.adapter.updatePassword({ accessToken, refreshToken: "refresh-token", password: "b".repeat(12) });
+    await setup.adapter.updatePassword({ accessToken, refreshToken: "refresh-token", userId, password: "b".repeat(12) });
 
-    expect(setup.factory).toHaveBeenCalledTimes(10);
-    for (const call of setup.factory.mock.calls) expect(call).toEqual(["https://project.supabase.co/", "anon-key", { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false, flowType: "pkce" }]);
-    expect(setup.subject.auth.signInWithOAuth).toHaveBeenCalledWith({ provider: "custom:naver", options: { redirectTo: "https://app.example.test/oauth", skipBrowserRedirect: true } });
-  });
-
-  it("returns only a complete verified canonical provider pair", async () => {
-    const { adapter: subject } = adapter();
-    await expect(subject.signInWithPassword({ email: "person@example.test", password: "a".repeat(12) })).resolves.toMatchObject({ accessToken, refreshToken: "refresh-token", userId, supabaseSessionId: sessionId, user: { id: userId, emailVerified: true } });
-  });
-
-  it("returns an authenticated signup only for a complete verified provider session", async () => {
-    const { adapter: subject } = adapter(client({ signUp: vi.fn(async () => ok({ session })) }));
-    await expect(subject.signUp({ email: "person@example.test", password: "a".repeat(12) }, new URL("https://app.example.test/confirm"))).resolves.toMatchObject({ status: "authenticated", tokens: { userId, supabaseSessionId: sessionId } });
-  });
-
-  it.each(["user_already_exists", "email_exists", "user_already_registered", "email_already_exists"])("returns the same verification-required signup result for %s", async (code) => {
-    const { adapter: subject } = adapter(client({ signUp: vi.fn(async () => ({ data: { session: null }, error: { code, message: "hostile provider text" } })) }));
-    await expect(subject.signUp({ email: "person@example.test", password: "a".repeat(12) }, new URL("https://app.example.test/confirm"))).resolves.toEqual({ status: "verification_required" });
-  });
-
-  it("returns verification-required rather than exposing incomplete signup sessions", async () => {
-    const { adapter: subject } = adapter(client({ signUp: vi.fn(async () => ok({ session: { ...session, refresh_token: "" } })) }));
-    await expect(subject.signUp({ email: "person@example.test", password: "a".repeat(12) }, new URL("https://app.example.test/confirm"))).resolves.toEqual({ status: "verification_required" });
-  });
-
-  it.each(["user_not_found", "email_not_found", "user_not_exist", "email_not_exists"])("accepts password reset when provider reports absent account %s", async (code) => {
-    const { adapter: subject } = adapter(client({ resetPasswordForEmail: vi.fn(async () => ({ data: null, error: { code, message: "hostile provider text" } })) }));
-    await expect(subject.requestPasswordReset("absent@example.test", new URL("https://app.example.test/recovery"))).resolves.toBeUndefined();
-  });
-
-  it("serializes the same public acknowledgements for new/existing signup and present/absent reset", async () => {
-    const context = { emailRedirectUrl: new URL("https://app.example.test/confirm"), passwordResetRedirectUrl: new URL("https://app.example.test/recovery"), now: new Date("2026-07-20T12:00:00.000Z") };
-    const noSession = { create: vi.fn() };
-    const publicResult = async (provider: InstanceType<typeof SupabaseAuthAdapter>) => new EmailAuthService(provider, noSession).signUp({ email: "person@example.test", password: "a".repeat(12) }, context);
-    const newAccount = JSON.stringify(await publicResult(adapter(client()).adapter));
-    const existing = JSON.stringify(await publicResult(adapter(client({ signUp: vi.fn(async () => ({ data: { session: null }, error: { code: "user_already_exists" } })) })).adapter));
-    const authenticated = JSON.stringify(await publicResult(adapter(client({ signUp: vi.fn(async () => ok({ session })) })).adapter));
-    const presentReset = JSON.stringify(await new EmailAuthService(adapter(client()).adapter, noSession).requestPasswordReset("person@example.test", context));
-    const absentReset = JSON.stringify(await new EmailAuthService(adapter(client({ resetPasswordForEmail: vi.fn(async () => ({ data: null, error: { code: "user_not_found" } })) })).adapter, noSession).requestPasswordReset("absent@example.test", context));
-    expect(newAccount).toBe(JSON.stringify({ accepted: true }));
-    expect(existing).toBe(newAccount); expect(authenticated).toBe(newAccount); expect(absentReset).toBe(presentReset);
-    expect(noSession.create).not.toHaveBeenCalled();
-  });
-
-  it("covers provider-id defaults and the safe primitive validation boundary", async () => {
-    const setup = adapter(client({ signInWithPassword: vi.fn(async () => []), signInWithOAuth: vi.fn(async () => ok({ url: "https://provider.example.test/authorize" })) }));
-    await expectSafeError(() => setup.adapter.signInWithPassword({ email: "person@example.test", password: "a".repeat(12) }));
-    await setup.adapter.startOAuth({ provider: "google", redirectUrl: new URL("https://app.example.test/oauth") });
-    await expectSafeError(() => setup.adapter.startOAuth({ provider: "google", redirectUrl: null as never }));
-    const defaultAdapter = new SupabaseAuthAdapter({ url: "http://localhost:54321", anonKey: "anon-key" }) as unknown as { client(): unknown };
-    expect(defaultAdapter.client()).toBeDefined();
-  });
-
-  it.each([
-    { token: `header.${Buffer.from(JSON.stringify({ session_id: "not-a-uuid" })).toString("base64url")}.signature`, email: "person@example.test", expires: nowSeconds },
-    { token: "header.A.signature", email: "person@example.test", expires: nowSeconds },
-    { token: accessToken, email: undefined, expires: nowSeconds },
-    { token: accessToken, email: "person@example.test", expires: "future" },
-  ])("fails closed for malformed JWT payload and untrusted optional fields", async ({ token, email, expires }) => {
-    const invalid = { ...session, access_token: token, expires_at: expires, user: { ...session.user, email } };
-    const { adapter: subject } = adapter(client({ signInWithPassword: vi.fn(async () => ok({ session: invalid })) }));
-    await expectSafeError(() => subject.signInWithPassword({ email: "person@example.test", password: "a".repeat(12) }), token);
-  });
-
-  it.each([
-    { ...session, access_token: "not-a-jwt" },
-    { ...session, refresh_token: "" },
-    { ...session, expires_at: nowSeconds - 7200 },
-    { ...session, user: { ...session.user, email_confirmed_at: undefined } },
-    { ...session, user: { ...session.user, id: "not-a-uuid" } },
-  ])("fails closed for malformed or unverified session material", async (invalidSession) => {
-    const { adapter: subject } = adapter(client({ signInWithPassword: vi.fn(async () => ok({ session: invalidSession })) }));
-    await expectSafeError(() => subject.signInWithPassword({ email: "person@example.test", password: "a".repeat(12) }), "person@example.test", "refresh-token");
-  });
-
-  it("maps allowlisted provider errors and never echoes hostile provider text", async () => {
-    const hostile = "raw provider response person@example.test refresh-token";
-    for (const [error, code] of [
-      [{ status: 429, message: hostile }, "AUTH_RATE_LIMITED"],
-      [{ code: "email_not_confirmed", message: hostile }, "AUTH_EMAIL_VERIFICATION_REQUIRED"],
-      [{ status: 401, message: hostile }, "AUTH_INVALID_CREDENTIALS"],
-      [{ code: "flow_state_expired", message: hostile }, "AUTH_OAUTH_TRANSACTION_INVALID"],
-      [{ status: 503, message: hostile }, "AUTH_PROVIDER_UNAVAILABLE"],
-    ] as const) {
-      const { adapter: subject } = adapter(client({ signInWithPassword: vi.fn(async () => ({ data: { session: null }, error })) }));
-      await expect(subject.signInWithPassword({ email: "person@example.test", password: "a".repeat(12) })).rejects.toMatchObject({ code, message: code });
-    }
-  });
-
-  it("rejects unsafe configuration and callback codes before creating a client", async () => {
-    expect(() => new SupabaseAuthAdapter({ url: "http://public.example.test", anonKey: "secret-key" })).toThrow(AuthProviderError);
-    expect(() => new SupabaseAuthAdapter({ url: "https://user:pass@project.supabase.co", anonKey: "secret-key" })).toThrow(AuthProviderError);
-    const setup = adapter();
-    await expectSafeError(() => setup.adapter.confirmEmail({ code: "bad\ncode" }), "bad\ncode");
-    await expectSafeError(() => setup.adapter.startOAuth({ provider: "google", redirectUrl: new URL("http://public.example.test/callback") }));
-    expect(setup.factory).not.toHaveBeenCalled();
-  });
-
-  it("validates schema-backed and strict port inputs before creating a client", async () => {
-    const setup = adapter();
-    await expectSafeError(() => setup.adapter.signUp({ email: "bad", password: "short" } as never, new URL("https://app.example.test/confirm")));
-    await expectSafeError(() => setup.adapter.signInWithPassword({ email: "bad", password: "short" } as never));
-    await expectSafeError(() => setup.adapter.requestPasswordReset("bad", new URL("https://app.example.test/recovery")));
-    await expectSafeError(() => setup.adapter.startOAuth({ provider: "unapproved" as never, redirectUrl: new URL("https://app.example.test/oauth") }));
-    await expectSafeError(() => setup.adapter.updatePassword({ accessToken, refreshToken: "refresh-token", password: "short" }));
-    expect(setup.factory).not.toHaveBeenCalled();
-  });
-
-  it("rejects malformed raw errors, whitespace credentials, and non-integer JWT claims without provider calls", async () => {
-    const malformed = adapter(client({ signUp: vi.fn(async () => ({ data: null, error: { code: 7 } })) }));
-    await expectSafeError(() => malformed.adapter.signUp({ email: "person@example.test", password: "a".repeat(12) }, new URL("https://app.example.test/confirm")));
-    const primitive = adapter(client({ signUp: vi.fn(async () => ({ data: null, error: "hostile" })) }));
-    await expectSafeError(() => primitive.adapter.signUp({ email: "person@example.test", password: "a".repeat(12) }, new URL("https://app.example.test/confirm")));
-    const noClient = adapter();
-    await expectSafeError(() => noClient.adapter.confirmEmail({ code: " code " }));
-    await expectSafeError(() => noClient.adapter.refresh(" refresh-token "));
-    expect(noClient.factory).not.toHaveBeenCalled();
-    for (const access_token of [jwt({ exp: 1.5 }), jwt({ sub: 7 })]) {
-      const { adapter: subject } = adapter(client({ signInWithPassword: vi.fn(async () => ok({ session: { ...session, access_token } })) }));
-      await expectSafeError(() => subject.signInWithPassword({ email: "person@example.test", password: "a".repeat(12) }));
+    expect(setup.factory).toHaveBeenCalledTimes(4);
+    for (const call of setup.factory.mock.calls) {
+      expect(call).toEqual(["https://project.supabase.co/", "anon-key", { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false, flowType: "pkce" }]);
     }
   });
 
   it.each([
-    { token: jwt({ sub: "123e4567-e89b-12d3-a456-426614174099" }), expires: nowSeconds, confirmed: session.user.email_confirmed_at },
-    { token: jwt({ exp: nowSeconds + 1 }), expires: nowSeconds, confirmed: session.user.email_confirmed_at },
-    { token: `!.${Buffer.from(JSON.stringify({ session_id: sessionId, sub: userId, exp: nowSeconds })).toString("base64url")}.signature`, expires: nowSeconds, confirmed: session.user.email_confirmed_at },
-    { token: jwt(), expires: nowSeconds, confirmed: "not-a-timestamp" },
-    { token: jwt(), expires: nowSeconds, confirmed: new Date(Date.now() + 60_000).toISOString() },
-  ])("rejects inconsistent JWT claims and invalid verification timestamps", async ({ token, expires, confirmed }) => {
-    const invalid = { ...session, access_token: token, expires_at: expires, user: { ...session.user, email_confirmed_at: confirmed } };
-    const { adapter: subject } = adapter(client({ signInWithPassword: vi.fn(async () => ok({ session: invalid })) }));
-    await expectSafeError(() => subject.signInWithPassword({ email: "person@example.test", password: "a".repeat(12) }), token);
+    { body: { code: "bad_code_verifier", message: "secret provider text" }, status: 400, expected: "AUTH_OAUTH_TRANSACTION_INVALID" },
+    { body: { code: "over_request_rate_limit" }, status: 429, expected: "AUTH_RATE_LIMITED" },
+    { body: { code: "unexpected" }, status: 503, expected: "AUTH_PROVIDER_UNAVAILABLE" },
+  ])("maps PKCE HTTP failures to fixed safe errors", async ({ body, status, expected }) => {
+    const setup = adapter([jsonResponse(body, status)]);
+    await expectSafeError(() => setup.adapter.exchangeOAuthCode({ code: "secret-code", codeVerifier: verifier }), expected, "secret-code", verifier, "secret provider text");
   });
 
-  it("rejects phone-only confirmation and never creates an app session", async () => {
-    const phoneConfirmed = { ...session, user: { ...session.user, email_confirmed_at: null, confirmed_at: "2026-07-20T00:00:00.000Z", phone_confirmed_at: "2026-07-20T00:00:00.000Z" } };
-    const provider = adapter(client({ signInWithPassword: vi.fn(async () => ok({ session: phoneConfirmed })) })).adapter;
-    const sessions = { create: vi.fn(async () => ({ selector: "opaque-selector", accessTokenExpiresAt: new Date(nowSeconds * 1000), absoluteExpiresAt: new Date(nowSeconds * 1000 + 86_400_000) })) };
-    const context = { emailRedirectUrl: new URL("https://app.example.test/confirm"), passwordResetRedirectUrl: new URL("https://app.example.test/recovery"), now: new Date("2026-07-20T12:00:00.000Z") };
-    await expect(new EmailAuthService(provider, sessions).signIn({ email: "person@example.test", password: "a".repeat(12) }, context)).rejects.toMatchObject({ code: "AUTH_EMAIL_VERIFICATION_REQUIRED" });
-    expect(sessions.create).not.toHaveBeenCalled();
+  it.each(["user_already_exists", "email_exists", "user_already_registered", "email_already_exists"])(
+    "preserves the signup acknowledgement for provider existence code %s",
+    async (code) => {
+      const setup = adapter([jsonResponse({ code, message: "hostile" }, 400)]);
+      await expect(setup.adapter.signUp({ email: "person@example.test", password: "a".repeat(12) }, new URL("https://app.example.test/confirm"), challenge)).resolves.toEqual({ status: "verification_required" });
+    },
+  );
+
+  it.each(["user_not_found", "email_not_found", "user_not_exist", "email_not_exists"])(
+    "preserves the recovery acknowledgement for absent-account code %s",
+    async (code) => {
+      const setup = adapter([jsonResponse({ code, message: "hostile" }, 400)]);
+      await expect(setup.adapter.requestPasswordReset("absent@example.test", new URL("https://app.example.test/recovery"), challenge)).resolves.toBeUndefined();
+    },
+  );
+
+  it("rejects malformed HTTP JSON and incomplete token material", async () => {
+    const malformedJson = new Response("not-json", { status: 200, headers: { "content-type": "application/json" } });
+    await expectSafeError(() => adapter([malformedJson]).adapter.exchangeOAuthCode({ code: "code", codeVerifier: verifier }), "AUTH_PROVIDER_UNAVAILABLE");
+    await expectSafeError(() => adapter([jsonResponse({ ...session, refresh_token: "" })]).adapter.exchangeOAuthCode({ code: "code", codeVerifier: verifier }), "AUTH_PROVIDER_UNAVAILABLE", accessToken);
+    await expectSafeError(() => adapter([jsonResponse([])]).adapter.requestPasswordReset("person@example.test", new URL("https://app.example.test/recovery"), challenge), "AUTH_PROVIDER_UNAVAILABLE");
   });
 
-  it("maps update failures safely after setting only a fresh in-memory provider session", async () => {
-    const hostile = "password and access token must not escape";
-    const { adapter: subject, subject: fake } = adapter(client({ updateUser: vi.fn(async () => ({ data: null, error: { status: 503, message: hostile } })) }));
-    await expectSafeError(() => subject.updatePassword({ accessToken, refreshToken: "refresh-token", password: "b".repeat(12) }), hostile, accessToken);
-    expect(fake.auth.setSession).toHaveBeenCalledWith({ access_token: accessToken, refresh_token: "refresh-token" });
+  it("rejects unsafe configuration, redirects, challenges, verifiers, and providers before side effects", async () => {
+    expect(() => new SupabaseAuthAdapter({ url: "http://public.example.test", anonKey: "anon-key" })).toThrow(AuthProviderError);
+    expect(() => new SupabaseAuthAdapter({ url: "https://project.supabase.co/path", anonKey: "anon-key" })).toThrow(AuthProviderError);
+    expect(() => new SupabaseAuthAdapter({ url: "https://project.supabase.co?secret=1", anonKey: "anon-key" })).toThrow(AuthProviderError);
+    const setup = adapter();
+    await expectSafeError(() => setup.adapter.startOAuth({ provider: "github" as never, redirectUrl: new URL("https://app.example.test/oauth"), codeChallenge: challenge }), "AUTH_OAUTH_TRANSACTION_INVALID");
+    await expectSafeError(() => setup.adapter.startOAuth({ provider: "google", redirectUrl: new URL("http://public.example.test/oauth"), codeChallenge: challenge }), "AUTH_PROVIDER_UNAVAILABLE");
+    await expectSafeError(() => setup.adapter.startOAuth({ provider: "google", redirectUrl: new URL("https://app.example.test/oauth"), codeChallenge: "bad" }), "AUTH_PROVIDER_UNAVAILABLE");
+    await expectSafeError(() => setup.adapter.confirmEmail({ code: "bad\ncode", codeVerifier: verifier }), "AUTH_OAUTH_TRANSACTION_INVALID", "bad\ncode");
+    await expectSafeError(() => setup.adapter.confirmEmail({ code: "code", codeVerifier: "bad" }), "AUTH_OAUTH_TRANSACTION_INVALID");
+    expect(setup.factory).not.toHaveBeenCalled();
+    expect(setup.fetcher).not.toHaveBeenCalled();
   });
 
-  it("maps non-provider throws to the fixed unavailable error", async () => {
-    const { adapter: subject } = adapter(client({ signInWithPassword: vi.fn(async () => { throw new Error("hostile transport detail"); }) }));
-    await expectSafeError(() => subject.signInWithPassword({ email: "person@example.test", password: "a".repeat(12) }), "hostile transport detail");
+  it("allows an explicit loopback Supabase authorize endpoint for local development", async () => {
+    const subject = new SupabaseAuthAdapter({ url: "http://localhost:54321", anonKey: "anon-key" });
+    await expect(subject.startOAuth({ provider: "google", redirectUrl: new URL("http://localhost:3000/oauth"), codeChallenge: challenge })).resolves.toMatchObject({
+      authorizationUrl: new URL(`http://localhost:54321/auth/v1/authorize?provider=google&redirect_to=http%3A%2F%2Flocalhost%3A3000%2Foauth&code_challenge=${challenge}&code_challenge_method=s256`),
+    });
   });
 
-  it("safely maps provider errors even when no raw message exists", async () => {
-    const { adapter: subject } = adapter(client({ signInWithPassword: vi.fn(async () => ({ data: null, error: { status: 503 } })) }));
-    await expectSafeError(() => subject.signInWithPassword({ email: "person@example.test", password: "a".repeat(12) }));
+  it("rejects a provider password update when the recovered user does not match", async () => {
+    const setup = adapter();
+    await expectSafeError(() => setup.adapter.updatePassword({ accessToken, refreshToken: "refresh-token", userId: "123e4567-e89b-12d3-a456-426614174099", password: "b".repeat(12) }), "AUTH_OAUTH_TRANSACTION_INVALID", accessToken);
+    expect(setup.sdk.auth.updateUser).not.toHaveBeenCalled();
+  });
+
+  it("maps SDK provider errors without returning provider text or token values", async () => {
+    const setup = adapter([], client({ signInWithPassword: vi.fn(async () => ({ data: null, error: { status: 401, message: "hostile refresh-token" } })) }));
+    await expectSafeError(() => setup.adapter.signInWithPassword({ email: "person@example.test", password: "a".repeat(12) }), "AUTH_INVALID_CREDENTIALS", "hostile", "refresh-token");
   });
 });

@@ -1,30 +1,24 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
-import { SessionService } from "../session/session-service.js";
+import { decryptToken, type TokenEnvelope, type TokenKeyring } from "../security/token-envelope.js";
+import { AuthProviderError } from "./auth-provider-port.js";
 
 vi.mock("server-only", () => ({}));
-
-const authModule = await import("./email-auth-service.js").catch(() => ({} as Record<string, unknown>));
-const fakeModule = await import("./fake-auth-provider.js").catch(() => ({} as Record<string, unknown>));
-
-const EmailAuthService = authModule.EmailAuthService as (new (provider: unknown, sessions: unknown) => {
+const module = await import("./email-auth-service.js").catch(() => ({} as Record<string, unknown>));
+const EmailAuthService = module.EmailAuthService as (new (...args: unknown[]) => {
   signUp(input: unknown, context: unknown): Promise<unknown>;
   signIn(input: unknown, context: unknown): Promise<unknown>;
   confirmEmail(input: unknown, context: unknown): Promise<unknown>;
-  requestPasswordReset(email: string, context: unknown): Promise<unknown>;
-}) | undefined;
-const EmailAuthServiceError = authModule.EmailAuthServiceError as (new (code: string) => Error & { code: string }) | undefined;
-const FakeAuthProvider = fakeModule.FakeAuthProvider as (new () => {
-  signUpResult: unknown;
-  signInResult: unknown;
-  confirmationResult: unknown;
-  failure: Error | null;
-  calls: { signUp: unknown[]; signInWithPassword: unknown[]; requestPasswordReset: unknown[]; confirmEmail: unknown[] };
 }) | undefined;
 
 const now = new Date("2026-07-20T12:00:00.000Z");
-const userId = "123e4567-e89b-12d3-a456-426614174001";
-const providerSessionId = "123e4567-e89b-12d3-a456-426614174002";
+const transactionId = "123e4567-e89b-12d3-a456-426614174020";
+const userId = "123e4567-e89b-12d3-a456-426614174021";
+const providerSessionId = "123e4567-e89b-12d3-a456-426614174022";
+const interaction = Buffer.alloc(32, 5).toString("base64url");
+const otherInteraction = Buffer.alloc(32, 6).toString("base64url");
+const verifier = "e".repeat(43);
+const keyring: TokenKeyring = { currentKeyId: "current", keys: new Map([["current", randomBytes(32)]]) };
 const tokens = {
   accessToken: "provider-access-token",
   refreshToken: "provider-refresh-token",
@@ -33,149 +27,159 @@ const tokens = {
   accessTokenExpiresAt: new Date(now.getTime() + 60_000),
   user: { id: userId, email: "person@example.test", emailVerified: true },
 };
-const context = {
-  emailRedirectUrl: new URL("https://app.example.test/auth/confirm"),
-  passwordResetRedirectUrl: new URL("https://app.example.test/auth/recovery"),
-  now,
-};
 const validInput = { email: "person@example.test", password: "a".repeat(12) };
 
-function sessionCreator() {
-  return { create: vi.fn(async () => ({ selector: "opaque-selector", sessionId: "123e4567-e89b-12d3-a456-426614174003", userId, accessTokenExpiresAt: tokens.accessTokenExpiresAt, absoluteExpiresAt: new Date(now.getTime() + 30 * 86_400_000) })) };
+type EmailRecord = {
+  id: string;
+  interactionHash: Uint8Array;
+  encryptedPkceVerifier: TokenEnvelope;
+  createdAt: Date;
+  expiresAt: Date;
+  consumedAt: Date | null;
+};
+
+class EmailRepository {
+  public record: EmailRecord | null = null;
+  public events: string[] = [];
+
+  public async createEmailConfirmationTransaction(record: EmailRecord): Promise<void> {
+    this.events.push("create");
+    this.record = { ...record, interactionHash: Uint8Array.from(record.interactionHash) };
+  }
+
+  public async claimEmailConfirmationTransaction(interactionHash: Uint8Array, claimedAt: Date): Promise<EmailRecord | null> {
+    this.events.push("claim");
+    const record = this.record;
+    if (record === null || record.consumedAt !== null || record.expiresAt.getTime() <= claimedAt.getTime() || !Buffer.from(record.interactionHash).equals(Buffer.from(interactionHash))) return null;
+    this.record = { ...record, consumedAt: new Date(claimedAt) };
+    return this.record;
+  }
 }
 
-describe("EmailAuthService", () => {
-  it("does not create an app session before email verification", async () => {
-    expect(EmailAuthService).toBeTypeOf("function");
-    expect(FakeAuthProvider).toBeTypeOf("function");
-    const provider = new FakeAuthProvider!();
-    const sessions = sessionCreator();
-    const service = new EmailAuthService!(provider, sessions);
+function setup() {
+  const repository = new EmailRepository();
+  const provider = {
+    signUpResult: { status: "verification_required" } as unknown,
+    signInResult: tokens as unknown,
+    confirmationResult: tokens as unknown,
+    failure: null as AuthProviderError | null,
+    calls: { signUp: [] as unknown[], signIn: [] as unknown[], confirm: [] as unknown[] },
+    signUp: vi.fn(async (...args: unknown[]) => {
+      repository.events.push("provider-signup");
+      provider.calls.signUp.push(args);
+      if (provider.failure) throw provider.failure;
+      return provider.signUpResult;
+    }),
+    signInWithPassword: vi.fn(async (input: unknown) => {
+      provider.calls.signIn.push(input);
+      if (provider.failure) throw provider.failure;
+      return provider.signInResult;
+    }),
+    confirmEmail: vi.fn(async (input: unknown) => {
+      repository.events.push("provider-confirm");
+      provider.calls.confirm.push(input);
+      if (provider.failure) throw provider.failure;
+      return provider.confirmationResult;
+    }),
+  };
+  const sessions = {
+    create: vi.fn(async () => {
+      repository.events.push("session");
+      return { selector: "opaque-session-selector", accessTokenExpiresAt: tokens.accessTokenExpiresAt, absoluteExpiresAt: new Date(now.getTime() + 86_400_000) };
+    }),
+  };
+  expect(EmailAuthService).toBeTypeOf("function");
+  const service = new EmailAuthService!(provider, sessions, repository, keyring, () => transactionId, () => verifier);
+  const context = {
+    emailRedirectUrl: new URL("https://app.example.test/auth/confirm"),
+    passwordResetRedirectUrl: new URL("https://app.example.test/auth/recovery"),
+    interactionSelector: interaction,
+    now,
+  };
+  return { repository, provider, sessions, service, context };
+}
 
-    provider.signInResult = { ...tokens, user: { ...tokens.user, emailVerified: false } };
-    await expect(service.signIn(validInput, context)).rejects.toMatchObject({ code: "AUTH_EMAIL_VERIFICATION_REQUIRED" });
-    expect(sessions.create).not.toHaveBeenCalled();
+describe("EmailAuthService PKCE confirmation continuity", () => {
+  it("stores an interaction-bound encrypted verifier before sending only its challenge", async () => {
+    const subject = setup();
+    await expect(subject.service.signUp(validInput, subject.context)).resolves.toEqual({ accepted: true });
+    const record = subject.repository.record;
+    expect(record?.interactionHash).toEqual(Uint8Array.from(createHash("sha256").update(interaction).digest()));
+    expect(record?.expiresAt.getTime()).toBe(now.getTime() + 15 * 60_000);
+    expect(decryptToken(record?.encryptedPkceVerifier, { recordId: transactionId, tokenKind: "pkce" }, keyring)).toBe(verifier);
+    expect(subject.repository.events).toEqual(["create", "provider-signup"]);
+    const args = subject.provider.calls.signUp[0] as [unknown, URL, string];
+    expect(args[1].toString()).toBe("https://app.example.test/auth/confirm");
+    expect(args[2]).toBe(createHash("sha256").update(verifier, "ascii").digest("base64url"));
+    const serialized = JSON.stringify({ record, result: await subject.service.signUp(validInput, { ...subject.context, interactionSelector: otherInteraction }) });
+    for (const secret of [interaction, verifier]) expect(serialized).not.toContain(secret);
   });
 
-  it("returns only opaque session metadata after verified sign in", async () => {
-    const provider = new FakeAuthProvider!();
-    const sessions = sessionCreator();
-    const service = new EmailAuthService!(provider, sessions);
-    provider.signInResult = tokens;
-
-    const result = await service.signIn(validInput, context);
+  it("claims before exchanging confirmation code and returns only opaque metadata", async () => {
+    const subject = setup();
+    await subject.service.signUp(validInput, subject.context);
+    subject.repository.events.length = 0;
+    const result = await subject.service.confirmEmail({ code: "confirmation-code" }, { ...subject.context, now: new Date(now.getTime() + 1_000) });
+    expect(subject.repository.events).toEqual(["claim", "provider-confirm", "session"]);
+    expect(subject.provider.calls.confirm).toEqual([{ code: "confirmation-code", codeVerifier: verifier }]);
+    expect(result).toMatchObject({ selector: "opaque-session-selector", user: tokens.user });
     const serialized = JSON.stringify(result);
-    expect(sessions.create).toHaveBeenCalledTimes(1);
-    expect(result).toMatchObject({ selector: "opaque-selector", user: tokens.user, accessTokenExpiresAt: tokens.accessTokenExpiresAt });
-    for (const secret of [tokens.accessToken, tokens.refreshToken, providerSessionId]) expect(serialized).not.toContain(secret);
+    for (const secret of [verifier, "confirmation-code", tokens.accessToken, tokens.refreshToken]) expect(serialized).not.toContain(secret);
   });
 
-  it("creates a real encrypted opaque session without serializing provider tokens", async () => {
-    const provider = new FakeAuthProvider!();
-    provider.signInResult = tokens;
-    const repository = { record: null as unknown, async create(record: unknown) { this.record = record; } };
-    const realSessions = new SessionService(repository as never, { currentKeyId: "current", keys: new Map([["current", randomBytes(32)]]) }, async () => tokens, () => "123e4567-e89b-12d3-a456-426614174003");
-
-    const result = await new EmailAuthService!(provider, realSessions).signIn(validInput, context) as { selector: string };
-    const serialized = JSON.stringify(result);
-    expect(serialized).not.toContain(tokens.accessToken);
-    expect(serialized).not.toContain(tokens.refreshToken);
-    expect(serialized).not.toContain(providerSessionId);
-    expect(JSON.stringify(repository.record)).not.toContain(tokens.accessToken);
-    expect(JSON.stringify(repository.record)).not.toContain(tokens.refreshToken);
-    expect(result.selector).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+  it.each([
+    ["wrong browser", { interactionSelector: otherInteraction, now: new Date(now.getTime() + 1_000) }],
+    ["expired", { interactionSelector: interaction, now: new Date(now.getTime() + 15 * 60_000) }],
+  ])("rejects %s before provider exchange", async (_label, callbackContext) => {
+    const subject = setup();
+    await subject.service.signUp(validInput, subject.context);
+    await expect(subject.service.confirmEmail({ code: "code" }, { ...subject.context, ...callbackContext })).rejects.toMatchObject({ code: "AUTH_OAUTH_TRANSACTION_INVALID" });
+    expect(subject.provider.confirmEmail).not.toHaveBeenCalled();
   });
 
-  it("acknowledges signup without creating a session until verification", async () => {
-    const provider = new FakeAuthProvider!();
-    const sessions = sessionCreator();
-    const service = new EmailAuthService!(provider, sessions);
-    provider.signUpResult = { status: "verification_required" };
+  it("rejects replay and leaves a provider-failed claim unusable", async () => {
+    const replay = setup();
+    await replay.service.signUp(validInput, replay.context);
+    await replay.service.confirmEmail({ code: "code" }, { ...replay.context, now: new Date(now.getTime() + 1_000) });
+    await expect(replay.service.confirmEmail({ code: "code" }, { ...replay.context, now: new Date(now.getTime() + 2_000) })).rejects.toMatchObject({ code: "AUTH_OAUTH_TRANSACTION_INVALID" });
+    expect(replay.provider.confirmEmail).toHaveBeenCalledTimes(1);
 
-    await expect(service.signUp(validInput, context)).resolves.toEqual({ accepted: true });
-    expect(sessions.create).not.toHaveBeenCalled();
+    const failed = setup();
+    await failed.service.signUp(validInput, failed.context);
+    failed.provider.failure = new AuthProviderError("AUTH_PROVIDER_UNAVAILABLE");
+    await expect(failed.service.confirmEmail({ code: "secret-code" }, { ...failed.context, now: new Date(now.getTime() + 1_000) })).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    await expect(failed.service.confirmEmail({ code: "secret-code" }, { ...failed.context, now: new Date(now.getTime() + 2_000) })).rejects.toMatchObject({ code: "AUTH_OAUTH_TRANSACTION_INVALID" });
+    expect(failed.provider.confirmEmail).toHaveBeenCalledTimes(1);
   });
 
-  it("returns the same reset response for present and absent accounts", async () => {
-    const provider = new FakeAuthProvider!();
-    const service = new EmailAuthService!(provider, sessionCreator());
-
-    const present = await service.requestPasswordReset("present@example.test", context);
-    const absent = await service.requestPasswordReset("absent@example.test", context);
-    expect(present).toEqual(absent);
-    expect(present).toEqual({ accepted: true });
+  it("returns identical signup acknowledgements for new, existing, and unexpected authenticated outcomes", async () => {
+    const subject = setup();
+    const fresh = JSON.stringify(await subject.service.signUp(validInput, subject.context));
+    subject.provider.failure = new AuthProviderError("AUTH_INVALID_CREDENTIALS");
+    const existing = JSON.stringify(await subject.service.signUp(validInput, { ...subject.context, interactionSelector: otherInteraction }));
+    subject.provider.failure = null;
+    subject.provider.signUpResult = { status: "authenticated", tokens };
+    const authenticated = JSON.stringify(await subject.service.signUp(validInput, { ...subject.context, interactionSelector: Buffer.alloc(32, 7).toString("base64url") }));
+    expect(fresh).toBe(JSON.stringify({ accepted: true }));
+    expect(existing).toBe(fresh);
+    expect(authenticated).toBe(fresh);
+    expect(subject.sessions.create).not.toHaveBeenCalled();
   });
 
-  it("creates one opaque session after a verified confirmation", async () => {
-    const provider = new FakeAuthProvider!();
-    const sessions = sessionCreator();
-    const service = new EmailAuthService!(provider, sessions);
-    provider.confirmationResult = tokens;
-
-    await expect(service.confirmEmail({ code: "server-only-code" }, context)).resolves.toMatchObject({ selector: "opaque-selector", user: tokens.user });
-    expect(provider.calls.confirmEmail).toEqual([{ code: "server-only-code" }]);
-    expect(sessions.create).toHaveBeenCalledTimes(1);
+  it("keeps verified password sign-in behavior and rejects unverified users", async () => {
+    const subject = setup();
+    await expect(subject.service.signIn(validInput, subject.context)).resolves.toMatchObject({ selector: "opaque-session-selector", user: tokens.user });
+    subject.provider.signInResult = { ...tokens, user: { ...tokens.user, emailVerified: false } };
+    await expect(subject.service.signIn(validInput, subject.context)).rejects.toMatchObject({ code: "AUTH_EMAIL_VERIFICATION_REQUIRED" });
   });
 
-  it("rejects a hostile confirmation code before calling the provider", async () => {
-    const provider = new FakeAuthProvider!();
-    const service = new EmailAuthService!(provider, sessionCreator());
-    await expect(service.confirmEmail({ code: "bad\ncode" }, context)).rejects.toMatchObject({ code: "AUTH_OAUTH_TRANSACTION_INVALID" });
-    expect(provider.calls.confirmEmail).toHaveLength(0);
-  });
-
-  it("keeps signup acknowledgement identical for authenticated and existing-account outcomes", async () => {
-    const provider = new FakeAuthProvider!();
-    const sessions = sessionCreator();
-    const service = new EmailAuthService!(provider, sessions);
-    provider.signUpResult = { status: "authenticated", tokens };
-    const authenticated = JSON.stringify(await service.signUp(validInput, context));
-    provider.failure = new (await import("./auth-provider-port.js")).AuthProviderError("AUTH_INVALID_CREDENTIALS");
-    const existing = JSON.stringify(await service.signUp(validInput, context));
-    expect(existing).toBe(authenticated);
-    expect(existing).toBe(JSON.stringify({ accepted: true }));
-    expect(sessions.create).not.toHaveBeenCalled();
-  });
-
-  it("maps provider and session failures without echoing secrets", async () => {
-    const provider = new FakeAuthProvider!();
-    const sessions = sessionCreator();
-    const service = new EmailAuthService!(provider, sessions);
-    provider.failure = new (await import("./auth-provider-port.js")).AuthProviderError("AUTH_RATE_LIMITED");
-    await expect(service.signUp(validInput, context)).rejects.toMatchObject({ code: "AUTH_RATE_LIMITED", message: "AUTH_RATE_LIMITED" });
-
-    provider.failure = null;
-    provider.signInResult = { ...tokens, user: { ...tokens.user, id: "123e4567-e89b-12d3-a456-426614174099" } };
-    await expect(service.signIn(validInput, context)).rejects.toMatchObject({ code: "AUTH_EMAIL_VERIFICATION_REQUIRED" });
-    expect(sessions.create).not.toHaveBeenCalled();
-  });
-
-  it("rejects invalid context and reset input before invoking the provider", async () => {
-    const provider = new FakeAuthProvider!();
-    const service = new EmailAuthService!(provider, sessionCreator());
-    const badContext = { ...context, now: new Date("invalid") };
-    await expect(service.signUp(validInput, badContext)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
-    await expect(service.signUp({ email: "bad", password: "short" }, context)).rejects.toMatchObject({ code: "AUTH_INVALID_CREDENTIALS" });
-    await expect(service.requestPasswordReset("bad", context)).rejects.toMatchObject({ code: "AUTH_INVALID_CREDENTIALS" });
-    expect(provider.calls.signUp).toHaveLength(0);
-    expect(provider.calls.requestPasswordReset).toHaveLength(0);
-  });
-
-  it("accepts explicit local development callback URLs and safely maps unexpected session errors", async () => {
-    const provider = new FakeAuthProvider!();
-    const sessions = { create: vi.fn(async () => { throw new Error("session secret"); }) };
-    const localContext = { ...context, emailRedirectUrl: new URL("http://localhost:3000/confirm"), passwordResetRedirectUrl: new URL("http://localhost:3000/recovery") };
-    await expect(new EmailAuthService!(provider, sessions).signUp(validInput, localContext)).resolves.toEqual({ accepted: true });
-    provider.signInResult = tokens;
-    await expect(new EmailAuthService!(provider, sessions).signIn(validInput, localContext)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", message: "AUTH_PROVIDER_UNAVAILABLE" });
-  });
-
-  it("rejects invalid input before provider calls and never echoes it", async () => {
-    const provider = new FakeAuthProvider!();
-    const service = new EmailAuthService!(provider, sessionCreator());
-    await expect(service.signIn({ email: "secret@example.test", password: "short", extra: true }, context)).rejects.toSatisfy((error: unknown) =>
-      error instanceof EmailAuthServiceError! && !error.message.includes("secret@example.test"),
-    );
-    expect(provider.calls.signInWithPassword).toHaveLength(0);
+  it("rejects invalid context and callback input before persistence or provider calls", async () => {
+    const subject = setup();
+    await expect(subject.service.signUp(validInput, { ...subject.context, interactionSelector: "bad" })).rejects.toMatchObject({ code: "AUTH_OAUTH_TRANSACTION_INVALID" });
+    await expect(subject.service.signUp(validInput, { ...subject.context, now: new Date("invalid") })).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    await expect(subject.service.confirmEmail({ code: "bad\ncode" }, subject.context)).rejects.toMatchObject({ code: "AUTH_OAUTH_TRANSACTION_INVALID" });
+    expect(subject.repository.record).toBeNull();
+    expect(subject.provider.signUp).not.toHaveBeenCalled();
+    expect(subject.provider.confirmEmail).not.toHaveBeenCalled();
   });
 });

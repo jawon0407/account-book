@@ -62,7 +62,7 @@ export const oauthTransactions = appPrivate.table(
     check("oauth_transactions_state_hash_length", sql`octet_length(${table.stateHash}) = 32`),
     check("oauth_transactions_interaction_hash_length", sql`octet_length(${table.interactionHash}) = 32`),
     check("oauth_transactions_provider", sql`${table.provider} in ('google', 'kakao', 'naver')`),
-    check("oauth_transactions_return_path", sql`${table.returnPath} like '/%' and ${table.returnPath} not like '//%' and position(chr(92) in ${table.returnPath}) = 0 and char_length(${table.returnPath}) between 1 and 2048`),
+    check("oauth_transactions_return_path", sql`${table.returnPath} in ('/app', '/settings/security')`),
     check("oauth_transactions_expiry", sql`${table.expiresAt} > ${table.createdAt}`),
   ],
 );
@@ -72,15 +72,41 @@ export const authRecoveryTransactions = appPrivate.table(
   {
     id: uuid("id").primaryKey(),
     interactionHash: bytea("interaction_hash").notNull().unique(),
-    userId: uuid("user_id").notNull(),
-    encryptedRecoveryToken: jsonb("encrypted_recovery_token").notNull(),
+    encryptedPkceVerifier: jsonb("encrypted_pkce_verifier"),
+    userId: uuid("user_id"),
+    encryptedRecoveryToken: jsonb("encrypted_recovery_token"),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
     expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    exchangeClaimedAt: timestamp("exchange_claimed_at", { withTimezone: true }),
+    exchangedAt: timestamp("exchanged_at", { withTimezone: true }),
+    passwordUpdateClaimedAt: timestamp("password_update_claimed_at", { withTimezone: true }),
     consumedAt: timestamp("consumed_at", { withTimezone: true }),
   },
   (table) => [
     check("auth_recovery_transactions_interaction_hash_length", sql`octet_length(${table.interactionHash}) = 32`),
     check("auth_recovery_transactions_expiry", sql`${table.expiresAt} > ${table.createdAt}`),
+    check("auth_recovery_transactions_stage", sql`(
+      (${table.encryptedPkceVerifier} is not null and ${table.userId} is null and ${table.encryptedRecoveryToken} is null and ${table.exchangedAt} is null and ${table.passwordUpdateClaimedAt} is null and ${table.consumedAt} is null)
+      or
+      (${table.encryptedPkceVerifier} is null and ${table.userId} is not null and ${table.encryptedRecoveryToken} is not null and ${table.exchangeClaimedAt} is not null and ${table.exchangedAt} is not null and ((${table.passwordUpdateClaimedAt} is null and ${table.consumedAt} is null) or ${table.passwordUpdateClaimedAt} is not null))
+    )`),
+    check("auth_recovery_transactions_stage_order", sql`(${table.exchangeClaimedAt} is null or ${table.exchangeClaimedAt} >= ${table.createdAt}) and (${table.exchangedAt} is null or ${table.exchangedAt} >= ${table.exchangeClaimedAt}) and (${table.passwordUpdateClaimedAt} is null or ${table.passwordUpdateClaimedAt} >= ${table.exchangedAt}) and (${table.consumedAt} is null or (${table.passwordUpdateClaimedAt} is not null and ${table.consumedAt} >= ${table.passwordUpdateClaimedAt}))`),
+  ],
+);
+
+export const emailConfirmationTransactions = appPrivate.table(
+  "email_confirmation_transactions",
+  {
+    id: uuid("id").primaryKey(),
+    interactionHash: bytea("interaction_hash").notNull().unique(),
+    encryptedPkceVerifier: jsonb("encrypted_pkce_verifier").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    consumedAt: timestamp("consumed_at", { withTimezone: true }),
+  },
+  (table) => [
+    check("email_confirmation_transactions_interaction_hash_length", sql`octet_length(${table.interactionHash}) = 32`),
+    check("email_confirmation_transactions_expiry", sql`${table.expiresAt} > ${table.createdAt}`),
   ],
 );
 

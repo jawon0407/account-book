@@ -13,6 +13,15 @@ const PostgresAuthRepository = repositoryModule.PostgresAuthRepository as
       revokeBySelectorHash(hash: Uint8Array, now: Date): Promise<boolean>;
       revokeAllForUser(userId: string, now: Date): Promise<number>;
       markRevocationPending(sessionId: string, now: Date): Promise<void>;
+      createOAuthTransaction(input: Record<string, unknown>): Promise<void>;
+      claimOAuthTransaction(input: Record<string, unknown>): Promise<unknown>;
+      createEmailConfirmationTransaction(input: Record<string, unknown>): Promise<void>;
+      claimEmailConfirmationTransaction(hash: Uint8Array, now: Date): Promise<unknown>;
+      createRecoveryTransaction(input: Record<string, unknown>): Promise<void>;
+      claimRecoveryExchange(hash: Uint8Array, now: Date): Promise<unknown>;
+      promoteRecoveryExchange(input: Record<string, unknown>): Promise<boolean>;
+      claimRecoveryPasswordUpdate(hash: Uint8Array, now: Date): Promise<unknown>;
+      consumeRecoveryAndRevokeSessions(input: Record<string, unknown>): Promise<boolean>;
     })
   | undefined;
 
@@ -42,22 +51,26 @@ function session(overrides: Record<string, unknown> = {}): Record<string, unknow
 }
 
 class FakeDatabase {
-  public readonly calls: Array<{ kind: string; values?: Record<string, unknown>; predicates?: unknown }> = [];
+  public readonly calls: Array<{ kind: string; table?: string | undefined; values?: Record<string, unknown>; predicates?: unknown }> = [];
   public affectedRows: unknown[] = [{}];
   public rows: unknown[] = [];
 
-  public insert(): { values: (values: Record<string, unknown>) => Promise<void> } {
-    return { values: async (values) => { this.calls.push({ kind: "insert", values }); } };
+  public insert(table?: object): { values: (values: Record<string, unknown>) => Promise<void> } {
+    return { values: async (values) => { this.calls.push({ kind: "insert", table: table?.[Symbol.for("drizzle:Name") as never] as string | undefined, values }); } };
   }
 
   public select(): { from: () => { where: (predicates: unknown) => { limit: () => Promise<unknown[]> } } } {
     return { from: () => ({ where: (predicates) => ({ limit: async () => { this.calls.push({ kind: "select", predicates }); return this.rows; } }) }) };
   }
 
-  public update(): { set: (values: Record<string, unknown>) => { where: (predicates: unknown) => { returning: () => Promise<unknown[]> } } } {
+  public update(table?: object): { set: (values: Record<string, unknown>) => { where: (predicates: unknown) => { returning: () => Promise<unknown[]> } } } {
     return {
-      set: (values) => ({ where: (predicates) => ({ returning: async () => { this.calls.push({ kind: "update", values, predicates }); return this.affectedRows; } }) }),
+      set: (values) => ({ where: (predicates) => ({ returning: async () => { this.calls.push({ kind: "update", table: table?.[Symbol.for("drizzle:Name") as never] as string | undefined, values, predicates }); return this.affectedRows; } }) }),
     };
+  }
+
+  public async transaction<T>(operation: (transaction: FakeDatabase) => Promise<T>): Promise<T> {
+    return operation(this);
   }
 }
 
@@ -211,5 +224,112 @@ describe("PostgresAuthRepository", () => {
     const { database, repository } = subject();
     database.rows = [row];
     await expect(repository.findActiveBySelectorHash(randomBytes(32), now)).resolves.toBeNull();
+  });
+
+  it("claims OAuth with one conditional update over every binding predicate", async () => {
+    const { database, repository } = subject();
+    const stateHash = randomBytes(32);
+    const interactionHash = randomBytes(32);
+    database.affectedRows = [{
+      id,
+      stateHash,
+      interactionHash,
+      provider: "google",
+      encryptedPkceVerifier: envelope,
+      returnPath: "/app",
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + 600_000),
+      consumedAt: now,
+    }];
+    await expect(repository.claimOAuthTransaction({ provider: "google", stateHash, interactionHash, now })).resolves.toMatchObject({ id, consumedAt: now });
+    expect(database.calls).toHaveLength(1);
+    expect(database.calls[0]).toMatchObject({ kind: "update", table: "oauth_transactions", values: { consumedAt: now } });
+    const statement = query(database.calls[0]?.predicates).sql;
+    for (const fragment of ['"provider" =', '"state_hash" =', '"interaction_hash" =', '"consumed_at" is null', '"expires_at" >']) expect(statement).toContain(fragment);
+    expect(statement).not.toContain(" or ");
+
+    database.affectedRows = [{}];
+    await expect(repository.claimOAuthTransaction({ provider: "google", stateHash, interactionHash, now })).resolves.toBeNull();
+    await expect(repository.claimOAuthTransaction({ provider: "google", stateHash: randomBytes(31), interactionHash, now })).resolves.toBeNull();
+    expect(database.calls).toHaveLength(2);
+  });
+
+  it("claims email confirmation with one live interaction-bound update", async () => {
+    const { database, repository } = subject();
+    const interactionHash = randomBytes(32);
+    database.affectedRows = [{ id, interactionHash, encryptedPkceVerifier: envelope, createdAt: now, expiresAt: new Date(now.getTime() + 900_000), consumedAt: now }];
+    await expect(repository.claimEmailConfirmationTransaction(interactionHash, now)).resolves.toMatchObject({ id, consumedAt: now });
+    const call = database.calls[0];
+    expect(call).toMatchObject({ kind: "update", table: "email_confirmation_transactions", values: { consumedAt: now } });
+    const statement = query(call?.predicates).sql;
+    expect(statement).toContain('"interaction_hash" =');
+    expect(statement).toContain('"consumed_at" is null');
+    expect(statement).toContain('"expires_at" >');
+    expect(statement).not.toContain(" or ");
+  });
+
+  it("claims and promotes recovery exchange with auditable single-statement CAS predicates", async () => {
+    const { database, repository } = subject();
+    const interactionHash = randomBytes(32);
+    const pending = {
+      id,
+      interactionHash,
+      encryptedPkceVerifier: envelope,
+      userId: null,
+      encryptedRecoveryToken: null,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + 900_000),
+      exchangeClaimedAt: now,
+      exchangedAt: null,
+      passwordUpdateClaimedAt: null,
+      consumedAt: null,
+    };
+    database.affectedRows = [pending];
+    await expect(repository.claimRecoveryExchange(interactionHash, now)).resolves.toMatchObject({ id, exchangeClaimedAt: now });
+    const claim = database.calls[0];
+    expect(claim).toMatchObject({ kind: "update", table: "auth_recovery_transactions", values: { exchangeClaimedAt: now } });
+    const claimSql = query(claim?.predicates).sql;
+    for (const fragment of ['"interaction_hash" =', '"encrypted_pkce_verifier" is not null', '"user_id" is null', '"encrypted_recovery_token" is null', '"exchange_claimed_at" is null', '"exchanged_at" is null', '"password_update_claimed_at" is null', '"consumed_at" is null', '"expires_at" >']) expect(claimSql).toContain(fragment);
+
+    database.affectedRows = [{}];
+    await expect(repository.promoteRecoveryExchange({ transactionId: id, expectedExchangeClaimedAt: now, userId, encryptedRecoveryToken: envelope, now })).resolves.toBe(true);
+    const promote = database.calls[1];
+    expect(promote).toMatchObject({ kind: "update", table: "auth_recovery_transactions", values: { encryptedPkceVerifier: null, userId, encryptedRecoveryToken: envelope, exchangedAt: now } });
+    const promoteSql = query(promote?.predicates).sql;
+    for (const fragment of ['"id" =', '"exchange_claimed_at" =', '"encrypted_pkce_verifier" is not null', '"user_id" is null', '"encrypted_recovery_token" is null', '"exchanged_at" is null', '"consumed_at" is null', '"expires_at" >']) expect(promoteSql).toContain(fragment);
+  });
+
+  it("claims password update once and atomically consumes it with local session revocation", async () => {
+    const { database, repository } = subject();
+    const interactionHash = randomBytes(32);
+    const exchanged = {
+      id,
+      interactionHash,
+      encryptedPkceVerifier: null,
+      userId,
+      encryptedRecoveryToken: envelope,
+      createdAt: now,
+      expiresAt: new Date(now.getTime() + 900_000),
+      exchangeClaimedAt: now,
+      exchangedAt: now,
+      passwordUpdateClaimedAt: now,
+      consumedAt: null,
+    };
+    database.affectedRows = [exchanged];
+    await expect(repository.claimRecoveryPasswordUpdate(interactionHash, now)).resolves.toMatchObject({ id, passwordUpdateClaimedAt: now });
+    const claimSql = query(database.calls[0]?.predicates).sql;
+    for (const fragment of ['"interaction_hash" =', '"encrypted_pkce_verifier" is null', '"user_id" is not null', '"encrypted_recovery_token" is not null', '"exchange_claimed_at" is not null', '"exchanged_at" is not null', '"password_update_claimed_at" is null', '"consumed_at" is null', '"expires_at" >']) expect(claimSql).toContain(fragment);
+
+    database.calls.length = 0;
+    database.affectedRows = [{}];
+    await expect(repository.consumeRecoveryAndRevokeSessions({ transactionId: id, userId, expectedPasswordUpdateClaimedAt: now, now })).resolves.toBe(true);
+    expect(database.calls).toHaveLength(2);
+    expect(database.calls[0]).toMatchObject({ table: "auth_recovery_transactions", values: { consumedAt: now } });
+    expect(database.calls[1]).toMatchObject({ table: "auth_sessions", values: { revokedAt: now } });
+    const consumeSql = query(database.calls[0]?.predicates).sql;
+    for (const fragment of ['"id" =', '"user_id" =', '"password_update_claimed_at" =', '"consumed_at" is null', '"expires_at" >']) expect(consumeSql).toContain(fragment);
+    const revokeSql = query(database.calls[1]?.predicates).sql;
+    expect(revokeSql).toContain('"user_id" =');
+    expect(revokeSql).toContain('"revoked_at" is null');
   });
 });

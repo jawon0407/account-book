@@ -2,16 +2,16 @@ import "server-only";
 
 import type { AuthProvider, CurrentUser, SignInInput, SignUpInput } from "@account-book/contracts";
 
-/** A confirmation code received only by the server callback. */
-export type EmailConfirmationInput = Readonly<{ code: string }>;
-/** The approved provider and callback URL for starting an OAuth transaction. */
-export type OAuthStartInput = Readonly<{ provider: AuthProvider; redirectUrl: URL }>;
-/** An OAuth authorization code received only by the server callback. */
-export type OAuthExchangeInput = Readonly<{ code: string }>;
-/** A password-recovery code received only by the server callback. */
-export type RecoveryExchangeInput = Readonly<{ code: string }>;
+/** A confirmation code and its matching server-owned PKCE verifier. */
+export type EmailConfirmationInput = Readonly<{ code: string; codeVerifier: string }>;
+/** The approved provider, trusted callback, and canonical S256 challenge for OAuth. */
+export type OAuthStartInput = Readonly<{ provider: AuthProvider; redirectUrl: URL; codeChallenge: string }>;
+/** An OAuth authorization code and its matching server-owned PKCE verifier. */
+export type OAuthExchangeInput = Readonly<{ code: string; codeVerifier: string }>;
+/** A password-recovery code and its matching server-owned PKCE verifier. */
+export type RecoveryExchangeInput = Readonly<{ code: string; codeVerifier: string }>;
 /** Server-held recovery credentials used to update one password. */
-export type PasswordUpdateAtProviderInput = Readonly<{ accessToken: string; refreshToken: string; password: string }>;
+export type PasswordUpdateAtProviderInput = Readonly<{ accessToken: string; refreshToken: string; userId: string; password: string }>;
 
 /** A complete verified provider session that may be encrypted into an app session. */
 export type AuthTokenPair = Readonly<{
@@ -46,14 +46,14 @@ export class AuthProviderError extends Error {
 
 /** Server-only port that prevents Supabase SDK details and provider tokens reaching routes or UI code. */
 export interface AuthProviderPort {
-  signUp(input: SignUpInput, redirectUrl: URL): Promise<EmailAuthResult>;
+  signUp(input: SignUpInput, redirectUrl: URL, codeChallenge: string): Promise<EmailAuthResult>;
   signInWithPassword(input: SignInInput): Promise<AuthTokenPair>;
   confirmEmail(input: EmailConfirmationInput): Promise<AuthTokenPair>;
   startOAuth(input: OAuthStartInput): Promise<OAuthStartResult>;
   exchangeOAuthCode(input: OAuthExchangeInput): Promise<AuthTokenPair>;
   refresh(refreshToken: string): Promise<AuthTokenPair>;
   signOut(accessToken: string, refreshToken: string): Promise<void>;
-  requestPasswordReset(email: string, redirectUrl: URL): Promise<void>;
+  requestPasswordReset(email: string, redirectUrl: URL, codeChallenge: string): Promise<void>;
   exchangeRecoveryCode(input: RecoveryExchangeInput): Promise<RecoveryContext>;
   updatePassword(input: PasswordUpdateAtProviderInput): Promise<void>;
 }
