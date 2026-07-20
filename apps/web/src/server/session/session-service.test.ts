@@ -45,6 +45,7 @@ const SessionService = serviceModule.SessionService as
       keyring: Keyring,
       refresher: (refreshToken: string) => Promise<TokenPair>,
       createId?: () => string,
+      clock?: () => Date,
     ) => {
       create(tokens: TokenPair, now: Date): Promise<{ selector: string; sessionId: string }>;
       resolve(selector: string, now: Date): Promise<{ accessToken: string; refreshToken: string; sessionId: string }>;
@@ -207,9 +208,9 @@ class SerializedSecurityRepository extends TestRepository {
   }
 }
 
-function service(repository = new TestRepository(), refresher = vi.fn(async () => tokenPair({ accessToken: "new-access", refreshToken: "new-refresh" }))) {
+function service(repository = new TestRepository(), refresher = vi.fn(async () => tokenPair({ accessToken: "new-access", refreshToken: "new-refresh" })), clock: () => Date = () => new Date(now)) {
   expect(SessionService).toBeTypeOf("function");
-  return { repository, refresher, service: new SessionService!(repository, keyring, refresher, () => id) };
+  return { repository, refresher, service: new SessionService!(repository, keyring, refresher, () => id, clock) };
 }
 
 async function createSession(repository = new TestRepository()) {
@@ -348,10 +349,28 @@ describe("SessionService", () => {
     expect(repository.calls.rotate).toBe(1);
   });
 
+  it("validates and rotates with a fresh time sampled after a next-second refresh", async () => {
+    const providerCompletedAt = new Date(now.getTime() + 1_000);
+    const nextSecondPair = tokenPair({ issuedAtSeconds: Math.floor(providerCompletedAt.getTime() / 1000), accessToken: "next-access", refreshToken: "next-refresh" });
+    const repository = new TestRepository();
+    const setup = service(repository, vi.fn(async () => nextSecondPair), () => providerCompletedAt);
+    const created = await setup.service.create(tokenPair(), now);
+
+    await expect(setup.service.refresh(created.selector, now)).resolves.toEqual({ status: "refreshed" });
+    expect(repository.record).toMatchObject({ lastSeenAt: providerCompletedAt, rotationVersion: 1 });
+  });
+
+  it("fails closed when the post-refresh clock is invalid", async () => {
+    const setup = await createSession();
+    const subject = new SessionService!(setup.repository, keyring, async () => tokenPair(), () => id, () => new Date("invalid"));
+    await expectSafeFailure(() => subject.refresh(setup.created.selector, now));
+    expect(setup.repository.calls.rotate).toBe(0);
+  });
+
   it("rejects a canonical replacement token pair for a different user before CAS", async () => {
     const replacementUserId = "123e4567-e89b-12d3-a456-426614174003";
     const { repository, created } = await createSession();
-    const subject = new SessionService!(repository, keyring, async () => tokenPair({ userId: replacementUserId }), () => id);
+    const subject = new SessionService!(repository, keyring, async () => tokenPair({ userId: replacementUserId }), () => id, () => new Date(now));
 
     await expectSafeFailure(() => subject.refresh(created.selector, now), replacementUserId, created.selector);
     expect(repository.calls.rotate).toBe(0);
@@ -368,7 +387,7 @@ describe("SessionService", () => {
   it("uses one fixed error for refresh provider and repository failures", async () => {
     const failedRefresher = vi.fn(async () => Promise.reject(new Error("provider-secret")));
     const first = await createSession();
-    const subject = new SessionService!(first.repository, keyring, failedRefresher, () => id);
+    const subject = new SessionService!(first.repository, keyring, failedRefresher, () => id, () => new Date(now));
     await expectSafeFailure(() => subject.refresh(first.created.selector, now), "provider-secret", first.created.selector);
 
     const second = await createSession();

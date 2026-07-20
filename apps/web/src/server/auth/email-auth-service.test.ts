@@ -57,7 +57,7 @@ class EmailRepository {
   }
 }
 
-function setup() {
+function setup(clock: () => Date = () => new Date(now)) {
   const repository = new EmailRepository();
   const provider = {
     signUpResult: { status: "verification_required" } as unknown,
@@ -90,7 +90,7 @@ function setup() {
     }),
   };
   expect(EmailAuthService).toBeTypeOf("function");
-  const service = new EmailAuthService!(provider, sessions, repository, keyring, () => transactionId, () => verifier);
+  const service = new EmailAuthService!(provider, sessions, repository, keyring, () => transactionId, () => verifier, clock);
   const context = {
     emailRedirectUrl: new URL("https://app.example.test/auth/confirm"),
     passwordResetRedirectUrl: new URL("https://app.example.test/auth/recovery"),
@@ -172,6 +172,31 @@ describe("EmailAuthService PKCE confirmation continuity", () => {
     await expect(subject.service.signIn(validInput, subject.context)).resolves.toMatchObject({ selector: "opaque-session-selector", user: tokens.user });
     subject.provider.signInResult = { ...tokens, user: { ...tokens.user, emailVerified: false } };
     await expect(subject.service.signIn(validInput, subject.context)).rejects.toMatchObject({ code: "AUTH_EMAIL_VERIFICATION_REQUIRED" });
+  });
+
+  it("accepts a sign-in token issued in the next second using a post-provider clock sample", async () => {
+    const providerCompletedAt = new Date(now.getTime() + 1_000);
+    const subject = setup(() => providerCompletedAt);
+    subject.provider.signInResult = { ...tokens, issuedAtSeconds: Math.floor(providerCompletedAt.getTime() / 1000) };
+
+    await expect(subject.service.signIn(validInput, subject.context)).resolves.toMatchObject({ selector: "opaque-session-selector" });
+    expect(subject.sessions.create).toHaveBeenCalledWith(expect.objectContaining({ issuedAtSeconds: Math.floor(providerCompletedAt.getTime() / 1000) }), providerCompletedAt);
+  });
+
+  it("accepts a confirmation token issued in the next second using a post-provider clock sample", async () => {
+    const providerCompletedAt = new Date(now.getTime() + 1_000);
+    const subject = setup(() => providerCompletedAt);
+    subject.provider.confirmationResult = { ...tokens, issuedAtSeconds: Math.floor(providerCompletedAt.getTime() / 1000) };
+    await subject.service.signUp(validInput, subject.context);
+
+    await expect(subject.service.confirmEmail({ code: "code" }, subject.context)).resolves.toMatchObject({ selector: "opaque-session-selector" });
+    expect(subject.sessions.create).toHaveBeenCalledWith(expect.objectContaining({ issuedAtSeconds: Math.floor(providerCompletedAt.getTime() / 1000) }), providerCompletedAt);
+  });
+
+  it("fails closed when the post-provider clock is invalid", async () => {
+    const subject = setup(() => new Date("invalid"));
+    await expect(subject.service.signIn(validInput, subject.context)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    expect(subject.sessions.create).not.toHaveBeenCalled();
   });
 
   it("rejects invalid context and callback input before persistence or provider calls", async () => {

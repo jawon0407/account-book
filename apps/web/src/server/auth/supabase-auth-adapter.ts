@@ -75,7 +75,7 @@ function providerCode(value: unknown): string {
   return typeof code === "string" ? code : "";
 }
 function mappedProviderError(value: unknown, status?: number, pkce = false): AuthProviderError {
-  const error = object(value);
+  const error = value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
   const isHttp = status !== undefined;
   const providerStatus = status ?? (typeof error.status === "number" ? error.status : undefined);
   const code = typeof error.code === "string" ? error.code : "";
@@ -136,7 +136,9 @@ function commonTokenPair(sessionValue: unknown): Readonly<{ session: Record<stri
   const claims = jwtClaims(accessToken);
   const userId = uuid(user.id);
   if (claims.userId !== userId) return fail();
-  const pair = { accessToken, refreshToken, userId, supabaseSessionId: claims.sessionId, issuedAtSeconds: claims.issuedAt, accessTokenExpiresAt: new Date(claims.expiresAt * 1000), user: parsedUser.data };
+  const accessTokenExpiresAt = new Date(claims.expiresAt * 1000);
+  if (!Number.isFinite(accessTokenExpiresAt.getTime()) || accessTokenExpiresAt.getTime() <= Date.now()) return fail();
+  const pair = { accessToken, refreshToken, userId, supabaseSessionId: claims.sessionId, issuedAtSeconds: claims.issuedAt, accessTokenExpiresAt, user: parsedUser.data };
   return { session, pair, claims };
 }
 function tokenPair(sessionValue: unknown): AuthTokenPair {
@@ -166,7 +168,7 @@ function challenge(value: unknown): string {
 }
 function providerId(provider: AuthProvider): string { return provider === "naver" ? "custom:naver" : provider; }
 
-type HttpResult = Readonly<{ ok: boolean; status: number; body: Record<string, unknown> }>;
+type HttpResult = Readonly<{ ok: boolean; status: number; body: unknown }>;
 
 /** Request-scoped Supabase adapter with an explicit server-owned PKCE HTTP boundary. */
 export class SupabaseAuthAdapter implements AuthProviderPort {
@@ -356,8 +358,11 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
       body: JSON.stringify(body),
     });
     let parsed: unknown;
-    try { parsed = await response.json(); } catch { return fail(); }
-    return { ok: response.ok, status: response.status, body: object(parsed) };
+    try { parsed = await response.json(); } catch {
+      if (response.ok) return fail();
+      return { ok: false, status: response.status, body: null };
+    }
+    return { ok: response.ok, status: response.status, body: response.ok ? object(parsed) : parsed };
   }
 
   private client(): SupabaseClient { return this.factory(this.config.url, this.config.anonKey, AUTH_OPTIONS); }

@@ -26,6 +26,7 @@ export class EmailAuthServiceError extends Error {
 
 function fail(code: AuthProviderErrorCode = "AUTH_PROVIDER_UNAVAILABLE"): never { throw new EmailAuthServiceError(code); }
 function validDate(value: unknown): value is Date { return value instanceof Date && Number.isFinite(value.getTime()); }
+function postProviderTime(clock: () => Date): Date { const value = clock(); if (!validDate(value)) return fail(); return new Date(value); }
 function validUuid(value: unknown): value is string { return typeof value === "string" && UUID_PATTERN.test(value); }
 function safeCode(value: unknown): string {
   if (typeof value !== "string" || value.length === 0 || value.length > 4096 || value.trim() !== value || Array.from(value).some((character) => character.charCodeAt(0) <= 31 || character.charCodeAt(0) === 127)) return fail("AUTH_OAUTH_TRANSACTION_INVALID");
@@ -79,6 +80,7 @@ export class EmailAuthService {
     private readonly keyring: TokenKeyring,
     private readonly createId: () => string = randomUUID,
     private readonly createVerifier: () => string = createPkceVerifier,
+    private readonly clock: () => Date = () => new Date(),
   ) {}
 
   /**
@@ -124,8 +126,10 @@ export class EmailAuthService {
     try {
       const parsed = SignInInputSchema.safeParse(input);
       if (!parsed.success) return fail("AUTH_INVALID_CREDENTIALS");
-      const trusted = safeContext(context);
-      return await this.create(verifiedPair(await this.provider.signInWithPassword(parsed.data), trusted.now), trusted.now);
+      safeContext(context);
+      const providerPair = await this.provider.signInWithPassword(parsed.data);
+      const completedAt = postProviderTime(this.clock);
+      return await this.create(verifiedPair(providerPair, completedAt), completedAt);
     } catch (error) { return providerFailure(error); }
   }
 
@@ -145,7 +149,9 @@ export class EmailAuthService {
       const record = claimed(transaction, trusted.interactionHash, trusted.now);
       const codeVerifier = decryptToken(record.encryptedPkceVerifier, { recordId: record.id, tokenKind: "pkce" }, this.keyring);
       derivePkceChallenge(codeVerifier);
-      return await this.create(verifiedPair(await this.provider.confirmEmail({ code, codeVerifier }), trusted.now), trusted.now);
+      const providerPair = await this.provider.confirmEmail({ code, codeVerifier });
+      const completedAt = postProviderTime(this.clock);
+      return await this.create(verifiedPair(providerPair, completedAt), completedAt);
     } catch (error) {
       if (error instanceof EmailAuthServiceError || error instanceof AuthProviderError) return providerFailure(error);
       return fail("AUTH_OAUTH_TRANSACTION_INVALID");

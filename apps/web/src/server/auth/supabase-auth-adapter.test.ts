@@ -1,8 +1,11 @@
+import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import type { EmailConfirmationTransactionRecord } from "../persistence/auth-repository.js";
 
 vi.mock("server-only", () => ({}));
 const { SupabaseAuthAdapter } = await import("./supabase-auth-adapter.js");
 const { AuthProviderError } = await import("./auth-provider-port.js");
+const { EmailAuthService } = await import("./email-auth-service.js");
 
 const issuedAtSeconds = Math.floor(Date.now() / 1000);
 const nowSeconds = issuedAtSeconds + 3600;
@@ -23,6 +26,14 @@ const session = {
   user: { id: userId, email: "person@example.test", email_confirmed_at: "2026-07-20T00:00:00.000Z" },
 };
 const rawSession = { ...session, token_type: "bearer", expires_in: 3600 };
+const tokenSegments = accessToken.split(".");
+const wrongSegmentCountJwt = tokenSegments.slice(0, 2).join(".");
+const nonCanonicalSegmentJwt = `${tokenSegments[0]}.${tokenSegments[1]}=.${tokenSegments[2]}`;
+const malformedPayloadJwt = `${tokenSegments[0]}.${Buffer.from("{").toString("base64url")}.${tokenSegments[2]}`;
+const overflowExpiresAtSeconds = 8_640_000_000_001;
+const overflowAccessToken = jwt({ exp: overflowExpiresAtSeconds });
+const overflowRawSession = { ...rawSession, access_token: overflowAccessToken, expires_in: overflowExpiresAtSeconds - issuedAtSeconds, expires_at: undefined };
+const overflowSdkSession = { ...session, access_token: overflowAccessToken, expires_at: overflowExpiresAtSeconds };
 const ok = (data: unknown) => ({ data, error: null });
 
 function client(overrides: Partial<Record<string, unknown>> = {}) {
@@ -66,6 +77,25 @@ function expectSafeError(action: () => Promise<unknown>, code: string, ...secret
   return expect(action()).rejects.toSatisfy((error: unknown) =>
     error instanceof AuthProviderError && error.code === code && secrets.every((secret) => !error.message.includes(secret)),
   );
+}
+
+function emailFlow(provider: ReturnType<typeof adapter>["adapter"]) {
+  let record: EmailConfirmationTransactionRecord | null = null;
+  const repository = {
+    createEmailConfirmationTransaction: vi.fn(async (input: EmailConfirmationTransactionRecord) => { record = input; }),
+    claimEmailConfirmationTransaction: vi.fn(async (_hash: Uint8Array, claimedAt: Date) => {
+      if (record === null) return null;
+      record = { ...record, consumedAt: new Date(claimedAt) };
+      return record;
+    }),
+  };
+  const sessions = {
+    create: vi.fn(async () => ({ selector: "selector", accessTokenExpiresAt: new Date(Date.now() + 60_000), absoluteExpiresAt: new Date(Date.now() + 86_400_000) })),
+  };
+  const keyring = { currentKeyId: "current", keys: new Map([["current", randomBytes(32)]]) };
+  const service = new EmailAuthService(provider, sessions, repository, keyring, () => "123e4567-e89b-12d3-a456-426614174090", () => verifier, () => new Date());
+  const context = { emailRedirectUrl: new URL("https://app.example.test/auth/confirm"), interactionSelector: Buffer.alloc(32, 10).toString("base64url"), now: new Date() };
+  return { service, sessions, context };
 }
 
 describe("SupabaseAuthAdapter explicit server PKCE boundary", () => {
@@ -160,6 +190,47 @@ describe("SupabaseAuthAdapter explicit server PKCE boundary", () => {
   });
 
   it.each([
+    ["wrong JWT segment count", { access_token: wrongSegmentCountJwt }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["noncanonical base64url JWT segment", { access_token: nonCanonicalSegmentJwt }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["malformed JWT payload JSON", { access_token: malformedPayloadJwt }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["invalid email confirmation timestamp", { user: { ...session.user, email_confirmed_at: "not-a-date" } }, "AUTH_EMAIL_VERIFICATION_REQUIRED"],
+    ["future email confirmation timestamp", { user: { ...session.user, email_confirmed_at: "9999-12-31T23:59:59.000Z" } }, "AUTH_EMAIL_VERIFICATION_REQUIRED"],
+    ["phone-only confirmation", { user: { id: userId, phone: "+821012345678", phone_confirmed_at: "2026-07-20T00:00:00.000Z" } }, "AUTH_EMAIL_VERIFICATION_REQUIRED"],
+  ] as const)("rejects %s on both normalized and raw token paths", async (_label, override, expected) => {
+    const normalizedSession = { ...session, ...override };
+    const normalized = adapter([], client({ signInWithPassword: vi.fn(async () => ok({ session: normalizedSession })) }));
+    await expectSafeError(() => normalized.adapter.signInWithPassword({ email: "person@example.test", password: "a".repeat(12) }), expected);
+
+    const raw = adapter([jsonResponse({ ...rawSession, ...override })]);
+    await expectSafeError(() => raw.adapter.exchangeOAuthCode({ code: "code", codeVerifier: verifier }), expected);
+    expect(raw.factory).not.toHaveBeenCalled();
+
+    const normalizedFlow = emailFlow(adapter([], client({ signInWithPassword: vi.fn(async () => ok({ session: normalizedSession })) })).adapter);
+    await expect(normalizedFlow.service.signIn({ email: "person@example.test", password: "a".repeat(12) }, normalizedFlow.context)).rejects.toMatchObject({ code: expected });
+    expect(normalizedFlow.sessions.create).not.toHaveBeenCalled();
+
+    const rawFlow = emailFlow(adapter([jsonResponse({}), jsonResponse({ ...rawSession, ...override })]).adapter);
+    await rawFlow.service.signUp({ email: "person@example.test", password: "a".repeat(12) }, rawFlow.context);
+    await expect(rawFlow.service.confirmEmail({ code: "code" }, rawFlow.context)).rejects.toMatchObject({ code: expected });
+    expect(rawFlow.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects an unrepresentable expiry from the SDK-normalized parser", async () => {
+    const setup = adapter([], client({ signInWithPassword: vi.fn(async () => ok({ session: overflowSdkSession })) }));
+    await expectSafeError(() => setup.adapter.signInWithPassword({ email: "person@example.test", password: "a".repeat(12) }), "AUTH_PROVIDER_UNAVAILABLE");
+  });
+
+  it("rejects an unrepresentable expiry from a raw PKCE token exchange", async () => {
+    const setup = adapter([jsonResponse(overflowRawSession)]);
+    await expectSafeError(() => setup.adapter.exchangeOAuthCode({ code: "code", codeVerifier: verifier }), "AUTH_PROVIDER_UNAVAILABLE");
+  });
+
+  it("rejects an unrepresentable expiry from a recovery code exchange", async () => {
+    const setup = adapter([jsonResponse(overflowRawSession)]);
+    await expectSafeError(() => setup.adapter.exchangeRecoveryCode({ code: "code", codeVerifier: verifier }), "AUTH_PROVIDER_UNAVAILABLE");
+  });
+
+  it.each([
     { body: { code: "bad_code_verifier", message: "secret provider text" }, status: 400, expected: "AUTH_OAUTH_TRANSACTION_INVALID" },
     { body: { code: "over_request_rate_limit" }, status: 429, expected: "AUTH_RATE_LIMITED" },
     { body: { code: "unexpected" }, status: 503, expected: "AUTH_PROVIDER_UNAVAILABLE" },
@@ -168,6 +239,15 @@ describe("SupabaseAuthAdapter explicit server PKCE boundary", () => {
   ])("maps PKCE HTTP failures to fixed safe errors", async ({ body, status, expected }) => {
     const setup = adapter([jsonResponse(body, status)]);
     await expectSafeError(() => setup.adapter.exchangeOAuthCode({ code: "secret-code", codeVerifier: verifier }), expected, "secret-code", verifier, "secret provider text");
+  });
+
+  it("preserves an actual HTTP 429 when the response body is malformed JSON", async () => {
+    const malformed = new Response("not-json", { status: 429, headers: { "content-type": "application/json" } });
+    await expectSafeError(() => adapter([malformed]).adapter.exchangeOAuthCode({ code: "code", codeVerifier: verifier }), "AUTH_RATE_LIMITED");
+  });
+
+  it.each(["scalar", []])("preserves an actual HTTP 429 when the JSON body is non-object %#", async (body) => {
+    await expectSafeError(() => adapter([jsonResponse(body, 429)]).adapter.exchangeOAuthCode({ code: "code", codeVerifier: verifier }), "AUTH_RATE_LIMITED");
   });
 
   it.each(["user_already_exists", "email_exists", "user_already_registered", "email_already_exists"])(

@@ -122,6 +122,7 @@ export class SessionService {
     private readonly keyring: TokenKeyring,
     private readonly refreshToken: SessionTokenRefresher,
     private readonly createId: () => string = randomUUID,
+    private readonly clock: () => Date = () => new Date(),
   ) {}
 
   /** Creates a 30-day opaque session and returns only the browser selector plus safe metadata. */
@@ -168,7 +169,11 @@ export class SessionService {
   public async refresh(selector: string, now: Date): Promise<Readonly<{ status: "refreshed" | "superseded" }>> {
     try {
       const session = await this.load(selector, now);
-      const replacement = validTokenPair(await this.refreshToken(session.refreshToken), now);
+      const providerPair = await this.refreshToken(session.refreshToken);
+      const refreshedAtValue = this.clock();
+      if (!validTime(refreshedAtValue)) return fail();
+      const refreshedAt = new Date(refreshedAtValue);
+      const replacement = validTokenPair(providerPair, refreshedAt);
       if (replacement.userId !== session.userId) return fail();
       const rotation: RotateSessionInput = {
         sessionId: session.sessionId,
@@ -178,7 +183,7 @@ export class SessionService {
         encryptedRefreshToken: encryptToken(replacement.refreshToken, { recordId: session.sessionId, tokenKind: "refresh" }, this.keyring),
         supabaseSessionId: replacement.supabaseSessionId,
         accessTokenExpiresAt: new Date(replacement.accessTokenExpiresAt),
-        now: new Date(now),
+        now: refreshedAt,
       };
       return (await this.repository.rotate(rotation)) ? { status: "refreshed" } : { status: "superseded" };
     } catch {

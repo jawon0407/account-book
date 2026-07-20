@@ -66,7 +66,7 @@ class OAuthRepository {
   }
 }
 
-function setup() {
+function setup(clock: () => Date = () => new Date(now.getTime() + 1_000)) {
   const repository = new OAuthRepository();
   const provider = {
     calls: { start: [] as unknown[], exchange: [] as unknown[] },
@@ -88,7 +88,7 @@ function setup() {
     }),
   };
   expect(OAuthService).toBeTypeOf("function");
-  const service = new OAuthService!(repository, provider, sessions, keyring, () => transactionId, () => state, () => verifier);
+  const service = new OAuthService!(repository, provider, sessions, keyring, () => transactionId, () => state, () => verifier, clock);
   const startContext = { callbackBaseUrl: new URL("https://app.example.test/auth/oauth/callback"), interactionSelector: interaction, returnPath: "/app", now };
   const completeContext = { interactionSelector: interaction, now: new Date(now.getTime() + 1_000) };
   return { repository, provider, sessions, service, startContext, completeContext };
@@ -140,6 +140,24 @@ describe("OAuthService", () => {
     expect(result).toMatchObject({ selector: "opaque-session-selector", user: tokens.user, returnPath: "/settings/security" });
     const serialized = JSON.stringify(result);
     for (const secret of [state, interaction, verifier, "provider-code", tokens.accessToken, tokens.refreshToken]) expect(serialized).not.toContain(secret);
+  });
+
+  it("validates and creates with a fresh time sampled after a next-second provider exchange", async () => {
+    const providerCompletedAt = new Date(now.getTime() + 2_000);
+    const subject = setup(() => providerCompletedAt);
+    const nextSecondTokens = { ...tokens, issuedAtSeconds: Math.floor(providerCompletedAt.getTime() / 1000) };
+    subject.provider.exchangeOAuthCode.mockResolvedValueOnce(nextSecondTokens);
+    await subject.service.start("google", subject.startContext);
+
+    await expect(subject.service.complete({ provider: "google", state, code: "code" }, subject.completeContext)).resolves.toMatchObject({ selector: "opaque-session-selector" });
+    expect(subject.sessions.create).toHaveBeenCalledWith(expect.objectContaining({ issuedAtSeconds: nextSecondTokens.issuedAtSeconds }), providerCompletedAt);
+  });
+
+  it("fails closed when the post-provider clock is invalid", async () => {
+    const subject = setup(() => new Date("invalid"));
+    await subject.service.start("google", subject.startContext);
+    await expect(subject.service.complete({ provider: "google", state, code: "code" }, subject.completeContext)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    expect(subject.sessions.create).not.toHaveBeenCalled();
   });
 
   it.each([

@@ -36,6 +36,7 @@ export class OAuthServiceError extends Error {
 
 function fail(code: AuthProviderErrorCode = "AUTH_OAUTH_TRANSACTION_INVALID"): never { throw new OAuthServiceError(code); }
 function validDate(value: unknown): value is Date { return value instanceof Date && Number.isFinite(value.getTime()); }
+function postProviderTime(clock: () => Date): Date { const value = clock(); if (!validDate(value)) return fail("AUTH_PROVIDER_UNAVAILABLE"); return new Date(value); }
 function validUuid(value: unknown): value is string { return typeof value === "string" && UUID_PATTERN.test(value); }
 function validReturnPath(value: unknown): "/app" | "/settings/security" { if (typeof value !== "string" || !RETURN_PATHS.has(value)) return fail(); return value as "/app" | "/settings/security"; }
 function validCode(value: unknown): string {
@@ -100,6 +101,7 @@ export class OAuthService {
     private readonly createId: () => string = randomUUID,
     private readonly createState: () => string = createSessionSelector,
     private readonly createVerifier: () => string = createPkceVerifier,
+    private readonly clock: () => Date = () => new Date(),
   ) {}
 
   /**
@@ -160,8 +162,10 @@ export class OAuthService {
       const record = trustedClaim(claimed, input);
       const codeVerifier = decryptToken(record.encryptedPkceVerifier, { recordId: record.id, tokenKind: "pkce" }, this.keyring);
       derivePkceChallenge(codeVerifier);
-      const pair = trustedPair(await this.provider.exchangeOAuthCode({ code, codeVerifier }), context.now);
-      const created = await this.sessions.create({ accessToken: pair.accessToken, refreshToken: pair.refreshToken, userId: pair.userId, supabaseSessionId: pair.supabaseSessionId, issuedAtSeconds: pair.issuedAtSeconds, accessTokenExpiresAt: pair.accessTokenExpiresAt }, context.now);
+      const providerPair = await this.provider.exchangeOAuthCode({ code, codeVerifier });
+      const completedAt = postProviderTime(this.clock);
+      const pair = trustedPair(providerPair, completedAt);
+      const created = await this.sessions.create({ accessToken: pair.accessToken, refreshToken: pair.refreshToken, userId: pair.userId, supabaseSessionId: pair.supabaseSessionId, issuedAtSeconds: pair.issuedAtSeconds, accessTokenExpiresAt: pair.accessTokenExpiresAt }, completedAt);
       return { selector: created.selector, user: pair.user, accessTokenExpiresAt: created.accessTokenExpiresAt, absoluteExpiresAt: created.absoluteExpiresAt, returnPath: record.returnPath };
     } catch (error) {
       if (error instanceof OAuthServiceError || error instanceof AuthProviderError) return providerFailure(error);
