@@ -18,6 +18,10 @@ function jwt(claims: Record<string, unknown> = {}) {
   return `${Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url")}.${Buffer.from(JSON.stringify({ session_id: sessionId, sub: userId, iat: issuedAtSeconds, exp: nowSeconds, ...claims })).toString("base64url")}.${Buffer.from("signature").toString("base64url")}`;
 }
 
+function jwtPayload(payload: unknown) {
+  return `${Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url")}.${Buffer.from(JSON.stringify(payload)).toString("base64url")}.${Buffer.from("signature").toString("base64url")}`;
+}
+
 const accessToken = jwt();
 const session = {
   access_token: accessToken,
@@ -30,6 +34,9 @@ const tokenSegments = accessToken.split(".");
 const wrongSegmentCountJwt = tokenSegments.slice(0, 2).join(".");
 const nonCanonicalSegmentJwt = `${tokenSegments[0]}.${tokenSegments[1]}=.${tokenSegments[2]}`;
 const malformedPayloadJwt = `${tokenSegments[0]}.${Buffer.from("{").toString("base64url")}.${tokenSegments[2]}`;
+const nonObjectPayloadJwt = jwtPayload(null);
+const nonCanonicalHeaderJwt = `${tokenSegments[0]}=.${tokenSegments[1]}.${tokenSegments[2]}`;
+const nonCanonicalSignatureJwt = `${tokenSegments[0]}.${tokenSegments[1]}.${tokenSegments[2]}=`;
 const overflowExpiresAtSeconds = 8_640_000_000_001;
 const overflowAccessToken = jwt({ exp: overflowExpiresAtSeconds });
 const overflowRawSession = { ...rawSession, access_token: overflowAccessToken, expires_in: overflowExpiresAtSeconds - issuedAtSeconds, expires_at: undefined };
@@ -193,6 +200,13 @@ describe("SupabaseAuthAdapter explicit server PKCE boundary", () => {
     ["wrong JWT segment count", { access_token: wrongSegmentCountJwt }, "AUTH_PROVIDER_UNAVAILABLE"],
     ["noncanonical base64url JWT segment", { access_token: nonCanonicalSegmentJwt }, "AUTH_PROVIDER_UNAVAILABLE"],
     ["malformed JWT payload JSON", { access_token: malformedPayloadJwt }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["non-object JWT payload JSON", { access_token: nonObjectPayloadJwt }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["missing JWT expiry", { access_token: jwt({ exp: undefined }) }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["fractional JWT expiry", { access_token: jwt({ exp: nowSeconds + 0.5 }) }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["malformed JWT subject", { access_token: jwt({ sub: "not-a-uuid" }) }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["malformed JWT session identifier", { access_token: jwt({ session_id: "not-a-uuid" }) }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["noncanonical JWT header segment", { access_token: nonCanonicalHeaderJwt }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["noncanonical JWT signature segment", { access_token: nonCanonicalSignatureJwt }, "AUTH_PROVIDER_UNAVAILABLE"],
     ["invalid email confirmation timestamp", { user: { ...session.user, email_confirmed_at: "not-a-date" } }, "AUTH_EMAIL_VERIFICATION_REQUIRED"],
     ["future email confirmation timestamp", { user: { ...session.user, email_confirmed_at: "9999-12-31T23:59:59.000Z" } }, "AUTH_EMAIL_VERIFICATION_REQUIRED"],
     ["phone-only confirmation", { user: { id: userId, phone: "+821012345678", phone_confirmed_at: "2026-07-20T00:00:00.000Z" } }, "AUTH_EMAIL_VERIFICATION_REQUIRED"],
