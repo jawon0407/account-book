@@ -1,8 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "jsx": "react-jsx",
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "plugins": [{ "name": "next" }]
   },
-  "include": ["src", "vitest.config.ts"]
+  "include": ["next-env.d.ts", "next.config.ts", "src", "vitest.config.ts"]
 }

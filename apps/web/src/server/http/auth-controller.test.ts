@@ -1,0 +1,248 @@
+import { randomBytes } from "node:crypto";
+import { describe, expect, it, vi } from "vitest";
+import { issueCsrfToken } from "../security/csrf.js";
+
+vi.mock("server-only", () => ({}));
+
+const module = await import("./auth-controller.js").catch(() => ({} as Record<string, unknown>));
+const AuthController = module.AuthController as (new (dependencies: Record<string, unknown>) => Record<string, (request: Request, parameters?: Record<string, string>) => Promise<Response>>) | undefined;
+
+const now = new Date("2026-07-20T12:00:00.000Z");
+const selector = Buffer.alloc(32, 3).toString("base64url");
+const freshSelector = Buffer.alloc(32, 4).toString("base64url");
+const csrfKey = randomBytes(32);
+const csrfToken = issueCsrfToken({ selector }, now, csrfKey);
+const user = { id: "123e4567-e89b-12d3-a456-426614174001", email: "person@example.test", emailVerified: true };
+
+function request(path: string, init: RequestInit = {}, selected = selector): Request {
+  const headers = new Headers();
+  if (init.method === "POST") {
+    headers.set("Content-Type", "application/json");
+    headers.set("Origin", "https://app.example.test");
+    headers.set("Sec-Fetch-Site", "same-origin");
+    headers.set("Sec-Fetch-Mode", "cors");
+    headers.set("Sec-Fetch-Dest", "");
+    headers.set("X-CSRF-Token", csrfToken);
+  }
+  if (selected) headers.set("Cookie", `__Host-ab_interaction=${selected}`);
+  new Headers(init.headers).forEach((value, name) => headers.set(name, value));
+  return new Request(`https://spoofed.example.test${path}`, { ...init, headers });
+}
+
+function setup(overrides: Record<string, unknown> = {}) {
+  const events: string[] = [];
+  const email = {
+    signUp: vi.fn(async (_input, context) => { events.push("sign-up"); return { accepted: true, context }; }),
+    signIn: vi.fn(async () => ({ selector: freshSelector, user, accessTokenExpiresAt: new Date(now.getTime() + 120_000), absoluteExpiresAt: new Date(now.getTime() + 86_400_000) })),
+    confirmEmail: vi.fn(async () => ({ selector: freshSelector, user, accessTokenExpiresAt: new Date(now.getTime() + 120_000), absoluteExpiresAt: new Date(now.getTime() + 86_400_000) })),
+  };
+  const oauth = {
+    start: vi.fn(async (_provider, context) => { events.push("oauth-start"); return { authorizationUrl: new URL("https://provider.example.test/authorize"), context }; }),
+    complete: vi.fn(async () => ({ selector: freshSelector, user, accessTokenExpiresAt: new Date(now.getTime() + 120_000), absoluteExpiresAt: new Date(now.getTime() + 86_400_000), returnPath: "/app" })),
+  };
+  const recovery = {
+    start: vi.fn(async (_email, context) => { events.push("reset-start"); return { accepted: true, context }; }),
+    exchange: vi.fn(async () => ({ ready: true })),
+    update: vi.fn(async () => ({ updated: true })),
+  };
+  const sessions = {
+    resolve: vi.fn(async () => ({ accessToken: "server-access-jwt", refreshToken: "server-refresh-token", sessionId: "123e4567-e89b-12d3-a456-426614174002", userId: user.id, supabaseSessionId: "123e4567-e89b-12d3-a456-426614174003", accessTokenExpiresAt: new Date(now.getTime() + 120_000), rotationVersion: 0 })),
+    refresh: vi.fn(async () => ({ status: "refreshed" })),
+    revokeCurrent: vi.fn(async () => { events.push("local-revoke"); return true; }),
+    markRevocationPending: vi.fn(async () => { events.push("pending"); }),
+  };
+  const provider = { signOut: vi.fn(async () => { events.push("provider-sign-out"); }) };
+  const fetcher = vi.fn(async () => new Response(JSON.stringify(user), { status: 200, headers: { "Content-Type": "application/json", "Set-Cookie": "upstream=forbidden" } }));
+  expect(AuthController).toBeTypeOf("function");
+  const controller = new AuthController!({
+    configuredOrigin: new URL("https://app.example.test"),
+    apiInternalUrl: new URL("http://api.internal.test:3001"),
+    secureCookies: true,
+    csrfKey,
+    now: () => new Date(now),
+    createInteractionSelector: () => freshSelector,
+    email,
+    oauth,
+    recovery,
+    sessions,
+    provider,
+    fetcher,
+    ...overrides,
+  });
+  return { controller, email, oauth, recovery, sessions, provider, fetcher, events };
+}
+
+function expectNoStore(response: Response): void {
+  expect(response.headers.get("Cache-Control")).toBe("private, no-store");
+  expect(response.headers.get("Pragma")).toBe("no-cache");
+  expect(response.headers.get("Expires")).toBe("0");
+}
+
+describe("AuthController", () => {
+  it("issues only a CSRF token and replaces a malformed interaction selector", async () => {
+    const subject = setup();
+    const response = await subject.controller.csrf!(request("/api/auth/csrf", { headers: { Cookie: "__Host-ab_interaction=malformed" } }, ""));
+    expect(response.status).toBe(200);
+    expectNoStore(response);
+    expect(response.headers.get("Set-Cookie")).toContain(`__Host-ab_interaction=${freshSelector}`);
+    const payload = await response.json() as Record<string, unknown>;
+    expect(payload.csrfToken).toBeTypeOf("string");
+    expect(JSON.stringify(payload)).not.toContain(freshSelector);
+  });
+
+  it("returns only an opaque hardened session cookie after sign-in", async () => {
+    const { controller } = setup();
+    const response = await controller.signIn!(request("/api/auth/sign-in", { method: "POST", body: JSON.stringify({ email: "person@example.test", password: "a".repeat(12) }) }));
+    expect(response.status).toBe(200);
+    expectNoStore(response);
+    expect(response.headers.get("Set-Cookie")).toMatch(/__Host-ab_session=.*HttpOnly.*Secure.*SameSite=Lax.*Path=\/.*Priority=High/u);
+    const body = await response.text();
+    for (const secret of [freshSelector, "server-access-jwt", "server-refresh-token", "selector", "accessToken", "refreshToken"]) expect(body).not.toContain(secret);
+  });
+
+  it("rejects invalid mutation boundaries before calling a use case", async () => {
+    const variants = [
+      request("/api/auth/sign-up", { method: "POST", body: JSON.stringify({ email: "person@example.test", password: "a".repeat(12) }), headers: { "X-CSRF-Token": "wrong" } }),
+      request("/api/auth/sign-up", { method: "POST", body: "{}", headers: { Origin: "https://evil.example.test" } }),
+      request("/api/auth/sign-up", { method: "POST", body: "{}", headers: { "Sec-Fetch-Site": "cross-site" } }),
+      request("/api/auth/sign-up", { method: "POST", body: "{}", headers: { "Content-Type": "text/plain" } }),
+      request("/api/auth/sign-up", { method: "GET" }),
+    ];
+    for (const candidate of variants) {
+      const { controller, email } = setup();
+      const response = await controller.signUp!(candidate);
+      expect(response.status).toBe(403);
+      expectNoStore(response);
+      expect(email.signUp).not.toHaveBeenCalled();
+      expect(await response.json()).toMatchObject({ code: "AUTH_CSRF_REJECTED", retryable: false });
+    }
+  });
+
+  it.each([
+    ["signUp", "/api/auth/sign-up", { email: "person@example.test", password: "a".repeat(12) }],
+    ["oauthStart", "/api/auth/oauth/google/start", { returnPath: "/app" }],
+    ["passwordResetRequest", "/api/auth/password/reset-request", { email: "person@example.test" }],
+  ] as const)("uses a fresh server selector for %s after validating the existing CSRF selector", async (method, path, body) => {
+    const subject = setup();
+    const response = await subject.controller[method]!(request(path, { method: "POST", body: JSON.stringify({ ...body, selector: "caller-selected" }) }), method === "oauthStart" ? { provider: "google" } : undefined);
+    expect(response.status).toBe(422);
+    expect(subject.email.signUp).not.toHaveBeenCalled();
+    expect(subject.oauth.start).not.toHaveBeenCalled();
+    expect(subject.recovery.start).not.toHaveBeenCalled();
+
+    const accepted = await subject.controller[method]!(request(path, { method: "POST", body: JSON.stringify(body), headers: { Host: "evil.test", "X-Forwarded-Host": "evil.test", "X-Forwarded-Proto": "http" } }), method === "oauthStart" ? { provider: "google" } : undefined);
+    expect(accepted.headers.get("Set-Cookie")).toContain(`__Host-ab_interaction=${freshSelector}`);
+    const called = subject.email.signUp.mock.calls[0] ?? subject.oauth.start.mock.calls[0] ?? subject.recovery.start.mock.calls[0];
+    expect(called?.[1]).toMatchObject({ interactionSelector: freshSelector });
+    expect((called?.[1] as { emailRedirectUrl?: URL; callbackBaseUrl?: URL; passwordResetRedirectUrl?: URL })).toSatisfy((context: { emailRedirectUrl?: URL; callbackBaseUrl?: URL; passwordResetRedirectUrl?: URL }) => {
+      const url = context.emailRedirectUrl ?? context.callbackBaseUrl ?? context.passwordResetRedirectUrl;
+      return url?.origin === "https://app.example.test" && !url.toString().includes("evil.test");
+    });
+  });
+
+  it("uses the 60-second refresh threshold without returning a token", async () => {
+    const refresh = setup({ sessions: { ...setup().sessions, resolve: vi.fn(async () => ({ accessToken: "hidden", refreshToken: "hidden-refresh", sessionId: "123e4567-e89b-12d3-a456-426614174002", userId: user.id, supabaseSessionId: "123e4567-e89b-12d3-a456-426614174003", accessTokenExpiresAt: new Date(now.getTime() + 60_000), rotationVersion: 0 })) } });
+    const response = await refresh.controller.session!(request("/api/auth/session", { headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
+    expect(response.status).toBe(401);
+    const text = await response.text();
+    expect(JSON.parse(text)).toMatchObject({ code: "AUTH_SESSION_REFRESH_REQUIRED", retryable: false });
+    expect(text).not.toContain("hidden");
+
+    const healthy = setup();
+    const ok = await healthy.controller.session!(request("/api/auth/session", { headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
+    expect(ok.status).toBe(200);
+    expect(JSON.stringify(await ok.json())).not.toMatch(/access|refresh|selector/iu);
+  });
+
+  it("revokes locally before provider logout and keeps the cookie deleted on provider failure", async () => {
+    const subject = setup();
+    subject.provider.signOut.mockImplementationOnce(async () => { subject.events.push("provider-sign-out"); throw new Error("provider detail"); });
+    const response = await subject.controller.signOut!(request("/api/auth/sign-out", { method: "POST", body: "{}", headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
+    expect(subject.events).toEqual(["local-revoke", "provider-sign-out", "pending"]);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Set-Cookie")).toMatch(/__Host-ab_session=;.*Max-Age=0/u);
+    expect(await response.text()).not.toContain("provider detail");
+  });
+
+  it("uses only the fixed /v1/me URL and server JWT and validates upstream payloads", async () => {
+    const subject = setup();
+    const response = await subject.controller.me!(request("/api/me?url=https://evil.test", { headers: { Authorization: "Bearer browser", Host: "evil.test", Forwarded: "host=evil.test", Cookie: `__Host-ab_session=${selector}; other=secret` } }));
+    expect(response.status).toBe(200);
+    const [url, init] = subject.fetcher.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(url.toString()).toBe("http://api.internal.test:3001/v1/me");
+    expect(init).toMatchObject({ method: "GET", headers: { accept: "application/json", authorization: "Bearer server-access-jwt" } });
+    expect(JSON.stringify(init)).not.toMatch(/browser|evil|cookie|forwarded/iu);
+    expect(response.headers.get("Set-Cookie")).toBeNull();
+    expectNoStore(response);
+
+    subject.fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ ...user, token: "forbidden" }), { status: 200 }));
+    const malformed = await subject.controller.me!(request("/api/me", { headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
+    expect(malformed.status).toBe(502);
+    expect(await malformed.json()).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: false });
+
+    subject.fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ code: "AUTH_SESSION_EXPIRED", message: "Upstream message", requestId: "upstream-request", retryable: false, fieldErrors: [] }), { status: 418 }));
+    const unexpectedStatus = await subject.controller.me!(request("/api/me", { headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
+    expect(unexpectedStatus.status).toBe(401);
+    expect(await unexpectedStatus.json()).toMatchObject({ code: "AUTH_SESSION_EXPIRED", retryable: false });
+
+    subject.fetcher.mockRejectedValueOnce(new Error("internal network detail"));
+    const unavailable = await subject.controller.me!(request("/api/me", { headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
+    expect(unavailable.status).toBe(502);
+    expect(await unavailable.json()).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: false });
+  });
+
+  it("refreshes only through a CSRF-protected POST and returns no credential material", async () => {
+    const subject = setup();
+    const response = await subject.controller.refresh!(request("/api/auth/session/refresh", { method: "POST", body: "{}", headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
+    expect(response.status).toBe(200);
+    expect(subject.sessions.refresh).toHaveBeenCalledTimes(1);
+    const text = await response.text();
+    expect(text).toBe(JSON.stringify({ refreshed: true }));
+    expect(text).not.toMatch(/access|refreshToken|selector/iu);
+    expectNoStore(response);
+  });
+
+  it("fails OAuth callback closed and removes code/state from the next redirect", async () => {
+    const missing = setup();
+    const missingResponse = await missing.controller.oauthCallback!(request("/api/auth/callback?provider=google&state=bad&code=secret-code", {}, ""));
+    expect(missing.oauth.complete).not.toHaveBeenCalled();
+    expect(missingResponse.status).toBe(303);
+    expect(missingResponse.headers.get("Location")).toBe("https://app.example.test/app");
+    expect(missingResponse.headers.get("Location")).not.toMatch(/secret-code|state|code/iu);
+    expectNoStore(missingResponse);
+
+    const replay = setup();
+    replay.oauth.complete.mockRejectedValueOnce(Object.assign(new Error("hidden-code"), { code: "AUTH_OAUTH_TRANSACTION_INVALID" }));
+    const replayResponse = await replay.controller.oauthCallback!(request("/api/auth/callback?provider=google&state=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA&code=secret-code"));
+    expect(replayResponse.status).toBe(303);
+    expect(replayResponse.headers.get("Location")).toBe("https://app.example.test/app");
+    expect(await replayResponse.text()).not.toContain("hidden-code");
+  });
+
+  it("creates a session only for a completed email callback and clears the interaction", async () => {
+    const subject = setup();
+    const response = await subject.controller.emailCallback!(request("/api/auth/email/callback?code=confirmation-code"));
+    expect(subject.email.confirmEmail).toHaveBeenCalledWith({ code: "confirmation-code" }, expect.objectContaining({ interactionSelector: selector }));
+    expect(response.status).toBe(303);
+    expect(response.headers.get("Location")).toBe("https://app.example.test/app");
+    expect(response.headers.get("Set-Cookie")).toContain("__Host-ab_session=");
+    expect(response.headers.get("Set-Cookie")).toContain("__Host-ab_interaction=;");
+    expect(response.headers.get("Location")).not.toContain("confirmation-code");
+  });
+
+  it("keeps recovery callback limited and clears interaction only after password update", async () => {
+    const subject = setup();
+    const callback = await subject.controller.passwordCallback!(request("/api/auth/password/callback?code=recovery-code"));
+    expect(subject.recovery.exchange).toHaveBeenCalledWith({ code: "recovery-code" }, expect.objectContaining({ interactionSelector: selector }));
+    expect(callback.status).toBe(303);
+    expect(callback.headers.get("Location")).toBe("https://app.example.test/settings/security");
+    expect(callback.headers.get("Set-Cookie")).toBeNull();
+    expect(callback.headers.get("Location")).not.toContain("recovery-code");
+
+    const update = await subject.controller.passwordUpdate!(request("/api/auth/password/update", { method: "POST", body: JSON.stringify({ password: "b".repeat(12) }) }));
+    expect(update.status).toBe(200);
+    expect(update.headers.get("Set-Cookie")).toContain("__Host-ab_interaction=;");
+    expect(update.headers.get("Set-Cookie")).not.toContain("__Host-ab_session=");
+    expectNoStore(update);
+  });
+});
