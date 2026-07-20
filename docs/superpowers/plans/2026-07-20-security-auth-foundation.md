@@ -25,18 +25,19 @@
 - 실제 OAuth secret은 저장소에 기록하지 않으며 개발용 공급자 smoke test 전에는 운영 준비 완료로 표시하지 않는다.
 - 각 task는 RED → GREEN → REFACTOR를 확인하고 집중 테스트와 전체 회귀 테스트 결과를 기록한다.
 - 치명적·높음 보안 위험, 인증 회귀, secret scan 실패 또는 DB 권한 검증 실패가 있으면 병합하지 않는다.
+- Ponytail `full` ladder를 적용한다. 기존 코드 → Node/Web/PostgreSQL native 기능 → 이미 필요한 dependency 순서로 재사용하고, 보안·접근성·명시 요구가 아닌 단일 구현 abstraction과 미래용 scaffolding은 만들지 않는다.
 
 ## File Map
 
 | 영역 | 파일 | 책임 |
 | --- | --- | --- |
-| Workspace | `package.json`, `pnpm-lock.yaml`, `tsconfig.base.json`, `eslint.config.mjs`, `vitest.workspace.ts` | 고정 버전, 공통 명령과 strict 품질 기준 |
-| Config | `packages/config/tsconfig/*.json` | web, api, library별 compiler 기준 |
+| Workspace | `package.json`, `pnpm-lock.yaml`, `tsconfig.base.json`, `eslint.config.mjs` | 고정 버전, 공통 명령과 strict 품질 기준 |
 | Contracts | `packages/contracts/src/auth.ts`, `errors.ts`, `index.ts` | framework 독립 인증 schema와 type |
 | Database | `packages/database/src/schema/auth.ts`, `client.ts`, `index.ts` | Drizzle schema와 server-only DB client |
 | Migration | `supabase/migrations/202607200001_security_auth_foundation.sql` | private schema, table, constraint, role와 grant |
 | Web security | `apps/web/src/server/security/*.ts` | selector, encryption, cookie, CSRF, request 검증 |
-| Web session | `apps/web/src/server/session/*.ts` | session port, service와 PostgreSQL adapter |
+| Web persistence | `apps/web/src/server/persistence/auth-repository.ts`, `postgres-auth-repository.ts` | session·OAuth·recovery·rate-limit의 단일 DB 경계 |
+| Web session | `apps/web/src/server/session/session-service.ts` | session 생성·조회·회전·폐기 정책 |
 | Web auth | `apps/web/src/server/auth/*.ts` | Supabase port·adapter, email·OAuth·recovery use case |
 | BFF | `apps/web/src/app/api/auth/**/route.ts` | HTTP를 검증된 use case 호출로 변환 |
 | Web client | `apps/web/src/lib/http/*.ts`, `src/queries/auth.ts` | ky, CSRF와 TanStack Query |
@@ -112,11 +113,7 @@ git commit -m "docs: restore UTF-8 security guidance"
 **Files:**
 - Create: `tsconfig.base.json`
 - Create: `eslint.config.mjs`
-- Create: `vitest.workspace.ts`
-- Create: `packages/config/package.json`
-- Create: `packages/config/tsconfig/library.json`
-- Create: `packages/config/tsconfig/web.json`
-- Create: `packages/config/tsconfig/api.json`
+- Modify: `packages/config/README.md`
 - Modify: `package.json`
 - Modify: `pnpm-workspace.yaml`
 - Modify: `scripts/required-structure.mjs`
@@ -171,7 +168,7 @@ Expected: FAIL because `tsconfig.base.json` does not exist.
 }
 ```
 
-Root exact dev dependencies는 `typescript@6.0.3`, `vitest@4.1.10`, `@vitest/coverage-v8@4.1.10`, `eslint@10.7.0`, `@eslint/js@10.0.1`, `typescript-eslint@8.64.0`, `globals@17.7.0`, `prettier@3.9.5`, `tsx@4.23.1`, `@types/node@22.15.1`이다. `.npmrc`의 `save-exact=true`, `engine-strict=true`, `strict-peer-dependencies=true`를 유지한다.
+Root exact dev dependencies는 `typescript@6.0.3`, `vitest@4.1.10`, `@vitest/coverage-v8@4.1.10`, `eslint@10.7.0`, `@eslint/js@10.0.1`, `typescript-eslint@8.64.0`, `globals@17.7.0`, `prettier@3.9.5`, `tsx@4.23.1`, `@types/node@22.15.1`이다. 별도 config package와 Vitest workspace file은 만들지 않고 root compiler/lint 기준을 package별 `tsconfig.json`과 `vitest.config.ts`가 직접 확장한다. `.npmrc`의 `save-exact=true`, `engine-strict=true`, `strict-peer-dependencies=true`를 유지한다.
 
 `pnpm-workspace.yaml`은 `apps/*`, `packages/*`, `tests/*` 세 경계를 포함해 DB와 E2E test package도 같은 lockfile과 exact-version 정책을 사용하게 한다.
 
@@ -199,7 +196,7 @@ Expected: lockfile 생성, policy test PASS, lint/typecheck exit 0.
 - [ ] **Step 5: 커밋**
 
 ```powershell
-git add -- package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json eslint.config.mjs vitest.workspace.ts packages/config scripts/required-structure.mjs scripts/workspace-policy.test.mjs
+git add -- package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.base.json eslint.config.mjs packages/config/README.md scripts/required-structure.mjs scripts/workspace-policy.test.mjs
 git commit -m "build: establish strict TypeScript workspace"
 ```
 
@@ -350,7 +347,7 @@ create unique index auth_sessions_provider_session_unique
 
 `oauth_transactions`는 32-byte state hash, 32-byte interaction hash, provider check, encrypted verifier, 상대 return path, expires/consumed 시각을 갖는다. `auth_recovery_transactions`는 32-byte interaction hash, Supabase user ID, 암호화된 제한 recovery token, expires/consumed 시각을 갖는다. `auth_rate_limits`는 32-byte HMAC fingerprint, kind, window, count와 blocked 시각을 갖는다. public·anon·authenticated·service_role의 table 접근을 revoke하고 `app_session_bff`에 필요한 SELECT/INSERT/UPDATE/DELETE만 grant한다.
 
-Database package dependency는 `drizzle-orm@0.45.2`, `pg@8.22.0`, dev dependency는 `drizzle-kit@0.31.10`, `@types/pg@8.20.0`을 exact version으로 사용한다. DB test package는 `pg@8.22.0`, `@types/pg@8.20.0`과 workspace database package만 사용한다.
+Database package dependency는 `drizzle-orm@0.45.2`, `pg@8.22.0`, dev dependency는 `@types/pg@8.20.0`을 exact version으로 사용한다. SQL migration을 직접 검토하므로 생성용 `drizzle-kit`은 추가하지 않는다. DB test package는 `pg@8.22.0`, `@types/pg@8.20.0`과 workspace database package만 사용한다.
 
 - [ ] **Step 4: GREEN 확인**
 
@@ -487,10 +484,9 @@ git commit -m "feat: enforce auth request boundary"
 ### Task 7: 불투명 세션 domain과 PostgreSQL adapter
 
 **Files:**
-- Create: `apps/web/src/server/session/session-repository.ts`
+- Create: `apps/web/src/server/persistence/auth-repository.ts`
+- Create: `apps/web/src/server/persistence/postgres-auth-repository.ts`
 - Create: `apps/web/src/server/session/session-service.ts`
-- Create: `apps/web/src/server/session/postgres-session-repository.ts`
-- Create: `apps/web/src/server/session/memory-session-repository.ts`
 - Test: matching `*.test.ts` files.
 
 **Interfaces:**
@@ -522,7 +518,7 @@ Expected: FAIL because `SessionService` is undefined.
 - [ ] **Step 3: repository port와 service 구현**
 
 ```ts
-export interface SessionRepository {
+export interface AuthRepository {
   create(input: NewSessionRecord): Promise<void>;
   findActiveBySelectorHash(hash: Uint8Array, now: Date): Promise<AuthSessionRecord | null>;
   rotate(input: RotateSessionInput): Promise<boolean>;
@@ -532,18 +528,20 @@ export interface SessionRepository {
 }
 ```
 
+별도 memory production class는 만들지 않는다. `session-service.test.ts`의 작은 object stub이 같은 interface를 만족한다. PostgreSQL adapter 하나가 이후 OAuth·recovery·rate-limit method도 함께 구현해 pool과 transaction 처리 코드를 중복하지 않는다.
+
 `resolve`은 revoked, 7일 idle과 30일 absolute expiry를 fail closed로 거부한다. `refresh`는 기존 rotation version과 Supabase session ID를 compare-and-swap 조건으로 사용하고 새 token pair 전체를 한 transaction에서 교체한다. `GET /session` 경로의 resolve는 `last_seen_at`을 갱신하지 않는다.
 
 - [ ] **Step 4: GREEN과 DB adapter 검증**
 
-Run: `pnpm --filter @account-book/web test -- src/server/session && pnpm --filter @account-book/web typecheck`
+Run: `pnpm --filter @account-book/web test -- src/server/session src/server/persistence && pnpm --filter @account-book/web typecheck`
 
 Expected: memory service tests와 PostgreSQL query contract tests PASS.
 
 - [ ] **Step 5: 커밋**
 
 ```powershell
-git add -- apps/web/src/server/session
+git add -- apps/web/src/server/persistence apps/web/src/server/session
 git commit -m "feat: manage opaque authentication sessions"
 ```
 
@@ -554,7 +552,6 @@ git commit -m "feat: manage opaque authentication sessions"
 **Files:**
 - Create: `apps/web/src/server/auth/auth-provider-port.ts`
 - Create: `apps/web/src/server/auth/supabase-auth-adapter.ts`
-- Create: `apps/web/src/server/auth/auth-errors.ts`
 - Create: `apps/web/src/server/auth/email-auth-service.ts`
 - Create: `apps/web/src/server/auth/fake-auth-provider.ts`
 - Test: matching `*.test.ts` files.
@@ -602,13 +599,13 @@ export interface AuthProviderPort {
 
 같은 파일에서 `EmailConfirmationInput`, `OAuthStartInput`, `OAuthExchangeInput`, `RecoveryExchangeInput`, `PasswordUpdateAtProviderInput`, `AuthTokenPair`, `EmailAuthResult`, `OAuthStartResult`, `RecoveryContext`를 readonly object type으로 정의하고 token-bearing type은 server-only module 밖으로 export하지 않는다.
 
-Supabase client는 server-only 파일에서 요청별로 생성하고 `autoRefreshToken:false`, `persistSession:false`, `detectSessionInUrl:false`, `flowType:"pkce"`를 사용한다. 외부 오류는 provider code allowlist로만 매핑하고 원문 message를 response/log에 전달하지 않는다.
+Supabase client는 server-only 파일에서 요청별로 생성하고 `autoRefreshToken:false`, `persistSession:false`, `detectSessionInUrl:false`, `flowType:"pkce"`를 사용한다. 외부 오류 mapping은 adapter 안의 작은 allowlist 함수로 두고 별도 오류 module을 만들지 않으며 원문 message를 response/log에 전달하지 않는다.
 
 이 task에서 `apps/web/package.json`에 `@supabase/supabase-js@2.110.7`, `server-only@0.0.1`을 exact dependency로 추가하고 lockfile을 갱신한다.
 
 - [ ] **Step 4: GREEN 확인**
 
-Run: `pnpm --filter @account-book/web test -- src/server/auth && pnpm --filter @account-book/web typecheck`
+Run: `pnpm --filter @account-book/web test -- src/server/auth src/server/persistence && pnpm --filter @account-book/web typecheck`
 
 Expected: email auth tests PASS; response serialization에 token 문자열 0건.
 
@@ -624,8 +621,8 @@ git commit -m "feat: add server-only email authentication"
 ### Task 9: OAuth 거래와 비밀번호 recovery 상태기계
 
 **Files:**
-- Create: `apps/web/src/server/auth/oauth-transaction-repository.ts`
-- Create: `apps/web/src/server/auth/postgres-oauth-transaction-repository.ts`
+- Modify: `apps/web/src/server/persistence/auth-repository.ts`
+- Modify: `apps/web/src/server/persistence/postgres-auth-repository.ts`
 - Create: `apps/web/src/server/auth/oauth-service.ts`
 - Create: `apps/web/src/server/auth/password-recovery-service.ts`
 - Test: matching `*.test.ts` files.
@@ -669,7 +666,7 @@ Expected: OAuth/recovery tests PASS, state와 code가 오류·로그 snapshot에
 - [ ] **Step 5: 커밋**
 
 ```powershell
-git add -- apps/web/src/server/auth
+git add -- apps/web/src/server/auth apps/web/src/server/persistence
 git commit -m "feat: secure OAuth and password recovery"
 ```
 
@@ -788,7 +785,7 @@ Expected: FAIL because the auth components do not exist.
 
 배경 `oklch(0.985 0.004 260)`, ink `oklch(0.22 0.02 260)`, accent `oklch(0.52 0.18 270)`을 시작 token으로 사용하고 실제 contrast test를 통과할 때만 유지한다. desktop은 설명 panel과 form의 2열, 768px 이하는 단일열이다. radius는 16px 이하, shadow는 focus된 floating surface에만 사용한다. 숫자에는 `font-variant-numeric: tabular-nums`를 적용한다.
 
-Component test dependency는 `@testing-library/react@16.3.2`, `@testing-library/user-event@14.6.1`, `jsdom@29.1.1`, `@vitejs/plugin-react@6.0.3`, `vite@8.1.5`를 exact version으로 추가한다.
+Component test dependency는 `@testing-library/react@16.3.2`, `@testing-library/user-event@14.6.1`, `jsdom@29.1.1`을 exact version으로 추가한다. Vitest의 내장 JSX transform을 사용해 Vite React plugin과 직접 Vite dependency는 추가하지 않는다.
 
 loading spinner와 상태 전환은 180ms ease-out으로 제한하고 다음 media query로 축소한다.
 
@@ -825,10 +822,10 @@ git commit -m "feat: build responsive authentication UI"
 **Files:**
 - Create: `apps/api/package.json`, `tsconfig.json`, `vitest.config.ts`
 - Create: `apps/api/src/main.ts`, `app.module.ts`
-- Create: `apps/api/src/config/environment.ts`
+- Create: `apps/api/src/environment.ts`
 - Create: `apps/api/src/auth/jwt-verifier.ts`, `auth.guard.ts`, `principal.ts`
 - Create: `apps/api/src/me/me.controller.ts`, `me.module.ts`
-- Create: `apps/api/src/common/api-error.filter.ts`, `request-id.ts`, `logger.ts`
+- Create: `apps/api/src/common/api-error.filter.ts`, `request-context.ts`
 - Test: verifier, guard, error and endpoint tests.
 
 **Interfaces:**
@@ -864,9 +861,9 @@ export interface AccessTokenVerifier {
 }
 ```
 
-`createRemoteJWKSet`과 `jwtVerify`에 exact issuer, audience와 `algorithms:[configuredAlgorithm]`을 전달한다. Bearer header는 하나만 허용하고 길이를 제한한다. `sub`와 `session_id` UUID를 검증한 뒤 principal을 request scope에 설정한다. logger는 authorization, cookie, password, code와 token key를 redact한다. Fastify helmet을 등록하고 browser CORS를 활성화하지 않는다.
+`createRemoteJWKSet`과 `jwtVerify`에 exact issuer, audience와 `algorithms:[configuredAlgorithm]`을 전달한다. Bearer header는 하나만 허용하고 길이를 제한한다. `sub`와 `session_id` UUID를 검증한 뒤 principal을 request scope에 설정한다. request context는 safe request ID만 기록하고 request header/body 전체를 로깅하지 않는다. Fastify helmet을 등록하고 browser CORS를 활성화하지 않는다. 환경 변수는 shared Zod schema로 한 번 파싱하고 별도 config framework를 추가하지 않는다.
 
-API exact dependency는 `@nestjs/core@11.1.28`, `@nestjs/common@11.1.28`, `@nestjs/platform-fastify@11.1.28`, `@nestjs/config@4.0.4`, `fastify@5.10.0`, `@fastify/helmet@13.1.0`, `jose@6.2.3`, `pino@10.3.1`, `reflect-metadata@0.2.2`, `rxjs@7.8.2`다. Test dependency는 `@nestjs/testing@11.1.28`, `supertest@7.2.2`, `@types/supertest@7.2.1`을 사용한다.
+API exact dependency는 `@nestjs/core@11.1.28`, `@nestjs/common@11.1.28`, `@nestjs/platform-fastify@11.1.28`, `fastify@5.10.0`, `@fastify/helmet@13.1.0`, `jose@6.2.3`, `reflect-metadata@0.2.2`, `rxjs@7.8.2`다. Test dependency는 `@nestjs/testing@11.1.28`만 추가하고 HTTP test는 Fastify의 내장 `inject()`를 사용한다. 별도 config, logger와 Supertest dependency는 추가하지 않는다.
 
 - [ ] **Step 4: GREEN·API build 확인**
 
@@ -990,7 +987,7 @@ git commit -m "test: verify authentication foundation end to end"
 
 - Spec coverage: 하이브리드 환경, PostgreSQL 불투명 session, browser token 비노출, 이메일·Google·Kakao·Naver, CSRF·Origin·PKCE, JWT 재검증, UI motion, 오류, 문서와 live smoke blocker가 Task 3~13에 매핑된다.
 - Scope: 거래·예산·offline, provider 연결·해제, 자동 병합과 관리자 페이지는 구현 파일과 acceptance criteria에서 제외했다.
-- Type consistency: `AuthTokenPair`, `SessionRepository`, `AuthProviderPort`, `AuthPrincipal`, `ApiError` 이름은 producer task 이후 consumer task에서 동일하다.
+- Type consistency: `AuthTokenPair`, `AuthRepository`, `AuthProviderPort`, `AuthPrincipal`, `ApiError` 이름은 producer task 이후 consumer task에서 동일하다.
 - Security consistency: callback GET 예외는 단일 소비·binding 검증으로 제한하고 일반 상태 변경과 refresh는 POST로 유지한다.
 - Environment consistency: Node 22.15.1과 pnpm 11.9.0을 고정하고 Docker가 없는 local 환경의 DB 검증은 동일 SHA의 GitHub PostgreSQL service 결과로만 대체한다.
 - Documentation consistency: 보안 판단 주석, 환경 변수, ADR, RED/GREEN/REFACTOR와 실제 OAuth 미실행 blocker를 명시했다.
