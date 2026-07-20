@@ -82,7 +82,7 @@ function tokenPair(sessionValue: unknown): AuthTokenPair {
   const refreshToken = token(session.refresh_token);
   const user = object(session.user);
   const email = typeof user.email === "string" ? user.email : null;
-  const confirmation = typeof user.email_confirmed_at === "string" ? user.email_confirmed_at : user.confirmed_at;
+  const confirmation = user.email_confirmed_at;
   const confirmedAt = typeof confirmation === "string" ? new Date(confirmation) : new Date("invalid");
   const verified = typeof user.email === "string" && Number.isFinite(confirmedAt.getTime()) && confirmedAt.getTime() <= Date.now();
   const parsedUser = CurrentUserSchema.safeParse({ id: user.id, email, emailVerified: verified });

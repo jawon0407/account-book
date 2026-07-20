@@ -181,6 +181,15 @@ describe("SupabaseAuthAdapter", () => {
     await expectSafeError(() => subject.signInWithPassword({ email: "person@example.test", password: "a".repeat(12) }), token);
   });
 
+  it("rejects phone-only confirmation and never creates an app session", async () => {
+    const phoneConfirmed = { ...session, user: { ...session.user, email_confirmed_at: null, confirmed_at: "2026-07-20T00:00:00.000Z", phone_confirmed_at: "2026-07-20T00:00:00.000Z" } };
+    const provider = adapter(client({ signInWithPassword: vi.fn(async () => ok({ session: phoneConfirmed })) })).adapter;
+    const sessions = { create: vi.fn(async () => ({ selector: "opaque-selector", accessTokenExpiresAt: new Date(nowSeconds * 1000), absoluteExpiresAt: new Date(nowSeconds * 1000 + 86_400_000) })) };
+    const context = { emailRedirectUrl: new URL("https://app.example.test/confirm"), passwordResetRedirectUrl: new URL("https://app.example.test/recovery"), now: new Date("2026-07-20T12:00:00.000Z") };
+    await expect(new EmailAuthService(provider, sessions).signIn({ email: "person@example.test", password: "a".repeat(12) }, context)).rejects.toMatchObject({ code: "AUTH_EMAIL_VERIFICATION_REQUIRED" });
+    expect(sessions.create).not.toHaveBeenCalled();
+  });
+
   it("maps update failures safely after setting only a fresh in-memory provider session", async () => {
     const hostile = "password and access token must not escape";
     const { adapter: subject, subject: fake } = adapter(client({ updateUser: vi.fn(async () => ({ data: null, error: { status: 503, message: hostile } })) }));
