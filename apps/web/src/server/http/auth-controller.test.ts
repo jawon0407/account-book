@@ -6,6 +6,8 @@ vi.mock("server-only", () => ({}));
 
 const module = await import("./auth-controller.js").catch(() => ({} as Record<string, unknown>));
 const AuthController = module.AuthController as (new (dependencies: Record<string, unknown>) => Record<string, (request: Request, parameters?: Record<string, string>) => Promise<Response>>) | undefined;
+const sessionModule = await import("../session/session-service.js").catch(() => ({} as Record<string, unknown>));
+const SessionOperationError = sessionModule.SessionOperationError as (new (reason: "expired" | "unavailable") => Error & Readonly<{ reason: "expired" | "unavailable" }>) | undefined;
 
 const now = new Date("2026-07-20T12:00:00.000Z");
 const selector = Buffer.alloc(32, 3).toString("base64url");
@@ -86,6 +88,11 @@ function setup(overrides: Record<string, unknown> = {}) {
     ...overrides,
   });
   return { controller, email, oauth, recovery, sessions, provider, fetcher, events };
+}
+
+async function callSessionEndpoint(subject: ReturnType<typeof setup>, endpoint: "session" | "me" | "refresh"): Promise<Response> {
+  if (endpoint === "refresh") return subject.controller.refresh!(request("/api/auth/session/refresh", { method: "POST", body: "{}", headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
+  return subject.controller[endpoint]!(request(endpoint === "me" ? "/api/me" : "/api/auth/session", { headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
 }
 
 function expectNoStore(response: Response): void {
@@ -212,6 +219,31 @@ describe("AuthController", () => {
     for (const secret of [freshSelector, "provider-secret-state", "server-access-jwt"]) expect(rejectedText).not.toContain(secret);
   });
 
+  it.each([
+    "http://localhost:54321/auth/v1/authorize?state=local-state",
+    "http://127.0.0.1:54321/auth/v1/authorize?state=local-state",
+    "http://[::1]:54321/auth/v1/authorize?state=local-state",
+  ])("redirects to an exact loopback HTTP OAuth provider URL %s", async (target) => {
+    const subject = setup();
+    subject.oauth.start.mockResolvedValueOnce({ authorizationUrl: new URL(target), context: {} });
+    const response = await subject.controller.oauthContinue!(request("/api/auth/oauth/google/continue?returnPath=%2Fapp", { headers: { Cookie: `__Host-ab_interaction=${selector}`, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" } }, ""), { provider: "google" });
+    expect(response.status).toBe(303);
+    expect(response.headers.get("Location")).toBe(target);
+  });
+
+  it.each([
+    "http://provider.example.test/authorize?state=secret",
+    "https://user:password@provider.example.test/authorize",
+    "https://provider.example.test/authorize#secret",
+  ])("rejects an unsafe OAuth provider redirect %s", async (target) => {
+    const subject = setup();
+    subject.oauth.start.mockResolvedValueOnce({ authorizationUrl: new URL(target), context: {} });
+    const response = await subject.controller.oauthContinue!(request("/api/auth/oauth/google/continue?returnPath=%2Fapp", { headers: { Cookie: `__Host-ab_interaction=${selector}`, "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" } }, ""), { provider: "google" });
+    expect(response.status).toBe(400);
+    expect(response.headers.get("Location")).toBeNull();
+    expect(await response.text()).not.toContain(target);
+  });
+
   it("uses the 60-second refresh threshold without returning a token", async () => {
     const refresh = setup({ sessions: { ...setup().sessions, resolve: vi.fn(async () => ({ accessToken: "hidden", refreshToken: "hidden-refresh", sessionId: "123e4567-e89b-12d3-a456-426614174002", userId: user.id, supabaseSessionId: "123e4567-e89b-12d3-a456-426614174003", accessTokenExpiresAt: new Date(now.getTime() + 60_000), rotationVersion: 0 })) } });
     const response = await refresh.controller.session!(request("/api/auth/session", { headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
@@ -282,11 +314,37 @@ describe("AuthController", () => {
     expect(text).toBe(JSON.stringify({ refreshed: true }));
     expect(text).not.toMatch(/access|refreshToken|selector/iu);
     expectNoStore(response);
+  });
 
-    subject.sessions.refresh.mockRejectedValueOnce(new Error("AUTH_SESSION_OPERATION_FAILED"));
-    const expired = await subject.controller.refresh!(request("/api/auth/session/refresh", { method: "POST", body: "{}", headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
-    expect(expired.status).toBe(401);
-    expect(await expired.json()).toMatchObject({ code: "AUTH_SESSION_EXPIRED", retryable: false });
+  it.each([
+    ["session", "expired", 401, "AUTH_SESSION_EXPIRED", false],
+    ["me", "expired", 401, "AUTH_SESSION_EXPIRED", false],
+    ["refresh", "expired", 401, "AUTH_SESSION_EXPIRED", false],
+    ["session", "unavailable", 503, "AUTH_PROVIDER_UNAVAILABLE", true],
+    ["me", "unavailable", 503, "AUTH_PROVIDER_UNAVAILABLE", true],
+    ["refresh", "unavailable", 503, "AUTH_PROVIDER_UNAVAILABLE", true],
+  ] as const)("maps %s session failures with reason %s", async (endpoint, reason, status, code, retryable) => {
+    expect(SessionOperationError).toBeTypeOf("function");
+    const subject = setup();
+    const operation = endpoint === "refresh" ? subject.sessions.refresh : subject.sessions.resolve;
+    operation.mockRejectedValueOnce(new SessionOperationError!(reason));
+
+    const response = await callSessionEndpoint(subject, endpoint);
+
+    expect(response.status).toBe(status);
+    expect(await response.json()).toMatchObject({ code, retryable });
+    if (endpoint === "me") expect(subject.fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each(["session", "me", "refresh"] as const)("does not duck-type raw fixed-message errors from %s", async (endpoint) => {
+    const subject = setup();
+    const operation = endpoint === "refresh" ? subject.sessions.refresh : subject.sessions.resolve;
+    operation.mockRejectedValueOnce(new Error("AUTH_SESSION_OPERATION_FAILED"));
+
+    const response = await callSessionEndpoint(subject, endpoint);
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: true });
   });
 
   it("fails OAuth callback closed and removes code/state from the next redirect", async () => {

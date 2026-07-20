@@ -106,7 +106,7 @@ function databaseClient(connectionString: string): ReturnType<typeof createDatab
 export type RequestContainer = Readonly<{ authController: AuthController }>;
 
 /**
- * Constructs fresh database, provider, session, use-case, and HTTP objects for one request.
+ * Reuses one process-scoped infrastructure database client while constructing fresh request-scoped repository, provider, session, use-case, and HTTP objects.
  * @param environment - Complete server-only runtime environment; secrets are parsed but never retained in errors.
  * @returns A request-owned controller graph with no user session cached at module scope.
  * @throws `AUTH_CONFIGURATION_INVALID` before constructing an adapter when any required value is unsafe.

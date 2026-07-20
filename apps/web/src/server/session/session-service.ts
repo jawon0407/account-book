@@ -33,9 +33,12 @@ export type SessionTokenPair = Readonly<{
 /** Refreshes a decrypted provider refresh token into the next complete token pair. */
 export type SessionTokenRefresher = (refreshToken: string) => Promise<SessionTokenPair>;
 
+/** Public-safe classification for session state versus operational failures. */
+export type SessionFailureReason = "expired" | "unavailable";
+
 /** The only error exposed at the session-service boundary. */
 export class SessionOperationError extends Error {
-  public constructor() {
+  public constructor(public readonly reason: SessionFailureReason) {
     super("AUTH_SESSION_OPERATION_FAILED");
     this.name = "SessionOperationError";
   }
@@ -51,8 +54,13 @@ type ResolvedSession = Readonly<{
   rotationVersion: number;
 }>;
 
-function fail(): never {
-  throw new SessionOperationError();
+function fail(reason: SessionFailureReason = "unavailable"): never {
+  throw new SessionOperationError(reason);
+}
+
+function propagateFailure(error: unknown): never {
+  if (error instanceof SessionOperationError) throw error;
+  return fail("unavailable");
 }
 
 function validDate(value: unknown): value is Date {
@@ -103,7 +111,7 @@ function validRecord(record: AuthSessionRecord, now: Date): AuthSessionRecord {
     Number.isSafeInteger(record.rotationVersion) && record.rotationVersion >= 0,
     record.revokedAt === null,
   ].every(Boolean);
-  if (!valid) return fail();
+  if (!valid) return fail("expired");
   if (
     record.absoluteExpiresAt.getTime() - record.createdAt.getTime() <= 0 ||
     record.absoluteExpiresAt.getTime() - record.createdAt.getTime() > ABSOLUTE_LIFETIME_MS ||
@@ -111,7 +119,7 @@ function validRecord(record: AuthSessionRecord, now: Date): AuthSessionRecord {
     record.lastSeenAt.getTime() > record.absoluteExpiresAt.getTime() ||
     record.lastSeenAt.getTime() + IDLE_LIFETIME_MS <= now.getTime() ||
     record.absoluteExpiresAt.getTime() <= now.getTime()
-  ) return fail();
+  ) return fail("expired");
   return record;
 }
 
@@ -160,8 +168,8 @@ export class SessionService {
   public async resolve(selector: string, now: Date): Promise<ResolvedSession> {
     try {
       return await this.load(selector, now);
-    } catch {
-      return fail();
+    } catch (error) {
+      return propagateFailure(error);
     }
   }
 
@@ -186,8 +194,8 @@ export class SessionService {
         now: refreshedAt,
       };
       return (await this.repository.rotate(rotation)) ? { status: "refreshed" } : { status: "superseded" };
-    } catch {
-      return fail();
+    } catch (error) {
+      return propagateFailure(error);
     }
   }
 
@@ -222,19 +230,33 @@ export class SessionService {
   }
 
   private async load(selector: string, now: Date): Promise<ResolvedSession> {
-    if (!validTime(now)) return fail();
-    const selectorHash = hashSessionSelector(selector);
-    const record = await this.repository.findActiveBySelectorHash(selectorHash, new Date(now));
-    if (record === null || !sameDigest(selectorHash, record.selectorHash)) return fail();
+    if (!validTime(now)) return fail("expired");
+    let selectorHash: Uint8Array;
+    try {
+      selectorHash = hashSessionSelector(selector);
+    } catch {
+      return fail("expired");
+    }
+    let record: AuthSessionRecord | null;
+    try {
+      record = await this.repository.findActiveBySelectorHash(selectorHash, new Date(now));
+    } catch {
+      return fail("unavailable");
+    }
+    if (record === null || !(record.selectorHash instanceof Uint8Array) || !sameDigest(selectorHash, record.selectorHash)) return fail("expired");
     const active = validRecord(record, now);
-    return {
-      accessToken: decryptToken(active.encryptedAccessToken, { recordId: active.id, tokenKind: "access" }, this.keyring),
-      refreshToken: decryptToken(active.encryptedRefreshToken, { recordId: active.id, tokenKind: "refresh" }, this.keyring),
-      sessionId: active.id,
-      userId: active.userId,
-      supabaseSessionId: active.supabaseSessionId,
-      accessTokenExpiresAt: new Date(active.accessTokenExpiresAt),
-      rotationVersion: active.rotationVersion,
-    };
+    try {
+      return {
+        accessToken: decryptToken(active.encryptedAccessToken, { recordId: active.id, tokenKind: "access" }, this.keyring),
+        refreshToken: decryptToken(active.encryptedRefreshToken, { recordId: active.id, tokenKind: "refresh" }, this.keyring),
+        sessionId: active.id,
+        userId: active.userId,
+        supabaseSessionId: active.supabaseSessionId,
+        accessTokenExpiresAt: new Date(active.accessTokenExpiresAt),
+        rotationVersion: active.rotationVersion,
+      };
+    } catch {
+      return fail("expired");
+    }
   }
 }

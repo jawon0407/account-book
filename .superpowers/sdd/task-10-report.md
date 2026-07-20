@@ -113,3 +113,29 @@ Next.js 16 App Router에 13개 인증/user 경계를 연결했다. 각 요청은
 - optional coverage: 373 tests 자체는 PASS지만 기존 Task 5-9 include set이 branches 91.78%(670/730)라 threshold 100%로 exit 1. 새 controller/container/route/client는 계속 include 밖이다.
 
 실제 Supabase/disposable PostgreSQL integration은 credential과 폐기 가능한 DB가 없어 여전히 실행하지 않았다. callback/redirect, refresh CAS, pool lifecycle, pending logout, Secure cookie를 staging에서 확인하는 release blocker는 유지한다.
+
+## Second independent review: redirect and session-failure boundaries
+
+### RED evidence
+
+- Provider redirect policy: three exact loopback HTTP authorization URLs (`localhost`, `127.0.0.1`, `[::1]`) returned 400 instead of the required 303. The companion public-HTTP, credential-bearing HTTPS, and fragment-bearing HTTPS cases already failed closed.
+- Typed session classification: the focused service/controller run failed 19 of 56 cases. Thirteen service cases exposed a reasonless fixed error for missing or invalid state and provider/repository failures; six controller cases incorrectly returned 401 for operational failures or raw errors that merely copied the fixed message.
+
+### GREEN design
+
+- Redirects now allow HTTPS or HTTP only when `URL.hostname` is exactly `localhost`, `127.0.0.1`, or `[::1]`; credentials and fragments remain forbidden for every protocol.
+- `SessionOperationError` keeps the fixed non-secret `AUTH_SESSION_OPERATION_FAILED` message and adds only a typed `expired | unavailable` reason. Missing, revoked, malformed, invariant-invalid, or undecryptable session state is `expired`; repository/provider/rotation operational failures are `unavailable`. Refresh still returns `superseded` for a lost compare-and-swap.
+- `session`, `me`, and `refresh` use `instanceof SessionOperationError` plus its typed reason. Expired state returns 401/non-retryable; unavailable state returns 503/retryable. Raw errors with the same message receive no special treatment and fail as generic 503 responses.
+- The container TSDoc now states the real lifecycle: one process-scoped infrastructure database client, with fresh request-scoped repository, provider, session, use-case, and controller objects.
+
+### Fresh second-review verification
+
+All commands used the repository Node 22.15.1 and pnpm 11.9.0 shims with `CI=true`.
+
+- focused session/controller: 2 files / 56 tests PASS.
+- full web suite: 22 files / 389 tests PASS.
+- web typecheck PASS.
+- Next 16.2.10 production build PASS; all 14 BFF routes were generated.
+- security gate: 44/44 PASS.
+- root lint: PASS with zero warnings.
+- `git diff --check`: PASS.

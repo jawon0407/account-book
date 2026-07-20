@@ -66,3 +66,14 @@ Start HEAD: `164eddb`
   22 files / 373 tests. Optional coverage still exits 1 at the unchanged Task
   5-9 include set's 91.78% branches, and live provider/database integration
   remains unexecuted and release-blocking.
+- Task 10 second independent-review hardening: complete. OAuth provider
+  redirects now accept HTTPS plus exact loopback HTTP while rejecting public
+  HTTP, credentials, and fragments. Session failures carry a typed public-safe
+  `expired | unavailable` reason: missing/corrupt state maps to non-retryable
+  401, provider/repository operational failures map to retryable 503, and raw
+  fixed-message lookalikes receive no privileged mapping. The process-scoped
+  database-client/request-scoped service lifecycle is now documented exactly.
+  The review RED evidence and final design are recorded in the Task 10 report;
+  fresh verification is 56/56 focused tests, 22 files / 389 full web tests,
+  typecheck, production build, 44/44 security gate, zero-warning lint, and
+  whitespace validation all passing under Node 22 / pnpm 11 with `CI=true`.

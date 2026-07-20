@@ -26,11 +26,12 @@ import {
 import { issueCsrfToken } from "../security/csrf.js";
 import { verifyCsrfRequest } from "../security/request-origin.js";
 import { createSessionSelector, hashSessionSelector } from "../security/session-selector.js";
-import type { SessionService } from "../session/session-service.js";
+import { SessionOperationError, type SessionService } from "../session/session-service.js";
 
 const MAX_BODY_BYTES = 16_384;
 const MAX_UPSTREAM_BYTES = 65_536;
 const REFRESH_THRESHOLD_MS = 60_000;
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const ReturnPathSchema = z.enum(["/app", "/settings/security"]);
 const CsrfContextSchema = z.enum(["session", "interaction"]);
 const OAuthStartBodySchema = z.object({ returnPath: ReturnPathSchema }).strict();
@@ -139,6 +140,12 @@ export function safeAuthFailure(code: ApiError["code"], status: number, retryabl
   return json(body, status);
 }
 
+function sessionFailureResponse(error: SessionOperationError): Response {
+  return error.reason === "expired"
+    ? safeAuthFailure("AUTH_SESSION_EXPIRED", 401, false)
+    : safeAuthFailure("AUTH_PROVIDER_UNAVAILABLE", 503, true);
+}
+
 function statusFor(code: ApiError["code"]): number {
   switch (code) {
     case "AUTH_INVALID_CREDENTIALS": return 401;
@@ -168,7 +175,7 @@ function redirect(origin: URL, path: "/app" | "/settings/security", cookies: rea
 
 function providerRedirect(value: URL): Response {
   const target = new URL(value.toString());
-  if (target.protocol !== "https:" || target.username !== "" || target.password !== "" || target.hash !== "") return fail("AUTH_OAUTH_TRANSACTION_INVALID", 400);
+  if (!(target.protocol === "https:" || (target.protocol === "http:" && LOOPBACK_HOSTS.has(target.hostname))) || target.username !== "" || target.password !== "" || target.hash !== "") return fail("AUTH_OAUTH_TRANSACTION_INVALID", 400);
   const headers = noStoreHeaders();
   headers.set("Location", target.toString());
   return new Response(null, { status: 303, headers });
@@ -395,7 +402,7 @@ export class AuthController {
       await this.dependencies.sessions.refresh(selected, safeNow(this.dependencies.now));
       return json({ refreshed: true });
     } catch (error) {
-      if (error !== null && typeof error === "object" && (error as { message?: unknown }).message === "AUTH_SESSION_OPERATION_FAILED") return errorResponse(new BoundaryError("AUTH_SESSION_EXPIRED", 401));
+      if (error instanceof SessionOperationError) return sessionFailureResponse(error);
       return errorResponse(error);
     }
   }
@@ -431,7 +438,7 @@ export class AuthController {
       if (resolved.accessTokenExpiresAt.getTime() - now.getTime() <= REFRESH_THRESHOLD_MS) return fail("AUTH_SESSION_REFRESH_REQUIRED", 401);
       return json({ authenticated: true, expiresAt: resolved.accessTokenExpiresAt.toISOString() });
     } catch (error) {
-      if (!(error instanceof BoundaryError)) return errorResponse(new BoundaryError("AUTH_SESSION_EXPIRED", 401));
+      if (error instanceof SessionOperationError) return sessionFailureResponse(error);
       return errorResponse(error);
     }
   }
@@ -480,7 +487,7 @@ export class AuthController {
       if (!parsed.success) return fail("AUTH_PROVIDER_UNAVAILABLE", 502);
       return errorResponse(new BoundaryError(parsed.data.code, statusFor(parsed.data.code)));
     } catch (error) {
-      if (!(error instanceof BoundaryError) && error !== null && typeof error === "object" && (error as { message?: unknown }).message === "AUTH_SESSION_OPERATION_FAILED") return errorResponse(new BoundaryError("AUTH_SESSION_EXPIRED", 401));
+      if (error instanceof SessionOperationError) return sessionFailureResponse(error);
       return errorResponse(error);
     }
   }

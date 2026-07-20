@@ -55,7 +55,9 @@ const SessionService = serviceModule.SessionService as
       markRevocationPending(sessionId: string, now: Date): Promise<void>;
     })
   | undefined;
-const SessionOperationError = serviceModule.SessionOperationError as (new () => Error) | undefined;
+type SessionFailureReason = "expired" | "unavailable";
+type TypedSessionError = Error & Readonly<{ reason: SessionFailureReason }>;
+const SessionOperationError = serviceModule.SessionOperationError as (new (reason: SessionFailureReason) => TypedSessionError) | undefined;
 
 type Keyring = Readonly<{ currentKeyId: string; keys: ReadonlyMap<string, Uint8Array> }>;
 const keyring: Keyring = { currentKeyId: "current", keys: new Map([["current", randomBytes(32)]]) };
@@ -94,6 +96,7 @@ class TestRepository {
   public minimumAcceptedIat = 0;
   public readonly calls = { createSession: 0, legacyCreate: 0, find: 0, rotate: 0, revoke: 0, revokeAll: 0, pending: 0 };
   public fail = false;
+  public failRotate = false;
 
   public async create(input: SessionRecord): Promise<void> {
     this.calls.legacyCreate += 1;
@@ -118,7 +121,7 @@ class TestRepository {
 
   public async rotate(input: RotateInput): Promise<boolean> {
     this.calls.rotate += 1;
-    if (this.fail) throw new Error("database-secret");
+    if (this.fail || this.failRotate) throw new Error("database-secret");
     const record = this.record;
     if (
       record === null ||
@@ -222,8 +225,16 @@ async function createSession(repository = new TestRepository()) {
 function expectSafeFailure(action: () => Promise<unknown>, ...secrets: string[]): Promise<void> {
   expect(SessionOperationError).toBeTypeOf("function");
   return expect(action()).rejects.toSatisfy((error: unknown) => {
-    if (!(error instanceof (SessionOperationError as new () => Error))) return false;
+    if (!(error instanceof (SessionOperationError as new (reason: SessionFailureReason) => TypedSessionError))) return false;
     return secrets.every((secret) => !error.message.includes(secret));
+  });
+}
+
+function expectFailureReason(action: () => Promise<unknown>, reason: SessionFailureReason, ...secrets: string[]): Promise<void> {
+  expect(SessionOperationError).toBeTypeOf("function");
+  return expect(action()).rejects.toSatisfy((error: unknown) => {
+    if (!(error instanceof (SessionOperationError as new (reason: SessionFailureReason) => TypedSessionError))) return false;
+    return error.message === "AUTH_SESSION_OPERATION_FAILED" && error.reason === reason && secrets.every((secret) => !error.message.includes(secret));
   });
 }
 
@@ -320,6 +331,15 @@ describe("SessionService", () => {
     expect(refresher).not.toHaveBeenCalled();
   });
 
+  it("classifies missing session state as expired for resolve and refresh", async () => {
+    const { repository, refresher, service: subject, created } = await createSession();
+    repository.record = null;
+
+    await expectFailureReason(() => subject.resolve(created.selector, now), "expired", created.selector);
+    await expectFailureReason(() => subject.refresh(created.selector, now), "expired", created.selector);
+    expect(refresher).not.toHaveBeenCalled();
+  });
+
   it.each([
     (record: SessionRecord) => ({ ...record, selectorHash: randomBytes(32) }),
     (record: SessionRecord) => ({ ...record, revokedAt: now }),
@@ -335,7 +355,7 @@ describe("SessionService", () => {
   ])("fails closed when a stored session invariant is invalid", async (mutate) => {
     const { repository, service: subject, created } = await createSession();
     repository.record = mutate(repository.record as SessionRecord);
-    await expectSafeFailure(() => subject.resolve(created.selector, now), created.selector, id);
+    await expectFailureReason(() => subject.resolve(created.selector, now), "expired", created.selector, id);
   });
 
   it("replaces both encrypted tokens with one compare-and-swap", async () => {
@@ -384,15 +404,21 @@ describe("SessionService", () => {
     expect(repository.record?.rotationVersion).toBe(1);
   });
 
-  it("uses one fixed error for refresh provider and repository failures", async () => {
+  it("classifies refresh provider and repository failures as unavailable without leaking details", async () => {
     const failedRefresher = vi.fn(async () => Promise.reject(new Error("provider-secret")));
     const first = await createSession();
     const subject = new SessionService!(first.repository, keyring, failedRefresher, () => id, () => new Date(now));
-    await expectSafeFailure(() => subject.refresh(first.created.selector, now), "provider-secret", first.created.selector);
+    await expectFailureReason(() => subject.refresh(first.created.selector, now), "unavailable", "provider-secret", first.created.selector);
 
     const second = await createSession();
     second.repository.fail = true;
-    await expectSafeFailure(() => second.service.refresh(second.created.selector, now), "database-secret", second.created.selector);
+    await expectFailureReason(() => second.service.resolve(second.created.selector, now), "unavailable", "database-secret", second.created.selector);
+    await expectFailureReason(() => second.service.refresh(second.created.selector, now), "unavailable", "database-secret", second.created.selector);
+
+    const rotateFailure = await createSession();
+    rotateFailure.repository.failRotate = true;
+    await expectFailureReason(() => rotateFailure.service.refresh(rotateFailure.created.selector, now), "unavailable", "database-secret", rotateFailure.created.selector);
+    expect(rotateFailure.repository.calls.rotate).toBe(1);
 
     const third = await createSession();
     third.repository.fail = true;
