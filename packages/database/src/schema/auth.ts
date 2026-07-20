@@ -62,7 +62,7 @@ export const oauthTransactions = appPrivate.table(
     check("oauth_transactions_state_hash_length", sql`octet_length(${table.stateHash}) = 32`),
     check("oauth_transactions_interaction_hash_length", sql`octet_length(${table.interactionHash}) = 32`),
     check("oauth_transactions_provider", sql`${table.provider} in ('google', 'kakao', 'naver')`),
-    check("oauth_transactions_return_path", sql`${table.returnPath} like '/%' and ${table.returnPath} not like '//%' and char_length(${table.returnPath}) between 1 and 2048`),
+    check("oauth_transactions_return_path", sql`${table.returnPath} like '/%' and ${table.returnPath} not like '//%' and position(chr(92) in ${table.returnPath}) = 0 and char_length(${table.returnPath}) between 1 and 2048`),
     check("oauth_transactions_expiry", sql`${table.expiresAt} > ${table.createdAt}`),
   ],
 );

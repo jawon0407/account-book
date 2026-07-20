@@ -9,7 +9,7 @@ $$;
 alter role app_session_bff nologin nosuperuser nocreatedb nocreaterole noinherit noreplication nobypassrls;
 
 create schema if not exists app_private;
-revoke all privileges on schema app_private from public, anon, authenticated, service_role;
+revoke all privileges on schema app_private from public, anon, authenticated, service_role, app_session_bff;
 
 create table app_private.auth_sessions (
   id uuid primary key,
@@ -42,6 +42,7 @@ create table app_private.oauth_transactions (
     char_length(return_path) between 1 and 2048
     and return_path like '/%'
     and return_path not like '//%'
+    and position(chr(92) in return_path) = 0
   ),
   created_at timestamptz not null,
   expires_at timestamptz not null,
@@ -70,7 +71,15 @@ create table app_private.auth_rate_limits (
   primary key (fingerprint, kind, window_started_at)
 );
 
-revoke all privileges on all tables in schema app_private from public, anon, authenticated, service_role;
-alter default privileges in schema app_private revoke all privileges on tables from public, anon, authenticated, service_role, app_session_bff;
+revoke all privileges on all tables in schema app_private from public, anon, authenticated, service_role, app_session_bff;
+
+-- Supabase migrations execute as the postgres owner, which owns app_private tables.
+alter default privileges for role postgres in schema app_private revoke all privileges on tables from public, anon, authenticated, service_role, app_session_bff;
+
 grant usage on schema app_private to app_session_bff;
-grant select, insert, update, delete on all tables in schema app_private to app_session_bff;
+grant select, insert, update, delete on table
+  app_private.auth_sessions,
+  app_private.oauth_transactions,
+  app_private.auth_recovery_transactions,
+  app_private.auth_rate_limits
+to app_session_bff;
