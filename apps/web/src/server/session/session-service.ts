@@ -66,6 +66,12 @@ function validTime(value: unknown): value is Date {
   return validDate(value);
 }
 
+function shiftDate(date: Date, milliseconds: number): Date {
+  const shifted = new Date(date.getTime() + milliseconds);
+  if (!validDate(shifted)) return fail();
+  return shifted;
+}
+
 function validTokenPair(value: SessionTokenPair, now: Date): SessionTokenPair {
   const valid = [
     typeof value.accessToken !== "string" ||
@@ -96,6 +102,8 @@ function validRecord(record: AuthSessionRecord, now: Date): AuthSessionRecord {
   ].every(Boolean);
   if (!valid) return fail();
   if (
+    record.absoluteExpiresAt.getTime() - record.createdAt.getTime() <= 0 ||
+    record.absoluteExpiresAt.getTime() - record.createdAt.getTime() > ABSOLUTE_LIFETIME_MS ||
     record.createdAt.getTime() > record.lastSeenAt.getTime() ||
     record.lastSeenAt.getTime() > record.absoluteExpiresAt.getTime() ||
     record.lastSeenAt.getTime() + IDLE_LIFETIME_MS <= now.getTime() ||
@@ -121,7 +129,7 @@ export class SessionService {
       const id = this.createId();
       if (!validUuid(id)) return fail();
       const selector = createSessionSelector();
-      const absoluteExpiresAt = new Date(now.getTime() + ABSOLUTE_LIFETIME_MS);
+      const absoluteExpiresAt = shiftDate(now, ABSOLUTE_LIFETIME_MS);
       const record: NewSessionRecord = {
         id,
         selectorHash: hashSessionSelector(selector),
@@ -158,6 +166,7 @@ export class SessionService {
     try {
       const session = await this.load(selector, now);
       const replacement = validTokenPair(await this.refreshToken(session.refreshToken), now);
+      if (replacement.userId !== session.userId) return fail();
       const rotation: RotateSessionInput = {
         sessionId: session.sessionId,
         expectedRotationVersion: session.rotationVersion,

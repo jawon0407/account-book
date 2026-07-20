@@ -197,6 +197,8 @@ describe("SessionService", () => {
     await expectSafeFailure(() => subject.create(tokenPair({ supabaseSessionId: "not-a-uuid" }), now), "not-a-uuid");
     await expectSafeFailure(() => subject.create(tokenPair({ accessTokenExpiresAt: new Date("invalid") }), now));
     await expectSafeFailure(() => subject.create(tokenPair(), new Date("invalid")));
+    const nearMaximumNow = new Date(8_640_000_000_000_000 - 1);
+    await expectSafeFailure(() => subject.create(tokenPair({ accessTokenExpiresAt: new Date(8_640_000_000_000_000) }), nearMaximumNow));
     const invalidIdService = new SessionService!(new TestRepository(), keyring, async () => tokenPair(), () => "not-a-uuid");
     await expectSafeFailure(() => invalidIdService.create(tokenPair(), now), "not-a-uuid");
 
@@ -224,6 +226,7 @@ describe("SessionService", () => {
     (record: SessionRecord) => ({ ...record, selectorHash: randomBytes(31) }),
     (record: SessionRecord) => ({ ...record, createdAt: new Date(now.getTime() + 1), lastSeenAt: now }),
     (record: SessionRecord) => ({ ...record, lastSeenAt: new Date(now.getTime() + 1), absoluteExpiresAt: now }),
+    (record: SessionRecord) => ({ ...record, createdAt: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000 - 1), absoluteExpiresAt: now }),
     (record: SessionRecord) => ({ ...record, revocationPendingAt: new Date("invalid") }),
     (record: SessionRecord) => ({ ...record, encryptedAccessToken: { ...record.encryptedAccessToken, tag: "A".repeat(22) } }),
   ])("fails closed when a stored session invariant is invalid", async (mutate) => {
@@ -241,6 +244,15 @@ describe("SessionService", () => {
     expect(JSON.stringify(repository.record)).not.toContain("new-access");
     expect(JSON.stringify(repository.record)).not.toContain("new-refresh");
     expect(repository.calls.rotate).toBe(1);
+  });
+
+  it("rejects a canonical replacement token pair for a different user before CAS", async () => {
+    const replacementUserId = "123e4567-e89b-12d3-a456-426614174003";
+    const { repository, created } = await createSession();
+    const subject = new SessionService!(repository, keyring, async () => tokenPair({ userId: replacementUserId }), () => id);
+
+    await expectSafeFailure(() => subject.refresh(created.selector, now), replacementUserId, created.selector);
+    expect(repository.calls.rotate).toBe(0);
   });
 
   it("allows exactly one concurrent refresh CAS winner", async () => {
