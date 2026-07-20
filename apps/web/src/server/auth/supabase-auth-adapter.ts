@@ -1,12 +1,14 @@
 import "server-only";
 
 import { createClient } from "@supabase/supabase-js";
-import { CurrentUserSchema, type AuthProvider, type SignInInput, type SignUpInput } from "@account-book/contracts";
+import { AuthProviderSchema, CurrentUserSchema, PasswordResetRequestInputSchema, PasswordUpdateInputSchema, SignInInputSchema, SignUpInputSchema, type AuthProvider, type SignInInput, type SignUpInput } from "@account-book/contracts";
 import { AuthProviderError, type AuthProviderErrorCode, type AuthProviderPort, type AuthTokenPair, type EmailAuthResult, type EmailConfirmationInput, type OAuthExchangeInput, type OAuthStartInput, type OAuthStartResult, type PasswordUpdateAtProviderInput, type RecoveryContext, type RecoveryExchangeInput } from "./auth-provider-port.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u;
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/u;
 const AUTH_OPTIONS = { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false, flowType: "pkce" } as const;
+const SIGNUP_EXISTENCE_CODES = new Set(["user_already_exists", "email_exists", "user_already_registered", "email_already_exists", "user_already_exist"]);
+const RESET_ABSENT_CODES = new Set(["user_not_found", "email_not_found", "user_not_exist", "email_not_exists", "user_does_not_exist"]);
 
 /** Validated public Supabase endpoint and anon key; service-role credentials are deliberately absent. */
 export type SupabaseServerConfig = Readonly<{ url: string; anonKey: string }>;
@@ -22,6 +24,7 @@ function fail(code: AuthProviderErrorCode = "AUTH_PROVIDER_UNAVAILABLE"): never 
 function object(value: unknown): Record<string, unknown> { if (value === null || typeof value !== "object" || Array.isArray(value)) return fail(); return value as Record<string, unknown>; }
 function hasControlCharacter(value: string): boolean { return Array.from(value).some((character) => { const code = character.charCodeAt(0); return code <= 31 || code === 127; }); }
 function nonEmpty(value: unknown, max = 16_384): string { if (typeof value !== "string" || value.length === 0 || value.length > max || hasControlCharacter(value)) return fail(); return value; }
+function token(value: unknown): string { const safe = nonEmpty(value); if (safe.trim() !== safe) return fail(); return safe; }
 function uuid(value: unknown): string { if (typeof value !== "string" || !UUID_PATTERN.test(value)) return fail(); return value; }
 function safeUrl(value: unknown, allowDevelopmentHttp: boolean): URL {
   if (!(value instanceof URL) && typeof value !== "string") return fail();
@@ -31,6 +34,11 @@ function safeUrl(value: unknown, allowDevelopmentHttp: boolean): URL {
   return url;
 }
 function config(input: SupabaseServerConfig): SupabaseServerConfig { return { url: safeUrl(input?.url, true).toString(), anonKey: nonEmpty(input?.anonKey) }; }
+function providerCode(value: unknown): string {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return "";
+  const code = (value as Record<string, unknown>).code;
+  return typeof code === "string" ? code : "";
+}
 function mappedProviderError(value: unknown): AuthProviderError {
   const error = object(value);
   const status = error.status;
@@ -51,29 +59,41 @@ function accepted(value: unknown): void {
   const response = object(value);
   if (response.error !== null && response.error !== undefined) throw mappedProviderError(response.error);
 }
-function sessionId(accessToken: string): string {
+function canonicalSegment(value: unknown): string {
+  if (typeof value !== "string" || !BASE64URL_PATTERN.test(value)) return fail();
+  const decoded = Buffer.from(value, "base64url");
+  if (decoded.length === 0 || decoded.toString("base64url") !== value) return fail();
+  return value;
+}
+function jwtClaims(accessToken: string): Readonly<{ userId: string; sessionId: string; expiresAt: number }> {
   const parts = accessToken.split(".");
-  if (parts.length !== 3 || !BASE64URL_PATTERN.test(parts[1]!)) return fail();
+  if (parts.length !== 3) return fail();
   try {
-    const payload = parts[1]!;
-    const decoded = Buffer.from(payload, "base64url");
-    if (decoded.length === 0 || decoded.toString("base64url") !== payload) return fail();
-    return uuid(object(JSON.parse(decoded.toString("utf8"))).session_id);
+    canonicalSegment(parts[0]!); const payload = canonicalSegment(parts[1]!); canonicalSegment(parts[2]!);
+    const claims = object(JSON.parse(Buffer.from(payload, "base64url").toString("utf8")));
+    const expiresAt = claims.exp;
+    if (typeof expiresAt !== "number" || !Number.isSafeInteger(expiresAt) || new Date(expiresAt * 1000).getTime() <= Date.now()) return fail();
+    return { userId: uuid(claims.sub), sessionId: uuid(claims.session_id), expiresAt };
   } catch { return fail(); }
 }
 function tokenPair(sessionValue: unknown): AuthTokenPair {
   const session = object(sessionValue);
-  const accessToken = nonEmpty(session.access_token);
-  const refreshToken = nonEmpty(session.refresh_token);
+  const accessToken = token(session.access_token);
+  const refreshToken = token(session.refresh_token);
   const user = object(session.user);
   const email = typeof user.email === "string" ? user.email : null;
-  const verified = typeof user.email === "string" && (typeof user.email_confirmed_at === "string" || typeof user.confirmed_at === "string");
+  const confirmation = typeof user.email_confirmed_at === "string" ? user.email_confirmed_at : user.confirmed_at;
+  const confirmedAt = typeof confirmation === "string" ? new Date(confirmation) : new Date("invalid");
+  const verified = typeof user.email === "string" && Number.isFinite(confirmedAt.getTime()) && confirmedAt.getTime() <= Date.now();
   const parsedUser = CurrentUserSchema.safeParse({ id: user.id, email, emailVerified: verified });
-  const expiresAt = typeof session.expires_at === "number" && Number.isFinite(session.expires_at) ? new Date(session.expires_at * 1000) : new Date("invalid");
-  if (!parsedUser.success || !parsedUser.data.emailVerified || !Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now()) return fail("AUTH_EMAIL_VERIFICATION_REQUIRED");
-  return { accessToken, refreshToken, userId: uuid(user.id), supabaseSessionId: sessionId(accessToken), accessTokenExpiresAt: expiresAt, user: parsedUser.data };
+  if (!parsedUser.success || !parsedUser.data.emailVerified) return fail("AUTH_EMAIL_VERIFICATION_REQUIRED");
+  const claims = jwtClaims(accessToken);
+  const userId = uuid(user.id);
+  const expiresAt = typeof session.expires_at === "number" && Number.isSafeInteger(session.expires_at) ? new Date(session.expires_at * 1000) : new Date("invalid");
+  if (!Number.isFinite(expiresAt.getTime()) || expiresAt.getTime() <= Date.now() || claims.userId !== userId || claims.expiresAt !== session.expires_at) return fail();
+  return { accessToken, refreshToken, userId, supabaseSessionId: claims.sessionId, accessTokenExpiresAt: expiresAt, user: parsedUser.data };
 }
-function code(value: unknown): string { return nonEmpty(value, 4096); }
+function code(value: unknown): string { const safe = nonEmpty(value, 4096); if (safe.trim() !== safe) return fail("AUTH_OAUTH_TRANSACTION_INVALID"); return safe; }
 function providerId(provider: AuthProvider): string { return provider === "naver" ? "custom:naver" : provider; }
 
 /** Request-scoped Supabase adapter that returns only validated, verified token pairs to server use cases. */
@@ -89,16 +109,27 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
   /** Starts email signup with a trusted server-supplied confirmation callback URL. */
   public async signUp(input: SignUpInput, redirectUrl: URL): Promise<EmailAuthResult> {
     try {
+      const parsed = SignUpInputSchema.safeParse(input);
+      if (!parsed.success) return fail("AUTH_INVALID_CREDENTIALS");
       const callbackUrl = safeUrl(redirectUrl, true);
-      const data = dataOf(await this.client().auth.signUp({ email: input.email, password: input.password, options: { emailRedirectTo: callbackUrl.toString() } }));
+      const response = object(await this.client().auth.signUp({ email: parsed.data.email, password: parsed.data.password, options: { emailRedirectTo: callbackUrl.toString() } }));
+      if (response.error !== null && response.error !== undefined) {
+        if (SIGNUP_EXISTENCE_CODES.has(providerCode(response.error))) return { status: "verification_required" };
+        throw mappedProviderError(response.error);
+      }
+      const data = object(response.data);
       if (data.session === null || data.session === undefined) return { status: "verification_required" };
-      return { status: "authenticated", tokens: tokenPair(data.session) };
+      try { return { status: "authenticated", tokens: tokenPair(data.session) }; } catch { return { status: "verification_required" }; }
     } catch (error) { return this.rethrow(error); }
   }
 
   /** Exchanges valid email credentials for a complete verified provider session. */
   public async signInWithPassword(input: SignInInput): Promise<AuthTokenPair> {
-    try { return tokenPair(dataOf(await this.client().auth.signInWithPassword({ email: input.email, password: input.password })).session); } catch (error) { return this.rethrow(error); }
+    try {
+      const parsed = SignInInputSchema.safeParse(input);
+      if (!parsed.success) return fail("AUTH_INVALID_CREDENTIALS");
+      return tokenPair(dataOf(await this.client().auth.signInWithPassword(parsed.data)).session);
+    } catch (error) { return this.rethrow(error); }
   }
 
   /** Exchanges an email confirmation code without persisting it in the adapter. */
@@ -109,8 +140,10 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
   /** Obtains an external provider authorization URL with no browser redirect or local session persistence. */
   public async startOAuth(input: OAuthStartInput): Promise<OAuthStartResult> {
     try {
+      const provider = AuthProviderSchema.safeParse(input?.provider);
+      if (!provider.success) return fail("AUTH_OAUTH_TRANSACTION_INVALID");
       const redirectUrl = safeUrl(input?.redirectUrl, true);
-      const data = dataOf(await this.client().auth.signInWithOAuth({ provider: providerId(input.provider), options: { redirectTo: redirectUrl.toString(), skipBrowserRedirect: true } }));
+      const data = dataOf(await this.client().auth.signInWithOAuth({ provider: providerId(provider.data), options: { redirectTo: redirectUrl.toString(), skipBrowserRedirect: true } }));
       return { authorizationUrl: safeUrl(object(data).url, false) };
     } catch (error) { return this.rethrow(error); }
   }
@@ -122,17 +155,24 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
 
   /** Refreshes a server-held refresh token through a fresh no-persistence client. */
   public async refresh(refreshToken: string): Promise<AuthTokenPair> {
-    try { const token = nonEmpty(refreshToken); return tokenPair(dataOf(await this.client().auth.refreshSession({ refresh_token: token })).session); } catch (error) { return this.rethrow(error); }
+    try { const refresh = token(refreshToken); return tokenPair(dataOf(await this.client().auth.refreshSession({ refresh_token: refresh })).session); } catch (error) { return this.rethrow(error); }
   }
 
   /** Revokes a provider session using only server-held token material. */
   public async signOut(accessToken: string, refreshToken: string): Promise<void> {
-    try { const access = nonEmpty(accessToken); const refresh = nonEmpty(refreshToken); const client = this.client(); dataOf(await client.auth.setSession({ access_token: access, refresh_token: refresh })); accepted(await client.auth.signOut()); } catch (error) { return this.rethrow(error); }
+    try { const access = token(accessToken); const refresh = token(refreshToken); const client = this.client(); dataOf(await client.auth.setSession({ access_token: access, refresh_token: refresh })); accepted(await client.auth.signOut()); } catch (error) { return this.rethrow(error); }
   }
 
   /** Requests password reset delivery without exposing provider account-existence behavior. */
   public async requestPasswordReset(email: string, redirectUrl: URL): Promise<void> {
-    try { const safeEmail = nonEmpty(email, 254); const callbackUrl = safeUrl(redirectUrl, true); accepted(await this.client().auth.resetPasswordForEmail(safeEmail, { redirectTo: callbackUrl.toString() })); } catch (error) { return this.rethrow(error); }
+    try {
+      const parsed = PasswordResetRequestInputSchema.safeParse({ email });
+      if (!parsed.success) return fail("AUTH_INVALID_CREDENTIALS");
+      const callbackUrl = safeUrl(redirectUrl, true);
+      const response = object(await this.client().auth.resetPasswordForEmail(parsed.data.email, { redirectTo: callbackUrl.toString() }));
+      if (response.error !== null && response.error !== undefined && RESET_ABSENT_CODES.has(providerCode(response.error))) return;
+      accepted(response);
+    } catch (error) { return this.rethrow(error); }
   }
 
   /** Exchanges a recovery callback code into server-only credentials for the next recovery step. */
@@ -143,10 +183,12 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
   /** Updates one password after placing recovery credentials only in the fresh in-memory client. */
   public async updatePassword(input: PasswordUpdateAtProviderInput): Promise<void> {
     try {
-      const access = nonEmpty(input?.accessToken); const refresh = nonEmpty(input?.refreshToken); const password = nonEmpty(input?.password, 1024);
+      const access = token(input?.accessToken); const refresh = token(input?.refreshToken);
+      const password = PasswordUpdateInputSchema.safeParse({ password: input?.password });
+      if (!password.success) return fail("AUTH_INVALID_CREDENTIALS");
       const client = this.client();
       dataOf(await client.auth.setSession({ access_token: access, refresh_token: refresh }));
-      accepted(await client.auth.updateUser({ password }));
+      accepted(await client.auth.updateUser({ password: password.data.password }));
     } catch (error) { return this.rethrow(error); }
   }
 

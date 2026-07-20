@@ -2,6 +2,8 @@ import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { SessionService } from "../session/session-service.js";
 
+vi.mock("server-only", () => ({}));
+
 const authModule = await import("./email-auth-service.js").catch(() => ({} as Record<string, unknown>));
 const fakeModule = await import("./fake-auth-provider.js").catch(() => ({} as Record<string, unknown>));
 
@@ -113,6 +115,26 @@ describe("EmailAuthService", () => {
     await expect(service.confirmEmail({ code: "server-only-code" }, context)).resolves.toMatchObject({ selector: "opaque-selector", user: tokens.user });
     expect(provider.calls.confirmEmail).toEqual([{ code: "server-only-code" }]);
     expect(sessions.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects a hostile confirmation code before calling the provider", async () => {
+    const provider = new FakeAuthProvider!();
+    const service = new EmailAuthService!(provider, sessionCreator());
+    await expect(service.confirmEmail({ code: "bad\ncode" }, context)).rejects.toMatchObject({ code: "AUTH_OAUTH_TRANSACTION_INVALID" });
+    expect(provider.calls.confirmEmail).toHaveLength(0);
+  });
+
+  it("keeps signup acknowledgement identical for authenticated and existing-account outcomes", async () => {
+    const provider = new FakeAuthProvider!();
+    const sessions = sessionCreator();
+    const service = new EmailAuthService!(provider, sessions);
+    provider.signUpResult = { status: "authenticated", tokens };
+    const authenticated = JSON.stringify(await service.signUp(validInput, context));
+    provider.failure = new (await import("./auth-provider-port.js")).AuthProviderError("AUTH_INVALID_CREDENTIALS");
+    const existing = JSON.stringify(await service.signUp(validInput, context));
+    expect(existing).toBe(authenticated);
+    expect(existing).toBe(JSON.stringify({ accepted: true }));
+    expect(sessions.create).not.toHaveBeenCalled();
   });
 
   it("maps provider and session failures without echoing secrets", async () => {

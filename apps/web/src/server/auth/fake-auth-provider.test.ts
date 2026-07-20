@@ -1,6 +1,8 @@
-import { expect, it } from "vitest";
-import { AuthProviderError } from "./auth-provider-port.js";
-import { FakeAuthProvider } from "./fake-auth-provider.js";
+import { expect, it, vi } from "vitest";
+
+vi.mock("server-only", () => ({}));
+const { AuthProviderError } = await import("./auth-provider-port.js");
+const { FakeAuthProvider } = await import("./fake-auth-provider.js");
 
 it("is explicit test-only configuration with deterministic call capture", async () => {
   const fake = new FakeAuthProvider();

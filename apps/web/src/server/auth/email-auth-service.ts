@@ -13,6 +13,10 @@ export class EmailAuthServiceError extends Error {
 }
 
 function fail(code: AuthProviderErrorCode = "AUTH_PROVIDER_UNAVAILABLE"): never { throw new EmailAuthServiceError(code); }
+function safeCode(value: unknown): string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 4096 || value.trim() !== value || Array.from(value).some((character) => { const code = character.charCodeAt(0); return code <= 31 || code === 127; })) return fail("AUTH_OAUTH_TRANSACTION_INVALID");
+  return value;
+}
 function safeContext(context: EmailAuthContext): EmailAuthContext {
   const urls = [context?.emailRedirectUrl, context?.passwordResetRedirectUrl];
   if (!(context?.now instanceof Date) || !Number.isFinite(context.now.getTime()) || !urls.every((url) => url instanceof URL && url.username === "" && url.password === "" && (url.protocol === "https:" || (url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname))))) return fail();
@@ -40,7 +44,10 @@ export class EmailAuthService {
       if (!parsed.success) return fail("AUTH_INVALID_CREDENTIALS");
       await this.provider.signUp(parsed.data, safeContext(context).emailRedirectUrl);
       return { accepted: true };
-    } catch (error) { return providerFailure(error); }
+    } catch (error) {
+      if (error instanceof AuthProviderError && (error.code === "AUTH_INVALID_CREDENTIALS" || error.code === "AUTH_EMAIL_VERIFICATION_REQUIRED")) return { accepted: true };
+      return providerFailure(error);
+    }
   }
 
   /** Signs in a verified user and returns only opaque-session metadata. */
@@ -54,7 +61,7 @@ export class EmailAuthService {
 
   /** Exchanges a server callback code only after validating its exact trusted context. */
   public async confirmEmail(input: EmailConfirmationInput, context: EmailAuthContext): Promise<PublicSession> {
-    try { return await this.create(verifiedPair(await this.provider.confirmEmail(input)), safeContext(context)); } catch (error) { return providerFailure(error); }
+    try { const trusted = safeContext(context); return await this.create(verifiedPair(await this.provider.confirmEmail({ code: safeCode(input?.code) })), trusted); } catch (error) { return providerFailure(error); }
   }
 
   /** Starts reset delivery without exposing whether the email belongs to an account. */

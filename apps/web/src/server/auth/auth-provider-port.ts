@@ -1,3 +1,5 @@
+import "server-only";
+
 import type { AuthProvider, CurrentUser, SignInInput, SignUpInput } from "@account-book/contracts";
 
 /** A confirmation code received only by the server callback. */
