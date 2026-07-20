@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { test } from "node:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,6 +35,16 @@ const expectedScripts = {
   verify: "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
 };
 
+function tsconfigFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      return tsconfigFiles(path);
+    }
+    return entry.name === "tsconfig.json" ? [path] : [];
+  });
+}
+
 test("workspace pins strict TypeScript, boundaries, and verification policy", () => {
   const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
   const tsconfig = JSON.parse(readFileSync(tsconfigPath, "utf8"));
@@ -65,6 +75,16 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
     assert.equal(tsconfig.compilerOptions[option], true);
   }
   assert.equal(tsconfig.compilerOptions.skipLibCheck, false);
+  const packageLocalSkipLibCheck = ["apps", "packages", "tests"]
+    .flatMap((directory) => tsconfigFiles(join(rootDir, directory)))
+    .filter((path) => JSON.parse(readFileSync(path, "utf8")).compilerOptions?.skipLibCheck === true)
+    .map((path) => path.slice(rootDir.length + 1).replaceAll("\\", "/"))
+    .sort();
+  assert.deepEqual(packageLocalSkipLibCheck, [
+    "apps/web/tsconfig.json",
+    "packages/database/tsconfig.json",
+    "tests/database/tsconfig.json",
+  ]);
   for (const boundary of ["apps/*", "packages/*", "tests/*"]) {
     assert.equal(workspace.includes(`  - ${boundary}`), true);
   }
