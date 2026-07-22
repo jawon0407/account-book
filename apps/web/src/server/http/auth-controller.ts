@@ -166,7 +166,7 @@ function json(body: unknown, status = 200, cookies: readonly string[] = []): Res
   return new Response(JSON.stringify(body), { status, headers });
 }
 
-function redirect(origin: URL, path: "/app" | "/settings/security", cookies: readonly string[] = []): Response {
+function redirect(origin: URL, path: "/app" | "/reset-password" | "/settings/security", cookies: readonly string[] = []): Response {
   const headers = noStoreHeaders();
   headers.set("Location", new URL(path, origin).toString());
   for (const cookieValue of cookies) headers.append("Set-Cookie", cookieValue);
@@ -413,7 +413,7 @@ export class AuthController {
       const selected = this.interactionSelector(request);
       const code = callbackValue(new URL(request.url).searchParams.get("code"));
       await this.dependencies.recovery.exchange({ code }, this.recoveryContext(selected));
-      return redirect(this.origin, "/settings/security");
+      return redirect(this.origin, "/reset-password");
     } catch {
       return redirect(this.origin, "/app", [serializedCookie(clearAuthCookie(INTERACTION_COOKIE_NAME, this.dependencies.secureCookies))]);
     }

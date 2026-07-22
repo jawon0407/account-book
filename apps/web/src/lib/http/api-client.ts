@@ -35,11 +35,19 @@ export class ApiClientError extends Error {
 
 /**
  * Converts an unknown ky failure into a strict public error and drops untrusted details.
- * @param error - A caught browser request failure, optionally carrying a `Response`.
+ * @param error - A caught browser request failure, optionally carrying ky 2 `data` or a `Response`.
  * @returns A validated error suitable for control flow.
  */
 export async function apiError(error: unknown): Promise<ApiClientError> {
   if (error instanceof ApiClientError) return error;
+  if (error !== null && typeof error === "object") {
+    try {
+      const parsed = ApiErrorSchema.safeParse((error as { data?: unknown }).data);
+      if (parsed.success) return new ApiClientError(parsed.data);
+    } catch {
+      // Continue to the response fallback when an untrusted property cannot be read.
+    }
+  }
   const response = error !== null && typeof error === "object" ? (error as { response?: unknown }).response : undefined;
   if (response instanceof Response) {
     try {

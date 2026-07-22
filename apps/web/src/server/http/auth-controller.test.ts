@@ -378,12 +378,12 @@ describe("AuthController", () => {
     expect(response.headers.get("Location")).not.toContain("confirmation-code");
   });
 
-  it("keeps recovery callback limited and clears interaction only after password update", async () => {
+  it("opens the reset form after a limited recovery callback and clears interaction only after password update", async () => {
     const subject = setup();
     const callback = await subject.controller.passwordCallback!(request("/api/auth/password/callback?code=recovery-code"));
     expect(subject.recovery.exchange).toHaveBeenCalledWith({ code: "recovery-code" }, expect.objectContaining({ interactionSelector: selector }));
     expect(callback.status).toBe(303);
-    expect(callback.headers.get("Location")).toBe("https://app.example.test/settings/security");
+    expect(callback.headers.get("Location")).toBe("https://app.example.test/reset-password");
     expect(callback.headers.get("Set-Cookie")).toBeNull();
     expect(callback.headers.get("Location")).not.toContain("recovery-code");
 
