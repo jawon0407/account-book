@@ -37,6 +37,7 @@ const expectedScripts = {
 };
 
 const approvedPackageLocalSkipLibCheck = [
+  "apps/api/tsconfig.json",
   "apps/web/tsconfig.json",
   "packages/database/tsconfig.json",
   "tests/database/tsconfig.json",
