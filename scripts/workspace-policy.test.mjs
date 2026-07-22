@@ -23,7 +23,7 @@ const expectedDevDependencies = {
   globals: "17.7.0",
   prettier: "3.9.5",
   tsx: "4.23.1",
-  "@types/node": "22.15.1",
+  "@types/node": "22.20.1",
 };
 
 const expectedScripts = {
@@ -31,13 +31,12 @@ const expectedScripts = {
   test: "pnpm test:legacy && pnpm test:workspace",
   "test:db": "pnpm --filter @account-book/database-tests test",
   lint: "eslint . --max-warnings=0",
-  typecheck: "pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api typecheck",
+  typecheck: "pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api --filter @account-book/database-tests --filter @account-book/e2e typecheck",
   build: "pnpm --filter @account-book/contracts build && pnpm --filter @account-book/database build && pnpm --filter @account-book/api build && pnpm --filter @account-book/web build",
   verify: "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
 };
 
 const approvedPackageLocalSkipLibCheck = [
-  "apps/api/tsconfig.json",
   "apps/web/tsconfig.json",
   "packages/database/tsconfig.json",
   "tests/database/tsconfig.json",
@@ -110,7 +109,10 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
         return [name, value === "true" ? true : value];
       }),
   );
-  assert.deepEqual(allowBuilds, { esbuild: true, sharp: true });
+  assert.deepEqual(allowBuilds, { esbuild: true });
+  // Next 16.2.10 pulls vulnerable sharp 0.34.5 only as an optional image optimizer.
+  // The app has no next/image usage, so keep that unused native dependency absent.
+  assert.match(workspace, /^overrides:\r?\n {2}"next@16\.2\.10>sharp": "-"$/mu);
   for (const policy of ["engine-strict=true", "save-exact=true", "strict-peer-dependencies=true"]) {
     assert.match(npmrc, new RegExp(`^${policy}$`, "m"));
   }

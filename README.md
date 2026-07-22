@@ -4,7 +4,7 @@ PC와 모바일에서 사용할 수 있는 보안 우선 동기화형 개인 가
 
 ## Current Stage
 
-인증 기반 Task 12까지 완료되어 server-side 인증 도메인, PostgreSQL opaque session 저장소, server-owned PKCE·password recovery, 14개 same-origin Next.js BFF route, 반응형 인증 UI와 NestJS/Fastify JWT 신뢰 경계가 구현되었습니다. API는 remote JWKS로 서명·알고리즘·issuer·audience·시간·사용자/세션 UUID를 검증한 뒤에만 `/v1/me` principal을 만들며, 브라우저 token state나 CORS 경로를 만들지 않습니다. 전체 검증은 API test 54개와 web test 426개를 포함해 통과했습니다. 실제 Supabase/disposable PostgreSQL 통합 검증과 optional branch coverage `91.78%`의 100% gate 충족은 후속 작업입니다.
+인증 기반 Task 13의 로컬 구현까지 완료되었습니다. server-side 인증 도메인, PostgreSQL opaque session 저장소, server-owned PKCE·password recovery, 14개 same-origin Next.js BFF route, 반응형 인증 UI, NestJS/Fastify JWT 신뢰 경계에 더해 process-local ES256 IDP와 두 viewport의 Playwright·axe 인증 E2E가 추가되었습니다. 로컬 단위·정책 검증은 security/legacy 52개, contracts 15개, database 8개, API 54개, web 434개, disposable DB preparation 8개, production fake startup 1개와 모든 strict TypeScript 검사·프로덕션 빌드를 통과했습니다. 실제 disposable PostgreSQL을 사용하는 전체 브라우저 체인, hosted DB 최소 권한, Google·Kakao·Naver live OAuth와 동일 SHA CI 증거는 아직 출시 차단 항목입니다.
 
 ## Planned Stack
 
@@ -34,3 +34,13 @@ pnpm verify:structure
 ```
 
 Do not commit `.env` files, tokens, OAuth secrets, Supabase service-role keys, or production data.
+
+## Authentication verification
+
+Task 13 adds a disposable browser chain on fixed loopback ports: process-local ES256 IDP `4510`, real remote-JWKS API `4511`, and HTTPS Next.js BFF `4512`. The browser receives only `__Host-ab_session`; provider credentials remain encrypted in PostgreSQL and move server-to-server only.
+
+- [Opaque session ADR](docs/architecture/adr/0001-opaque-auth-sessions.md)
+- [Authentication environment guide](docs/guides/auth-environment.md)
+- [Authentication security testing](docs/guides/security-auth-testing.md)
+
+`pnpm test:db` and `pnpm --filter @account-book/e2e test` require an explicitly disposable PostgreSQL. Live provider OAuth is not local release evidence.

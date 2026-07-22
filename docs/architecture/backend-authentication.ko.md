@@ -8,11 +8,11 @@
 
 | 상태 | 범위 |
 | --- | --- |
-| 구현됨 | 인증 계약과 도메인 서비스, Supabase server-only adapter, opaque session·PostgreSQL 저장소, Next.js BFF 14개 route, request-scoped controller/container, same-origin CSRF, server-owned OAuth redirect handoff, always-Secure cookie, no-store 응답, ky 2 browser client와 TanStack Query binding, Task 11 반응형 인증 UI, Task 12 NestJS/Fastify JWT guard와 `/health`·`/v1/me` |
+| 구현됨 | 인증 계약과 도메인 서비스, Supabase server-only adapter, opaque session·PostgreSQL 저장소, Next.js BFF 14개 route, request-scoped controller/container, same-origin CSRF, server-owned OAuth redirect handoff, always-Secure cookie, no-store 응답, ky 2 browser client와 TanStack Query binding, Task 11 반응형 인증 UI, Task 12 NestJS/Fastify JWT guard와 `/health`·`/v1/me`, Task 13 disposable DB·ES256 IDP·Playwright 인증 체인과 CI gate |
 | 스키마만 구현됨 | `auth_rate_limits` 테이블. 이를 사용하는 rate-limit use case는 없다. |
 | 아직 없음 | 관리자 페이지, rate-limit use case, revocation retry worker |
 | 이 작업 공간에서 미검증 | 실제 Supabase Auth와 disposable PostgreSQL에 대한 live 통합 검증 |
-| 품질 후속 | API test 54개, web test 426개와 production build는 통과했다. optional coverage는 기존 instrumentation 범위에서 branch `91.78%`로 100% threshold를 충족하지 못하며 Task 10·11 신규 경계가 아직 include되지 않았다. 실제 remote JWKS와 Supabase/PostgreSQL 연결은 Task 13 live 통합 검증 대상이다. |
+| 품질 후속 | Security/legacy 52개, contracts 15개, database 8개, API 54개, web 434개, DB preparation 8개와 production fake startup 1개가 통과했다. 기존 optional branch coverage `91.78%`의 100% threshold 충족은 별도 품질 후속이다. 실제 disposable PostgreSQL에서 migration 001→003과 전체 브라우저 성공 체인을 실행한 증거는 같은 commit SHA의 CI가 필요하다. Hosted DB 최소 권한과 Google·Kakao·Naver live OAuth는 여전히 운영 출시 차단 항목이다. |
 
 ## 문제와 선택
 
@@ -69,7 +69,7 @@ flowchart LR
 
 환경 변수는 Zod로 한 번 파싱하고 frozen snapshot으로 재사용한다. JWKS와 issuer URL은 HTTPS가 원칙이며 Task 13 로컬 IDP에 한해 exact `localhost`, `127.0.0.1`, `[::1]` HTTP를 허용한다. credentials, fragment, public HTTP와 numeric loopback 우회 표기는 거부한다.
 
-`apps/api/tsconfig.json`의 package-local `skipLibCheck: true`는 TypeScript 6.0.3과 고정된 `@types/node` 22.15.1 외부 선언 충돌에 대한 사용자 승인 예외다. `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`는 계속 적용되고 workspace policy가 이 경로 하나만 추가 허용한다.
+과거 `apps/api/tsconfig.json`에 두었던 package-local `skipLibCheck: true` 예외는 제거했다. 동일 Node 22 계열의 `@types/node`를 TypeScript 6.0.3 호환 선언이 포함된 22.20.1로 갱신해 `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`와 외부 선언 검사를 모두 유지한다.
 
 ## 비밀값과 selector의 위치
 

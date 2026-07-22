@@ -33,8 +33,12 @@ pnpm --filter @account-book/api typecheck
 pnpm --filter @account-book/api build
 ```
 
-`apps/api/tsconfig.json`의 `skipLibCheck: true`는 TypeScript 6.0.3과 고정된 `@types/node` 22.15.1의 Fastify 관련 외부 선언 충돌을 피하기 위한 사용자 승인 예외다. 애플리케이션 소스는 계속 `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`를 상속하며 workspace policy가 예외 경로를 정확히 제한한다.
+동일 Node 22 계열의 `@types/node`를 TypeScript 6.0.3 호환 선언이 포함된 22.20.1로 갱신해 과거 `skipLibCheck: true` 예외를 제거했다. API와 외부 선언은 모두 `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `skipLibCheck: false` 정책으로 검사된다.
 
 ---
 
 This internal NestJS/Fastify API currently exposes public `GET /health` and JWT-protected `GET /v1/me`. It is the final authority for JWT validation and will own resource authorization, input schemas, versions, idempotency, and financial data changes. Production verification uses remote JWKS and fails closed; browser CORS and token storage are intentionally absent.
+
+## End-to-end authentication smoke
+
+Task 13 starts the real API on `127.0.0.1:4511` and points its verifier at a process-local ES256 IDP on `127.0.0.1:4510`. A successful `/api/me` requires remote JWKS signature verification plus exact issuer, audience, algorithm, expiry, `sub`, and `session_id` validation. A 401/503 is never successful smoke evidence. Hosted JWKS and issuer remain HTTPS-only.

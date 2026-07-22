@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "prepare:e2e": "tsx prepare-auth-e2e.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

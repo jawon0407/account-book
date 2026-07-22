@@ -122,7 +122,7 @@ git commit -m "docs: restore UTF-8 security guidance"
 
 **Interfaces:**
 - Consumes: Node 22.15.1 and pnpm 11.9.0.
-- Produces: `pnpm lint`, `pnpm typecheck`, `pnpm test:workspace`, `pnpm build`, `pnpm verify`.
+- Produces: `pnpm lint`, `pnpm typecheck`, `pnpm test:workspace`, `pnpm build`, `pnpm run verify`.
 
 - [ ] **Step 1: strict compiler와 workspace script 실패 테스트 작성**
 
@@ -168,7 +168,7 @@ Expected: FAIL because `tsconfig.base.json` does not exist.
 }
 ```
 
-Root exact dev dependencies는 `typescript@6.0.3`, `vitest@4.1.10`, `@vitest/coverage-v8@4.1.10`, `eslint@10.7.0`, `@eslint/js@10.0.1`, `typescript-eslint@8.64.0`, `globals@17.7.0`, `prettier@3.9.5`, `tsx@4.23.1`, `@types/node@22.15.1`이다. 별도 config package와 Vitest workspace file은 만들지 않고 root compiler/lint 기준을 package별 `tsconfig.json`과 `vitest.config.ts`가 직접 확장한다. `.npmrc`의 `save-exact=true`, `engine-strict=true`, `strict-peer-dependencies=true`를 유지한다.
+Root exact dev dependencies는 `typescript@6.0.3`, `vitest@4.1.10`, `@vitest/coverage-v8@4.1.10`, `eslint@10.7.0`, `@eslint/js@10.0.1`, `typescript-eslint@8.64.0`, `globals@17.7.0`, `prettier@3.9.5`, `tsx@4.23.1`, `@types/node@22.20.1`이다. 별도 config package와 Vitest workspace file은 만들지 않고 root compiler/lint 기준을 package별 `tsconfig.json`과 `vitest.config.ts`가 직접 확장한다. `.npmrc`의 `save-exact=true`, `engine-strict=true`, `strict-peer-dependencies=true`를 유지한다.
 
 `pnpm-workspace.yaml`은 `apps/*`, `packages/*`, `tests/*` 세 경계를 포함해 DB와 E2E test package도 같은 lockfile과 exact-version 정책을 사용하게 한다.
 
@@ -181,7 +181,7 @@ Root script는 다음 이름과 조합을 사용한다.
   "test": "pnpm test:legacy && pnpm test:workspace",
   "test:db": "pnpm --filter @account-book/database-tests test",
   "lint": "eslint . --max-warnings=0",
-  "typecheck": "pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api typecheck",
+  "typecheck": "pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api --filter @account-book/database-tests --filter @account-book/e2e typecheck",
   "build": "pnpm --filter @account-book/contracts build && pnpm --filter @account-book/database build && pnpm --filter @account-book/api build && pnpm --filter @account-book/web build",
   "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
 }
@@ -884,6 +884,8 @@ git commit -m "feat: verify API authentication principals"
 
 **Files:**
 - Create: `tests/e2e/package.json`, `tests/e2e/playwright.config.ts`, `tests/e2e/test-idp-server.ts`, `tests/e2e/auth.spec.ts`
+- Create: `tests/e2e/production-fake-startup.test.ts`, `tests/database/prepare-auth-e2e.ts`, `tests/database/prepare-auth-e2e.test.ts`, `apps/web/scripts/assert-auth-startup.mjs`
+- Modify: `tests/database/package.json`, `tests/database/tsconfig.json`, `apps/web/package.json`, `apps/web/next.config.ts`
 - Modify: `.github/workflows/security-gate.yml`
 - Modify: `scripts/security/workflow-policy.test.mjs`
 - Modify: `README.md`, `apps/web/README.md`, `apps/api/README.md`
@@ -921,7 +923,7 @@ test("email login never exposes provider tokens", async ({ page }) => {
 });
 ```
 
-Workflow policy test에는 frozen install, `pnpm verify`, PostgreSQL service, `pnpm test:db`, 읽기 전용 permission, SHA-pinned action 두 개만 허용하는 assertion을 추가한다.
+Workflow policy test에는 frozen install, `pnpm run verify`, PostgreSQL service, `pnpm test:db`, 읽기 전용 permission, SHA-pinned action 두 개만 허용하는 assertion을 추가한다.
 
 E2E package는 `@playwright/test@1.61.1`과 `@axe-core/playwright@4.12.1`을 exact dev dependency로 사용한다. `test-idp-server.ts`는 test 전용 ES256 key pair로 JWT와 JWKS를 제공하며 `127.0.0.1`에만 bind한다. Playwright webServer는 이 IDP, 실제 jose verifier를 사용하는 API, fake Auth adapter를 사용하는 web process를 명시적 port에서 실행하고 기존 server 재사용을 CI에서 금지한다. production mode에서 fake adapter가 선택되면 E2E가 startup 실패를 확인한다.
 
@@ -941,12 +943,24 @@ Workflow에 digest-pinned `postgres:17@sha256:cb875afe6d2e8593c28c22d37d0fd7aaf0
       - name: Install the reviewed dependency graph
         run: pnpm install --frozen-lockfile
       - name: Run repository verification
-        run: pnpm verify
+        run: pnpm run verify
       - name: Verify PostgreSQL authentication boundaries
         env:
           TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/account_book_test
+          TEST_DATABASE_DISPOSABLE: 'true'
         run: pnpm test:db
+      - name: Prepare the disposable database for browser authentication
+        env:
+          TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/account_book_test
+          TEST_DATABASE_DISPOSABLE: 'true'
+        run: pnpm --filter @account-book/database-tests prepare:e2e
+      - name: Install the pinned Chromium runtime
+        run: pnpm --filter @account-book/e2e exec playwright install --with-deps chromium
       - name: Run browser authentication tests
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/account_book_test
+          TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/account_book_test
+          TEST_DATABASE_DISPOSABLE: 'true'
         run: pnpm --filter @account-book/e2e test
       - name: Audit production dependencies
         run: pnpm audit --prod --audit-level high
@@ -962,8 +976,10 @@ Run:
 
 ```powershell
 pnpm setup:hooks
-pnpm verify
+pnpm run verify
 pnpm test:db
+pnpm --filter @account-book/database-tests prepare:e2e
+pnpm --filter @account-book/e2e exec playwright install --with-deps chromium
 pnpm --filter @account-book/e2e test
 pnpm audit --prod --audit-level high
 git diff --check

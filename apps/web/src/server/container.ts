@@ -67,6 +67,12 @@ function serverUrl(value: string, protocols: ReadonlySet<string>, rootOnly: bool
   return url;
 }
 
+function fakeProviderUrl(value: string): URL {
+  const url = serverUrl(value, new Set(["http:"]), false);
+  if (url.toString() !== value || url.hostname !== "127.0.0.1" || url.port !== "4510" || url.pathname !== "/token" || url.search !== "") return invalidConfiguration();
+  return url;
+}
+
 function canonicalKey(value: string): Uint8Array {
   if (!/^[A-Za-z0-9_-]{43}$/u.test(value)) return invalidConfiguration();
   const decoded = Buffer.from(value, "base64url");
@@ -120,7 +126,7 @@ export function createRequestContainer(environment: Readonly<Record<string, stri
     const csrfKey = canonicalKey(required(environment, "AUTH_CSRF_HMAC_KEY"));
     const repository = new PostgresAuthRepository(databaseClient(databaseUrl));
     const provider = runtime.mode === "fake"
-      ? new FakeAuthProvider()
+      ? new FakeAuthProvider(environment.AUTH_FAKE_PROVIDER_URL === undefined ? undefined : { tokenUrl: fakeProviderUrl(required(environment, "AUTH_FAKE_PROVIDER_URL")) })
       : new SupabaseAuthAdapter({
           url: serverUrl(required(environment, "SUPABASE_URL"), new Set(["http:", "https:"]), true).toString(),
           anonKey: required(environment, "SUPABASE_ANON_KEY"),

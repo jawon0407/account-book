@@ -39,6 +39,29 @@ describe("authentication runtime selection", () => {
     expect(resolveAuthRuntime!({ NODE_ENV: "test", APP_ORIGIN: `http://${hostname}:3000`, AUTH_ADAPTER_MODE: "fake" })).toMatchObject({ mode: "fake" });
   });
 
+  it("accepts only the exact test IDP token bridge on 127.0.0.1:4510", () => {
+    expect(() => createRequestContainer!({ ...runtimeEnvironment, AUTH_FAKE_PROVIDER_URL: "http://127.0.0.1:4510/token" })).not.toThrow();
+    for (const value of [
+      "http://localhost:4510/token",
+      "http://127.1:4510/token",
+      "http://127.0.0.1:04510/token",
+      "http://127.0.0.1:4511/token",
+      "http://127.0.0.1:4510/other",
+      "http://127.0.0.1:4510/token?detail=1",
+      "http://user:pass@127.0.0.1:4510/token",
+      "https://127.0.0.1:4510/token",
+    ]) expect(() => createRequestContainer!({ ...runtimeEnvironment, AUTH_FAKE_PROVIDER_URL: value })).toThrow("AUTH_CONFIGURATION_INVALID");
+  });
+
+  it("rejects a production fake bridge before constructing an authentication request graph", () => {
+    expect(() => createRequestContainer!({
+      ...runtimeEnvironment,
+      APP_ORIGIN: "https://localhost",
+      AUTH_FAKE_PROVIDER_URL: "http://127.0.0.1:4510/token",
+      NODE_ENV: "production",
+    })).toThrow("AUTH_CONFIGURATION_INVALID");
+  });
+
   it.each([
     "https://user:pass@app.example.test",
     "https://app.example.test/path",

@@ -30,3 +30,44 @@ it("implements every provider operation only from explicit deterministic results
   expect(fake.calls.exchangeOAuthCode).toEqual([{ code: "code", codeVerifier }]);
   expect(fake.calls.exchangeRecoveryCode).toEqual([{ code: "code", codeVerifier }]);
 });
+
+const bridgeInput = { email: "verified@example.test", password: "correct horse battery staple" };
+const bridgeUser = { id: "123e4567-e89b-42d3-a456-426614174001", email: bridgeInput.email, emailVerified: true };
+
+function validBridgeResponse(): Response {
+  const issuedAtSeconds = Math.floor(Date.now() / 1000) - 1;
+  return Response.json({
+    accessToken: "signed-access-token",
+    accessTokenExpiresAt: new Date((issuedAtSeconds + 300) * 1000).toISOString(),
+    issuedAtSeconds,
+    refreshToken: "opaque-refresh-token",
+    supabaseSessionId: "123e4567-e89b-42d3-a456-426614174002",
+    user: bridgeUser,
+    userId: bridgeUser.id,
+  }, { headers: { "Cache-Control": "no-store" } });
+}
+
+it("accepts one strict valid token pair from the explicit loopback bridge", async () => {
+  const fetcher = vi.fn(async () => validBridgeResponse());
+  const fake = new FakeAuthProvider({ tokenUrl: new URL("http://127.0.0.1:4510/token"), fetcher });
+  const pair = await fake.signInWithPassword(bridgeInput);
+  expect(pair).toMatchObject({ accessToken: "signed-access-token", refreshToken: "opaque-refresh-token", user: bridgeUser, userId: bridgeUser.id });
+  expect(fetcher).toHaveBeenCalledWith(new URL("http://127.0.0.1:4510/token"), expect.objectContaining({ method: "POST", body: JSON.stringify(bridgeInput) }));
+});
+
+it("maps bridge 401 to one fixed invalid-credentials error", async () => {
+  const fake = new FakeAuthProvider({ tokenUrl: new URL("http://127.0.0.1:4510/token"), fetcher: vi.fn(async () => Response.json({ provider: "detail-secret" }, { status: 401 })) });
+  await expect(fake.signInWithPassword(bridgeInput)).rejects.toMatchObject({ code: "AUTH_INVALID_CREDENTIALS", message: "AUTH_INVALID_CREDENTIALS" });
+});
+
+it.each([
+  ["malformed pair", async () => Response.json({ accessToken: "provider-detail-secret" })],
+  ["oversized response", async () => new Response("x".repeat(65_537), { status: 200, headers: { "Content-Type": "application/json" } })],
+  ["fetch failure", async () => { throw new Error("provider-detail-secret"); }],
+  ["timeout", async () => { throw new DOMException("provider-detail-secret", "AbortError"); }],
+])("maps %s to one detail-free unavailable error", async (_name, fetcher) => {
+  const fake = new FakeAuthProvider({ tokenUrl: new URL("http://127.0.0.1:4510/token"), fetcher });
+  const error = await fake.signInWithPassword(bridgeInput).catch((caught: unknown) => caught);
+  expect(error).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", message: "AUTH_PROVIDER_UNAVAILABLE" });
+  expect(JSON.stringify(error)).not.toContain("provider-detail-secret");
+});
