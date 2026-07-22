@@ -226,6 +226,22 @@ describe("provider and shell interactions", () => {
     expect(surface!.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 
+  it("identifies the authentication surface once before requesting credentials", () => {
+    expect(AuthShell).toBeTypeOf("function");
+    if (AuthShell === undefined) return;
+    render(
+      <AuthShell title="로그인" description="계속하려면 로그인하세요." footer={<a href="/sign-up">새 계정 만들기</a>}>
+        <p>로그인 양식</p>
+      </AuthShell>,
+    );
+    const brand = screen.getByText("Account Book");
+    const heading = screen.getByRole("heading", { level: 1, name: "로그인" });
+    const context = screen.getByRole("complementary", { name: "서비스 안내" });
+    expect(screen.getAllByText("Account Book")).toHaveLength(1);
+    expect(brand.compareDocumentPosition(heading) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(heading.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it("includes the exact reduced-motion safety override", async () => {
     const css = await readFile(resolve(process.cwd(), "src/app/globals.css"), "utf8");
     expect(css).toContain("@media (prefers-reduced-motion: reduce)");

@@ -75,7 +75,15 @@ a:active { color: var(--ink); }
 .auth-context h2, .auth-heading h1 { margin: 0; text-wrap: balance; letter-spacing: -0.025em; }
 .auth-context h2 { max-width: 16ch; font-size: 1.75rem; line-height: 1.2; }
 .auth-context p, .auth-heading p { max-width: 65ch; margin: 0.75rem 0 0; color: var(--muted); text-wrap: pretty; }
-.auth-brand { margin: 0 !important; color: var(--ink) !important; font-weight: 750; letter-spacing: -0.02em; }
+.auth-brand {
+  position: relative;
+  z-index: 1;
+  margin: 0 !important;
+  padding: clamp(1.5rem, 5vw, 3.5rem) clamp(1.5rem, 5vw, 3.5rem) 0;
+  color: var(--ink) !important;
+  font-weight: 750;
+  letter-spacing: -0.02em;
+}
 .auth-security-note { margin-top: auto !important; font-size: 0.9375rem; }
 
 .auth-surface {
@@ -150,7 +158,8 @@ a:active { color: var(--ink); }
 @media (min-width: 48.0625rem) {
   .auth-main { padding: 2rem; }
   .auth-shell { display: grid; grid-template-columns: minmax(17rem, 0.8fr) minmax(24rem, 1.2fr); min-height: min(48rem, calc(100vh - 4rem)); }
-  .auth-context { grid-column: 1; grid-row: 1; }
+  .auth-brand { grid-column: 1; grid-row: 1; align-self: start; }
+  .auth-context { grid-column: 1; grid-row: 1; padding-top: calc(clamp(1.5rem, 5vw, 3.5rem) + 3.5rem); }
   .auth-surface { grid-column: 2; grid-row: 1; }
 }
 
