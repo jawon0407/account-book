@@ -181,8 +181,10 @@ Root script는 다음 이름과 조합을 사용한다.
   "test": "pnpm test:legacy && pnpm test:workspace",
   "test:db": "pnpm --filter @account-book/database-tests test",
   "lint": "eslint . --max-warnings=0",
-  "typecheck": "pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api --filter @account-book/database-tests --filter @account-book/e2e typecheck",
-  "build": "pnpm --filter @account-book/contracts build && pnpm --filter @account-book/database build && pnpm --filter @account-book/api build && pnpm --filter @account-book/web build",
+  "build:packages": "pnpm --filter @account-book/contracts build && pnpm --filter @account-book/database build",
+  "typecheck:workspace": "pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api --filter @account-book/database-tests --filter @account-book/e2e typecheck",
+  "typecheck": "pnpm build:packages && pnpm typecheck:workspace",
+  "build": "pnpm build:packages && pnpm --filter @account-book/api build && pnpm --filter @account-book/web build",
   "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
 }
 ```
