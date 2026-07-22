@@ -113,3 +113,22 @@ Start HEAD: `164eddb`
   runtime is 24.14.0 rather than the pinned 22.15.1, so the engine warning
   remains; live Supabase/PostgreSQL and optional 91.78% branch coverage remain
   unchanged release follow-ups. No push was performed.
+- Task 12: complete (commits `80c1310`, `9087ac5`; independent security/code
+  review CLEAN after one Important finding was fixed). The NestJS/Fastify API
+  now exposes public `/health` and protected `/v1/me`; production uses remote
+  JWKS with an exact asymmetric algorithm, issuer, scalar audience, time claims,
+  and canonical user/session UUIDs before attaching an immutable principal.
+  Raw Authorization cardinality and syntax, server-owned request IDs, Helmet,
+  no-CORS, no-store responses, and fixed non-secret `ApiError` mapping are
+  enforced. Review hardening rejects unsupported protected `crit` extensions
+  before key resolution, preserves invalid-token 401 classification for unknown
+  keys/signatures, and keeps timeout/fetch/malformed-JWKS failures operational.
+  TDD records the initial missing-boundary RED and the review regression RED;
+  fresh root `pnpm verify` passed lint, all package typechecks/builds, security
+  49, contracts 15, database 8, API 54, web 426, and the 20-route Next build.
+  The user-approved `apps/api/tsconfig.json`-only `skipLibCheck` exception works
+  around the TypeScript 6.0.3 / pinned Node declaration conflict while inherited
+  `strict`, `noUncheckedIndexedAccess`, and `exactOptionalPropertyTypes` remain
+  active and workspace policy constrains the exact path. Verification used Node
+  24.14.0 rather than pinned 22.15.1; live remote JWKS/Supabase/PostgreSQL stays
+  a Task 13 release follow-up. No push was performed.

@@ -4,7 +4,7 @@ PC와 모바일에서 사용할 수 있는 보안 우선 동기화형 개인 가
 
 ## Current Stage
 
-인증 기반 Task 11까지 완료되어 server-side 인증 도메인, PostgreSQL opaque session 저장소, server-owned PKCE·password recovery, 14개 same-origin Next.js BFF route와 반응형 인증 UI가 구현되었습니다. 이메일 가입·로그인·확인·비밀번호 복구와 Google·Kakao·Naver 진입 화면은 PC/모바일, 키보드, reduced-motion 환경을 지원하며 browser token state를 만들지 않습니다. Task 12 NestJS API/JWT guard와 실제 Supabase/disposable PostgreSQL 통합 검증은 아직 완료되지 않았습니다. Web test 426개와 production build는 통과했지만 optional branch coverage는 `91.78%`로 100% gate를 충족하지 못합니다.
+인증 기반 Task 12까지 완료되어 server-side 인증 도메인, PostgreSQL opaque session 저장소, server-owned PKCE·password recovery, 14개 same-origin Next.js BFF route, 반응형 인증 UI와 NestJS/Fastify JWT 신뢰 경계가 구현되었습니다. API는 remote JWKS로 서명·알고리즘·issuer·audience·시간·사용자/세션 UUID를 검증한 뒤에만 `/v1/me` principal을 만들며, 브라우저 token state나 CORS 경로를 만들지 않습니다. 전체 검증은 API test 54개와 web test 426개를 포함해 통과했습니다. 실제 Supabase/disposable PostgreSQL 통합 검증과 optional branch coverage `91.78%`의 100% gate 충족은 후속 작업입니다.
 
 ## Planned Stack
 

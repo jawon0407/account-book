@@ -1,6 +1,6 @@
 # 인증 백엔드 아키텍처
 
-> **English Summary:** The implemented authentication boundary now includes 14 same-origin Next.js BFF routes, always-Secure opaque cookies, selector-bound CSRF, server-owned OAuth redirect handoff, request-scoped services over a shared database client, encrypted provider credentials, typed refresh failures, and responsive accessible authentication screens. Task 12 NestJS API/JWT validation, rate-limit use cases, and live Supabase/PostgreSQL verification remain unfinished.
+> **English Summary:** The implemented authentication boundary now includes 14 same-origin Next.js BFF routes, always-Secure opaque cookies, selector-bound CSRF, server-owned OAuth redirect handoff, request-scoped services over a shared database client, encrypted provider credentials, responsive accessible authentication screens, and a NestJS/Fastify API that independently verifies JWT signatures and claims before creating a request principal. Rate-limit use cases and live Supabase/PostgreSQL verification remain unfinished.
 
 이 문서는 현재 코드에 구현된 인증 도메인, 저장소, same-origin HTTP 경계가 왜 이런 구조를 택했는지 설명한다. 구현 근거는 [`apps/web/src/server`](../../apps/web/src/server/), [`apps/web/src/app/api`](../../apps/web/src/app/api/), browser query 계층과 [인증 DB 스키마](../database/auth-schema.ko.md)다.
 
@@ -8,11 +8,11 @@
 
 | 상태 | 범위 |
 | --- | --- |
-| 구현됨 | 인증 계약과 도메인 서비스, Supabase server-only adapter, opaque session·PostgreSQL 저장소, Next.js BFF 14개 route, request-scoped controller/container, same-origin CSRF, server-owned OAuth redirect handoff, always-Secure cookie, no-store 응답, ky 2 browser client와 TanStack Query binding, Task 11 반응형 인증 UI |
+| 구현됨 | 인증 계약과 도메인 서비스, Supabase server-only adapter, opaque session·PostgreSQL 저장소, Next.js BFF 14개 route, request-scoped controller/container, same-origin CSRF, server-owned OAuth redirect handoff, always-Secure cookie, no-store 응답, ky 2 browser client와 TanStack Query binding, Task 11 반응형 인증 UI, Task 12 NestJS/Fastify JWT guard와 `/health`·`/v1/me` |
 | 스키마만 구현됨 | `auth_rate_limits` 테이블. 이를 사용하는 rate-limit use case는 없다. |
-| 아직 없음 | Task 12 NestJS `/v1/me` API와 JWT guard, 관리자 페이지, rate-limit use case, revocation retry worker |
+| 아직 없음 | 관리자 페이지, rate-limit use case, revocation retry worker |
 | 이 작업 공간에서 미검증 | 실제 Supabase Auth와 disposable PostgreSQL에 대한 live 통합 검증 |
-| 품질 후속 | web test 426개와 production build는 통과했다. optional coverage는 기존 instrumentation 범위에서 branch `91.78%`로 100% threshold를 충족하지 못하며 Task 10·11 신규 경계가 아직 include되지 않았다. |
+| 품질 후속 | API test 54개, web test 426개와 production build는 통과했다. optional coverage는 기존 instrumentation 범위에서 branch `91.78%`로 100% threshold를 충족하지 못하며 Task 10·11 신규 경계가 아직 include되지 않았다. 실제 remote JWKS와 Supabase/PostgreSQL 연결은 Task 13 live 통합 검증 대상이다. |
 
 ## 문제와 선택
 
@@ -37,7 +37,7 @@ flowchart LR
   Supabase["Supabase Auth\n외부 신뢰 경계"]
   Repo["PostgresAuthRepository"]
   DB["PostgreSQL app_private\n암호화 token · digest"]
-  API["NestJS /v1/me\nTask 12 미구현"]
+  API["NestJS /health · /v1/me\nJWT 재검증 경계"]
 
   Browser -->|"same-origin 요청\nopaque cookie만"| BFF
   BFF --> Guard
@@ -49,7 +49,27 @@ flowchart LR
   BFF -.->|"고정 API_INTERNAL_URL\nBearer access JWT"| API
 ```
 
-브라우저 URL, `Host`, forwarding header와 request body는 신뢰하지 않는다. BFF는 callback URL을 canonical `APP_ORIGIN`에서 만들고 selector를 두 `__Host-` cookie에서만 읽으며, 입력과 upstream JSON을 stream byte 기준으로 제한한다. Supabase adapter는 공급자 응답의 사용자 UUID, session UUID, email 확인 시각, JWT `iat`·`exp`, token lifetime 일관성을 다시 검사한다. `/api/me`가 호출하는 NestJS `/v1/me`와 JWT 서명 guard는 Task 12 범위라 아직 구현되지 않았다.
+브라우저 URL, `Host`, forwarding header와 request body는 신뢰하지 않는다. BFF는 callback URL을 canonical `APP_ORIGIN`에서 만들고 selector를 두 `__Host-` cookie에서만 읽으며, 입력과 upstream JSON을 stream byte 기준으로 제한한다. Supabase adapter는 공급자 응답의 사용자 UUID, session UUID, email 확인 시각, JWT `iat`·`exp`, token lifetime 일관성을 다시 검사한다. `/api/me`는 고정 `API_INTERNAL_URL/v1/me`에 server-held access JWT를 전달하고, NestJS API가 이를 독립 검증해 BFF와 provider adapter 자체를 암묵적으로 신뢰하지 않는다.
+
+## NestJS API JWT 신뢰 경계
+
+[`apps/api/src/auth`](../../apps/api/src/auth/)는 HTTP header와 JWT를 다음 순서로 검증한다.
+
+1. Node raw header pair에서 `Authorization`이 정확히 한 개인지 확인한다.
+2. 전체 값이 8192바이트 이하이고 제어 문자, 앞뒤 공백, 병합된 값이 없는 canonical `Bearer <JWT>` 형식인지 확인한다.
+3. 지원하지 않는 protected `crit` 확장을 key resolver 호출 전에 invalid credential로 거부한다.
+4. production에서 `createRemoteJWKSet`으로 얻은 key와 설정된 단일 `ES256 | RS256` 알고리즘으로 서명을 검증한다.
+5. 정확한 issuer와 scalar audience, 필수 `exp`, 유효한 optional `nbf`를 검증한다. audience 배열이나 추가 audience는 허용하지 않는다.
+6. `sub`와 `session_id`가 canonical UUID인지 확인한 뒤 두 값만 immutable `AuthPrincipal`로 만든다.
+7. 모든 검증이 끝난 뒤에만 Fastify request에 principal을 부착한다.
+
+따라서 body, query, 일반 header나 이메일·역할 같은 임의 JWT claim으로 사용자 소유권을 결정할 수 없다. `/v1/me`는 공유 `CurrentUser` 계약에 맞춰 검증된 `userId`, `email: null`, 기존 verified-session 불변조건을 나타내는 `emailVerified: true`만 반환한다.
+
+잘못된 credential은 세부 원인을 구분하지 않는 401 `AUTH_SESSION_EXPIRED`, JWKS나 내부 운영 실패는 503 `AUTH_PROVIDER_UNAVAILABLE`로 고정한다. 두 경우 모두 strict `ApiError`, 서버 생성 UUID `X-Request-Id`, `Cache-Control: private, no-store`를 사용하며 exception, token, 공급자 URL/message, header/body나 환경값을 직렬화하거나 로그로 남기지 않는다. Helmet은 등록하고 CORS는 등록하지 않는다.
+
+환경 변수는 Zod로 한 번 파싱하고 frozen snapshot으로 재사용한다. JWKS와 issuer URL은 HTTPS가 원칙이며 Task 13 로컬 IDP에 한해 exact `localhost`, `127.0.0.1`, `[::1]` HTTP를 허용한다. credentials, fragment, public HTTP와 numeric loopback 우회 표기는 거부한다.
+
+`apps/api/tsconfig.json`의 package-local `skipLibCheck: true`는 TypeScript 6.0.3과 고정된 `@types/node` 22.15.1 외부 선언 충돌에 대한 사용자 승인 예외다. `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`는 계속 적용되고 workspace policy가 이 경로 하나만 추가 허용한다.
 
 ## 비밀값과 selector의 위치
 
