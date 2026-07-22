@@ -1,6 +1,10 @@
-import { generateKeyPair, SignJWT, type JWTPayload } from "jose";
+import { errors, generateKeyPair, SignJWT, type JWTPayload } from "jose";
 import { beforeAll, describe, expect, it } from "vitest";
-import { InvalidAccessTokenError, JwtAccessTokenVerifier } from "./jwt-verifier.js";
+import {
+  AccessTokenVerificationUnavailableError,
+  InvalidAccessTokenError,
+  JwtAccessTokenVerifier,
+} from "./jwt-verifier.js";
 
 const issuer = "https://id.example.test/auth/v1";
 const audience = "authenticated";
@@ -71,6 +75,35 @@ describe("JwtAccessTokenVerifier", () => {
     await expect(verifier.verify(await token({}, otherPrivateKey))).rejects.toBeInstanceOf(InvalidAccessTokenError);
     await expect(verifier.verify(`${header}.${payload}.`)).rejects.toBeInstanceOf(InvalidAccessTokenError);
     await expect(verifier.verify(`${wrongAlgorithmHeader}.${payload}.${valid.split(".")[2]}`)).rejects.toBeInstanceOf(InvalidAccessTokenError);
+  });
+
+  it("rejects unsupported protected critical headers as an invalid token", async () => {
+    const header = Buffer.from(JSON.stringify({ alg: "ES256", crit: ["x"], x: true })).toString("base64url");
+
+    await expect(verifier.verify(`${header}.e30.AA`)).rejects.toBeInstanceOf(InvalidAccessTokenError);
+  });
+
+  it("classifies actual JOSE key-selection failures as invalid tokens", async () => {
+    const unknownKey = new JwtAccessTokenVerifier(
+      { issuer, audience, algorithm: "ES256" },
+      async () => { throw new errors.JWKSNoMatchingKey(); },
+    );
+
+    await expect(unknownKey.verify(await token())).rejects.toBeInstanceOf(InvalidAccessTokenError);
+  });
+
+  it.each([
+    ["JWKS timeout", new errors.JWKSTimeout()],
+    ["remote fetch failure", new TypeError("fetch failed with provider detail")],
+    ["invalid provider JWKS", new errors.JWKSInvalid("provider JWKS detail")],
+  ])("classifies %s as an operational failure", async (_name, failure) => {
+    const unavailable = new JwtAccessTokenVerifier(
+      { issuer, audience, algorithm: "ES256" },
+      async () => { throw failure; },
+    );
+
+    await expect(unavailable.verify(await token())).rejects.toBeInstanceOf(AccessTokenVerificationUnavailableError);
+    await expect(unavailable.verify(await token())).rejects.not.toThrow(/provider detail/iu);
   });
 
   it("turns resolver failures into a fixed unavailable error without provider detail", async () => {

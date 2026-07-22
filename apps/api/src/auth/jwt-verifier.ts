@@ -1,5 +1,6 @@
 import {
   createRemoteJWKSet,
+  decodeProtectedHeader,
   errors,
   jwtVerify,
   type JWTVerifyGetKey,
@@ -26,7 +27,7 @@ export type RemoteJwtVerificationPolicy = JwtVerificationPolicy & Readonly<{ jwk
  */
 export interface AccessTokenVerifier {
   /**
-   * Checks structure, algorithm, signature, registered claims, then canonical UUID claims.
+   * Checks protected-header structure/extensions, algorithm, signature, registered claims, then canonical UUID claims.
    * @param token - A bounded compact JWT extracted from one canonical Bearer header.
    * @returns The verified user and session IDs, with all other claims discarded.
    * @throws A fixed invalid-token or unavailable error; verification never falls back to unverified data.
@@ -65,8 +66,8 @@ function invalidJoseError(error: unknown): boolean {
 
 /**
  * Verifies JWTs with an explicitly supplied JOSE key resolver.
- * Signature and registered-claim validation precede exact-audience and UUID checks, and every
- * invalid path fails closed to one detail-free error.
+ * Protected-header validation precedes signature and registered-claim validation, then exact-audience
+ * and UUID checks run; every invalid path fails closed to one detail-free error.
  */
 export class JwtAccessTokenVerifier implements AccessTokenVerifier {
   /**
@@ -79,12 +80,18 @@ export class JwtAccessTokenVerifier implements AccessTokenVerifier {
   ) {}
 
   /**
-   * Validates compact structure, algorithm, signature, issuer/audience/time claims, then UUID claims.
+   * Validates protected-header structure/extensions, algorithm, signature, issuer/audience/time claims, then UUID claims.
    * @param token - One bounded compact JWT from the HTTP guard.
    * @returns A frozen principal containing only verified `sub` and `session_id` values.
    * @throws Fixed errors for invalid tokens or operational key failures; unverified claims are never returned.
    */
   public async verify(token: string): Promise<AuthPrincipal> {
+    try {
+      // Critical extensions change verification semantics; this boundary opts into none.
+      if (decodeProtectedHeader(token).crit !== undefined) throw new InvalidAccessTokenError();
+    } catch {
+      throw new InvalidAccessTokenError();
+    }
     try {
       const { payload } = await jwtVerify(token, this.resolveKey, {
         algorithms: [this.policy.algorithm],

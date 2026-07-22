@@ -17,6 +17,7 @@ const audience = "authenticated";
 const userId = "123e4567-e89b-12d3-a456-426614174000";
 const sessionId = "123e4567-e89b-12d3-a456-426614174001";
 const operationalToken = "b3BlcmF0aW9uYWw.c2VjcmV0.dG9rZW4";
+const unsupportedCritToken = `${Buffer.from(JSON.stringify({ alg: "ES256", crit: ["x"], x: true })).toString("base64url")}.e30.AA`;
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 describe("API authentication boundary", () => {
@@ -121,6 +122,22 @@ describe("API authentication boundary", () => {
       expect(ApiErrorSchema.parse(response.json()).code).toBe("AUTH_SESSION_EXPIRED");
       expect(response.headers["cache-control"]).toBe("private, no-store");
     }
+  });
+
+  it("maps unsupported protected critical headers to the fixed authentication failure", async () => {
+    const response = await app.inject({
+      method: "GET",
+      url: "/v1/me",
+      headers: { authorization: `Bearer ${unsupportedCritToken}` },
+    });
+
+    expect(response.statusCode).toBe(401);
+    expect(ApiErrorSchema.parse(response.json())).toMatchObject({
+      code: "AUTH_SESSION_EXPIRED",
+      retryable: false,
+      fieldErrors: [],
+    });
+    expect(response.headers["cache-control"]).toBe("private, no-store");
   });
 
   it("fails closed on operational verifier errors without leaking tokens or messages", async () => {
