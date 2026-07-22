@@ -99,3 +99,17 @@ Start HEAD: `164eddb`
   lint, typecheck, legacy 49 tests, contracts 15 tests, database 8 tests, web
   401 tests, and the 14-route production build before staging resumed. No push
   is part of this task.
+- Task 11: complete (commits `f3ca9a1..50f3694`, independent spec/code review
+  APPROVED; isolated Impeccable qualitative assessment and layout/type detector
+  clean). Five responsive auth routes, email/password and Google/Kakao/Naver
+  entry flows, safe fixed Korean error mapping, exact 768/769px behavior,
+  WCAG control contrast, 44px targets, 180ms state motion and reduced-motion
+  overrides are implemented without browser token state. TDD records the
+  callback, component, ky 2 envelope, accessibility and review-fix RED/GREEN
+  cycles. Browser QA covered five routes at 390x844 and 1440x900 plus the
+  768/769 boundary with zero horizontal overflow and console errors. Fresh
+  `pnpm verify` at `50f3694` passed lint, typecheck, security 49, contracts 15,
+  database 8, web 426, and the 20-route production build. The available Node
+  runtime is 24.14.0 rather than the pinned 22.15.1, so the engine warning
+  remains; live Supabase/PostgreSQL and optional 91.78% branch coverage remain
+  unchanged release follow-ups. No push was performed.

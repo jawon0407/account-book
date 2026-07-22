@@ -1,6 +1,6 @@
 # 인증 백엔드 아키텍처
 
-> **English Summary:** The implemented authentication boundary now includes 14 same-origin Next.js BFF routes, always-Secure opaque cookies, selector-bound CSRF, server-owned OAuth redirect handoff, request-scoped services over a shared database client, encrypted provider credentials, and typed refresh failures. Task 11 UI, Task 12 NestJS API/JWT validation, rate-limit use cases, and live Supabase/PostgreSQL verification remain unfinished.
+> **English Summary:** The implemented authentication boundary now includes 14 same-origin Next.js BFF routes, always-Secure opaque cookies, selector-bound CSRF, server-owned OAuth redirect handoff, request-scoped services over a shared database client, encrypted provider credentials, typed refresh failures, and responsive accessible authentication screens. Task 12 NestJS API/JWT validation, rate-limit use cases, and live Supabase/PostgreSQL verification remain unfinished.
 
 이 문서는 현재 코드에 구현된 인증 도메인, 저장소, same-origin HTTP 경계가 왜 이런 구조를 택했는지 설명한다. 구현 근거는 [`apps/web/src/server`](../../apps/web/src/server/), [`apps/web/src/app/api`](../../apps/web/src/app/api/), browser query 계층과 [인증 DB 스키마](../database/auth-schema.ko.md)다.
 
@@ -8,11 +8,11 @@
 
 | 상태 | 범위 |
 | --- | --- |
-| 구현됨 | 인증 계약과 도메인 서비스, Supabase server-only adapter, opaque session·PostgreSQL 저장소, Next.js BFF 14개 route, request-scoped controller/container, same-origin CSRF, server-owned OAuth redirect handoff, always-Secure cookie, no-store 응답, ky 2 browser client와 TanStack Query binding |
+| 구현됨 | 인증 계약과 도메인 서비스, Supabase server-only adapter, opaque session·PostgreSQL 저장소, Next.js BFF 14개 route, request-scoped controller/container, same-origin CSRF, server-owned OAuth redirect handoff, always-Secure cookie, no-store 응답, ky 2 browser client와 TanStack Query binding, Task 11 반응형 인증 UI |
 | 스키마만 구현됨 | `auth_rate_limits` 테이블. 이를 사용하는 rate-limit use case는 없다. |
-| 아직 없음 | Task 11 인증 UI, Task 12 NestJS `/v1/me` API와 JWT guard, 관리자 페이지, rate-limit use case, revocation retry worker |
+| 아직 없음 | Task 12 NestJS `/v1/me` API와 JWT guard, 관리자 페이지, rate-limit use case, revocation retry worker |
 | 이 작업 공간에서 미검증 | 실제 Supabase Auth와 disposable PostgreSQL에 대한 live 통합 검증 |
-| 품질 후속 | web test 401개와 production build는 통과했다. optional coverage는 기존 instrumentation 범위에서 branch `91.78%`로 100% threshold를 충족하지 못하며 Task 10 신규 경계가 아직 include되지 않았다. |
+| 품질 후속 | web test 426개와 production build는 통과했다. optional coverage는 기존 instrumentation 범위에서 branch `91.78%`로 100% threshold를 충족하지 못하며 Task 10·11 신규 경계가 아직 include되지 않았다. |
 
 ## 문제와 선택
 
@@ -241,6 +241,14 @@ provider 비밀번호 변경이 실패하면 row는 update-claimed 상태로 남
 ky 2 client는 `prefix: "/api"`, same-origin credential, 10초 timeout, retry 0을 사용한다. mutation마다 CSRF token을 새로 받고 browser storage에는 token이나 selector를 저장하지 않는다. TanStack Query는 query/mutation retry를 기본적으로 끄며, current-user GET가 `AUTH_SESSION_REFRESH_REQUIRED`를 받을 때만 CSRF-protected refresh POST 한 번과 원래 GET 한 번을 수행한다.
 
 session 조회와 `/api/me`는 access token 만료까지 60초 이하이면 자동 refresh하지 않고 `AUTH_SESSION_REFRESH_REQUIRED`를 반환한다. refresh 결과는 session 계층의 typed reason에 따라 expired는 401, provider rate limit은 429, operational unavailable은 retryable 503으로 매핑한다.
+
+### 반응형 인증 UI 경계
+
+`/login`, `/sign-up`, `/verify-email`, `/forgot-password`, `/reset-password`는 공통 `AuthShell`과 인증 form component를 사용한다. 모바일에서는 제품 식별과 form을 먼저 보여주고 상세 설명을 뒤에 배치하며, 769px부터 설명 영역과 form을 두 열로 전환한다. 입력 label, `autocomplete`, 오류 field 연결, keyboard focus, 최소 44px target, 3:1 이상 control 경계와 WCAG AA text 대비를 유지한다.
+
+form은 로컬 입력 상태만 보관하고 서버 상태는 기존 TanStack Query mutation으로 전달한다. OAuth button은 allowlist의 `google | kakao | naver`와 BFF가 반환한 exact same-origin `authorizationPath`만 top-level document navigation으로 연다. UI는 access token, refresh token, selector, provider URL, request ID와 API 원문 message를 저장하거나 출력하지 않고 공개 error code를 고정 한국어 문구로만 변환한다.
+
+pending indicator와 상태 전환은 180ms ease-out으로 제한한다. `prefers-reduced-motion`에서는 animation과 transition을 1ms·1회로 축소한다. 390×844와 1440×900의 다섯 인증 route, 768/769px 경계에서 horizontal overflow 0과 console error 0을 확인했다.
 
 ## 고정 오류와 비노출
 
