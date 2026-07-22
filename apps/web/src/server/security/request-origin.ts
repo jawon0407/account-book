@@ -89,7 +89,8 @@ export function verifyCsrfRequest(request: AuthRequest, context: Readonly<{ sele
     const mode = header(request, "Sec-Fetch-Mode");
     if (mode !== null && !FETCH_MODES.has(mode)) return rejected();
     const destination = header(request, "Sec-Fetch-Dest");
-    if (destination !== null && destination !== "") return rejected();
+    // Fetch Metadata maps fetch()'s empty destination to the literal `empty`; resource destinations remain blocked.
+    if (destination !== null && destination !== "" && destination !== "empty") return rejected();
     const token = header(request, "X-CSRF-Token");
     if (token === null || token.includes(",")) return rejected();
     verifyCsrfToken(token, context, policy.now, policy.key);

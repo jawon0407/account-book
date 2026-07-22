@@ -157,4 +157,12 @@ describe("state-changing request boundary", () => {
     expect(() => verifyCsrfRequest?.(request({ ...validHeaders(), "Sec-Fetch-Mode": "same-origin" }), context, policy)).not.toThrow();
     expect(() => verifyCsrfRequest?.(request({ ...validHeaders(), "Sec-Fetch-Mode": "no-cors" }), context, policy)).not.toThrow();
   });
+
+  it("accepts the standard fetch destination after all required checks", () => {
+    expect(() => verifyCsrfRequest?.(request({
+      ...validHeaders(),
+      "Sec-Fetch-Mode": "cors",
+      "Sec-Fetch-Dest": "empty",
+    }), context, policy)).not.toThrow();
+  });
 });
