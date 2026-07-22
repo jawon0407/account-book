@@ -43,8 +43,14 @@ function validationErrors(result: z.ZodSafeParseError<unknown>): FieldErrors {
   const paths = new Set(result.error.issues.map((issue) => issue.path[0]));
   return {
     ...(paths.has("email") ? { email: "올바른 이메일 주소를 입력해 주세요." } : {}),
-    ...(paths.has("password") ? { password: "비밀번호는 12자 이상 입력해 주세요." } : {}),
+    ...(paths.has("password") ? { password: passwordValidationMessage(result) } : {}),
   };
+}
+
+function passwordValidationMessage(result: z.ZodSafeParseError<unknown>): string {
+  return result.error.issues.some((issue) => issue.path[0] === "password" && issue.code === "too_big")
+    ? "비밀번호는 1024자 이하로 입력해 주세요."
+    : "비밀번호는 12자 이상 입력해 주세요.";
 }
 
 function CredentialsForm<T extends Credentials>({
@@ -129,7 +135,7 @@ function CredentialsForm<T extends Credentials>({
       </div>
       <button className="primary-button" disabled={isPending} type="submit">
         <span>{isPending ? pendingLabel : buttonLabel}</span>
-        {isPending ? <span className="spinner" aria-hidden="true" /> : null}
+        {isPending ? <span className="pending-indicator" aria-hidden="true">…</span> : null}
       </button>
       {feedback === null ? null : <AuthStatus kind={feedback.kind}>{feedback.message}</AuthStatus>}
     </form>
@@ -179,7 +185,7 @@ export function PasswordResetRequestForm({ submit, onSuccess }: SingleFormProps<
         <input aria-describedby={error === null ? undefined : "reset-request-email-error"} aria-invalid={error === null ? undefined : true} autoComplete="email" id="reset-request-email" name="email" onChange={() => setError(null)} ref={emailRef} type="email" />
         {error === null ? null : <p className="field-error" id="reset-request-email-error">{error}</p>}
       </div>
-      <button className="primary-button" disabled={isPending} type="submit"><span>{isPending ? "안내 준비 중" : "재설정 링크 받기"}</span>{isPending ? <span className="spinner" aria-hidden="true" /> : null}</button>
+      <button className="primary-button" disabled={isPending} type="submit"><span>{isPending ? "안내 준비 중" : "재설정 링크 받기"}</span>{isPending ? <span className="pending-indicator" aria-hidden="true">…</span> : null}</button>
       {feedback === null ? null : <AuthStatus kind={feedback.kind}>{feedback.message}</AuthStatus>}
     </form>
   );
@@ -196,7 +202,7 @@ export function PasswordUpdateForm({ submit, onSuccess }: SingleFormProps<Passwo
     if (isPending) return;
     const parsed = PasswordUpdateInputSchema.safeParse({ password: new FormData(event.currentTarget).get("password") });
     if (!parsed.success) {
-      const message = "비밀번호는 12자 이상 입력해 주세요.";
+      const message = passwordValidationMessage(parsed);
       setError(message);
       setFeedback({ kind: "error", message });
       passwordRef.current?.focus();
@@ -221,7 +227,7 @@ export function PasswordUpdateForm({ submit, onSuccess }: SingleFormProps<Passwo
         <p className="field-hint">12자 이상 입력해 주세요.</p>
         {error === null ? null : <p className="field-error" id="new-password-error">{error}</p>}
       </div>
-      <button className="primary-button" disabled={isPending} type="submit"><span>{isPending ? "변경 중" : "비밀번호 변경"}</span>{isPending ? <span className="spinner" aria-hidden="true" /> : null}</button>
+      <button className="primary-button" disabled={isPending} type="submit"><span>{isPending ? "변경 중" : "비밀번호 변경"}</span>{isPending ? <span className="pending-indicator" aria-hidden="true">…</span> : null}</button>
       {feedback === null ? null : <AuthStatus kind={feedback.kind}>{feedback.message}</AuthStatus>}
     </form>
   );

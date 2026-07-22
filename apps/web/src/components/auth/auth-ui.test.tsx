@@ -2,7 +2,7 @@
 
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { userEvent } from "@testing-library/user-event";
 import type { ComponentType, ReactNode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -46,6 +46,24 @@ const ProviderButtons = providers.ProviderButtons as ComponentType<ProviderButto
 const AuthShell = shells.AuthShell as ComponentType<AuthShellProps> | undefined;
 
 afterEach(cleanup);
+
+function contrastWithWhite(css: string, token: string): number {
+  const match = css.match(new RegExp(`--${token}:\\s*oklch\\(([\\d.]+)\\s+([\\d.]+)\\s+([\\d.]+)\\)`, "u"));
+  if (match === null) throw new Error(`Missing OKLCH token: ${token}`);
+  const lightness = Number(match[1]);
+  const chroma = Number(match[2]);
+  const hue = Number(match[3]) * Math.PI / 180;
+  const a = chroma * Math.cos(hue);
+  const b = chroma * Math.sin(hue);
+  const l = (lightness + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (lightness - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (lightness - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  const red = Math.min(1, Math.max(0, 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s));
+  const green = Math.min(1, Math.max(0, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s));
+  const blue = Math.min(1, Math.max(0, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s));
+  const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  return 1.05 / (luminance + 0.05);
+}
 
 describe("authentication forms", () => {
   it("keeps the form accessible while sign-in is pending", async () => {
@@ -103,6 +121,29 @@ describe("authentication forms", () => {
 
     expect(screen.getByRole("alert").textContent).toContain("이메일 또는 비밀번호를 확인해 주세요");
     expect(document.body.textContent).not.toMatch(/provider raw message|request-secret|token-secret/u);
+  });
+
+  it("maps overlong passwords to fixed corrective copy before any mutation", async () => {
+    expect(SignInForm).toBeTypeOf("function");
+    expect(PasswordUpdateForm).toBeTypeOf("function");
+    if (SignInForm === undefined || PasswordUpdateForm === undefined) return;
+    const signIn = vi.fn(async () => undefined);
+    const user = userEvent.setup();
+    render(<SignInForm submit={signIn} />);
+    fireEvent.change(screen.getByLabelText("이메일"), { target: { value: "person@example.test" } });
+    fireEvent.change(screen.getByLabelText("비밀번호"), { target: { value: "p".repeat(1025) } });
+    await user.click(screen.getByRole("button", { name: "로그인" }));
+    expect(signIn).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(screen.getByLabelText("비밀번호"));
+    expect(screen.getByRole("alert").textContent).toContain("비밀번호는 1024자 이하로 입력해 주세요");
+    cleanup();
+
+    const update = vi.fn(async () => undefined);
+    render(<PasswordUpdateForm submit={update} />);
+    fireEvent.change(screen.getByLabelText("새 비밀번호"), { target: { value: "p".repeat(1025) } });
+    await user.click(screen.getByRole("button", { name: "비밀번호 변경" }));
+    expect(update).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("비밀번호는 1024자 이하로 입력해 주세요");
   });
 
   it("uses the correct password autocomplete modes and reports successful auth steps", async () => {
@@ -171,6 +212,20 @@ describe("provider and shell interactions", () => {
     expect(screen.getByRole("link", { name: "새 계정 만들기" }).getAttribute("href")).toBe("/sign-up");
   });
 
+  it("puts the primary form surface before explanatory context in mobile reading order", () => {
+    expect(AuthShell).toBeTypeOf("function");
+    if (AuthShell === undefined) return;
+    render(
+      <AuthShell title="로그인" description="계속하려면 로그인하세요." footer={<a href="/sign-up">새 계정 만들기</a>}>
+        <p>로그인 양식</p>
+      </AuthShell>,
+    );
+    const surface = screen.getByRole("heading", { level: 1, name: "로그인" }).closest("section");
+    const context = screen.getByRole("complementary", { name: "서비스 안내" });
+    expect(surface).not.toBeNull();
+    expect(surface!.compareDocumentPosition(context) & Node.DOCUMENT_POSITION_FOLLOWING).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it("includes the exact reduced-motion safety override", async () => {
     const css = await readFile(resolve(process.cwd(), "src/app/globals.css"), "utf8");
     expect(css).toContain("@media (prefers-reduced-motion: reduce)");
@@ -183,5 +238,47 @@ describe("provider and shell interactions", () => {
   it("keeps footer authentication links at the minimum touch target height", async () => {
     const css = await readFile(resolve(process.cwd(), "src/app/globals.css"), "utf8");
     expect(css).toMatch(/\.auth-footer a\s*\{[^}]*min-height:\s*44px/isu);
+  });
+
+  it("keeps control boundaries at WCAG non-text contrast", async () => {
+    const css = await readFile(resolve(process.cwd(), "src/app/globals.css"), "utf8");
+    expect(contrastWithWhite(css, "line")).toBeGreaterThanOrEqual(3);
+  });
+
+  it("keeps 768px single-column and starts desktop layout at 769px", async () => {
+    const css = await readFile(resolve(process.cwd(), "src/app/globals.css"), "utf8");
+    expect(css).toContain("@media (min-width: 48.0625rem)");
+    expect(css).not.toContain("@media (min-width: 48rem)");
+  });
+
+  it("uses one non-blocking 180ms ease-out pending transition", async () => {
+    const css = await readFile(resolve(process.cwd(), "src/app/globals.css"), "utf8");
+    expect(css).toMatch(/\.pending-indicator\s*\{[^}]*animation:\s*auth-pending 180ms ease-out 1/isu);
+    expect(css).not.toMatch(/\.spinner|720ms|infinite/iu);
+  });
+
+  it("keeps Korean words intact with a long-token overflow fallback", async () => {
+    const css = await readFile(resolve(process.cwd(), "src/app/globals.css"), "utf8");
+    expect(css).toContain("word-break: keep-all");
+    expect(css).toContain("overflow-wrap: anywhere");
+  });
+
+  it("uses 4pt-compatible component spacing values", async () => {
+    const css = await readFile(resolve(process.cwd(), "src/app/globals.css"), "utf8");
+    expect(css).not.toMatch(/0\.(?:375|625|6875)rem/iu);
+  });
+
+  it("lifts only the form surface instead of the composite shell", async () => {
+    const css = await readFile(resolve(process.cwd(), "src/app/globals.css"), "utf8");
+    const shell = css.match(/\.auth-shell\s*\{([^}]*)\}/isu)?.[1] ?? "";
+    const surface = css.match(/^\.auth-surface\s*\{([^}]*)\}/imu)?.[1] ?? "";
+    expect(shell).not.toContain("box-shadow");
+    expect(surface).toContain("box-shadow");
+  });
+
+  it("provides global tabular numerals for stable financial values", async () => {
+    const css = await readFile(resolve(process.cwd(), "src/app/globals.css"), "utf8");
+    const body = css.match(/body\s*\{([^}]*)\}/isu)?.[1] ?? "";
+    expect(body).toContain("font-variant-numeric: tabular-nums");
   });
 });

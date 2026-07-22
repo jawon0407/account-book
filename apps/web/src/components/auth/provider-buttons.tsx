@@ -55,7 +55,7 @@ export function ProviderButtons({ start, navigate = navigateDocument }: Provider
             >
               <span className={`provider-mark provider-mark-${provider.value}`} aria-hidden="true">{provider.label.slice(0, 1)}</span>
               <span>{isPending ? `${provider.label}로 이동 중` : `${provider.label}로 계속`}</span>
-              {isPending ? <span className="spinner" aria-hidden="true" /> : null}
+              {isPending ? <span className="pending-indicator" aria-hidden="true">…</span> : null}
             </button>
           );
         })}
