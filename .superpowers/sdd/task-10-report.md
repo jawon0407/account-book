@@ -139,3 +139,45 @@ All commands used the repository Node 22.15.1 and pnpm 11.9.0 shims with `CI=tru
 - security gate: 44/44 PASS.
 - root lint: PASS with zero warnings.
 - `git diff --check`: PASS.
+
+## Controller 최종 workspace 검증
+
+Task 10 및 한국어 문서 갱신 뒤 root `pnpm test`를 새로 실행하자 workspace 정책 테스트가 RED가 됐다. `pnpm-workspace.yaml`에는 Next production image 처리를 위한 승인 항목 `sharp: true`가 추가됐지만, `scripts/workspace-policy.test.mjs`의 exact allowlist가 여전히 `{ esbuild: true }`만 기대했기 때문이다. 정책 테스트의 allowlist를 `{ esbuild: true, sharp: true }`로 동기화한 뒤 focused policy test와 root 전체 test를 다시 실행해 GREEN을 확인했다.
+
+최종 controller 검증은 Node 22.15.1, pnpm 11.9.0, `CI=true`에서 다음과 같이 통과했다.
+
+- root `pnpm test`: PASS. legacy 49 tests와 workspace suites(최종 web 401 tests 포함)가 모두 통과했다.
+- root `pnpm typecheck`: PASS.
+- root `pnpm build`: PASS. OAuth continue를 포함한 14개 BFF dynamic route가 생성됐다.
+- root `pnpm lint`: PASS, warning 0.
+- `pnpm test:security-gate`: PASS, 44/44.
+- `git diff --check`: PASS.
+
+마지막 session semantics, workspace policy, Task 10 한국어 문서 변경은 검증과 독립 리뷰를 마친 뒤 Codex 사용 한도로 Git mutation 승인이 한 차례 거절되어 worktree에 보존했다. 2026-07-22 사용 한도 해제 후 Node 22.15.1과 pnpm 11.9.0으로 root `pnpm verify`를 다시 실행해 lint, typecheck, legacy 49 tests, contracts 15 tests, database 8 tests, web 401 tests와 14-route production build가 모두 통과한 것을 확인한 다음 staging과 commit을 재개했다. push는 수행하지 않는다.
+
+## Final re-review: provider refresh failure semantics
+
+### RED evidence
+
+- The primary focused run failed 10 of 67 cases: four provider invalid/rate classifications, three malformed or cross-user replacement classifications, and three controller `rate_limited` mappings.
+- A second runtime-shape RED proved that a non-object replacement escaped field validation and became retryable 503 instead of fail-closed session expiry.
+- Existing characterization cases for explicit provider unavailability, repository/clock failures, generic throws, and refresh CAS losers remained green and protected their established semantics.
+
+### GREEN design
+
+- The session layer remains independent of the provider adapter type. Only the refresher rejection's exact allowlisted `code` property is inspected at that boundary; error messages are never classified.
+- Invalid credential, verification, or transaction codes become `expired`; rate limiting becomes `rate_limited`; provider-unavailable and unknown operational failures become `unavailable`.
+- Non-object, malformed, expired, or cross-user replacement pairs become non-retryable session expiry before any database rotation. Invalid clock, encryption, lookup, and rotation failures remain operationally unavailable, while a lost compare-and-swap still returns `superseded`.
+- The shared controller mapping returns 401 `AUTH_SESSION_EXPIRED`/non-retryable, 429 `AUTH_RATE_LIMITED`/non-retryable, or 503 `AUTH_PROVIDER_UNAVAILABLE`/retryable for `session`, `me`, and `refresh`.
+
+### Fresh final verification
+
+All commands used Node 22.15.1 and pnpm 11.9.0 with `CI=true`.
+
+- focused session/controller: 2 files / 68 tests PASS.
+- full web suite: 22 files / 401 tests PASS.
+- web typecheck PASS.
+- Next 16.2.10 production build PASS; all 14 BFF routes were generated.
+- security gate: 44/44 PASS.
+- root lint: PASS with zero warnings.
+- `git diff --check`: PASS.

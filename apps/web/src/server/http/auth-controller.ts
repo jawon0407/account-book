@@ -141,9 +141,9 @@ export function safeAuthFailure(code: ApiError["code"], status: number, retryabl
 }
 
 function sessionFailureResponse(error: SessionOperationError): Response {
-  return error.reason === "expired"
-    ? safeAuthFailure("AUTH_SESSION_EXPIRED", 401, false)
-    : safeAuthFailure("AUTH_PROVIDER_UNAVAILABLE", 503, true);
+  if (error.reason === "expired") return safeAuthFailure("AUTH_SESSION_EXPIRED", 401, false);
+  if (error.reason === "rate_limited") return safeAuthFailure("AUTH_RATE_LIMITED", 429, false);
+  return safeAuthFailure("AUTH_PROVIDER_UNAVAILABLE", 503, true);
 }
 
 function statusFor(code: ApiError["code"]): number {

@@ -33,8 +33,8 @@ export type SessionTokenPair = Readonly<{
 /** Refreshes a decrypted provider refresh token into the next complete token pair. */
 export type SessionTokenRefresher = (refreshToken: string) => Promise<SessionTokenPair>;
 
-/** Public-safe classification for session state versus operational failures. */
-export type SessionFailureReason = "expired" | "unavailable";
+/** Public-safe classification for expired state, provider throttling, or operational failures. */
+export type SessionFailureReason = "expired" | "rate_limited" | "unavailable";
 
 /** The only error exposed at the session-service boundary. */
 export class SessionOperationError extends Error {
@@ -63,6 +63,18 @@ function propagateFailure(error: unknown): never {
   return fail("unavailable");
 }
 
+function providerRefreshFailure(error: unknown): never {
+  let code: unknown;
+  try {
+    code = error !== null && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
+  } catch {
+    return fail("unavailable");
+  }
+  if (code === "AUTH_RATE_LIMITED") return fail("rate_limited");
+  if (code === "AUTH_INVALID_CREDENTIALS" || code === "AUTH_EMAIL_VERIFICATION_REQUIRED" || code === "AUTH_OAUTH_TRANSACTION_INVALID") return fail("expired");
+  return fail("unavailable");
+}
+
 function validDate(value: unknown): value is Date {
   return value instanceof Date && Number.isFinite(value.getTime());
 }
@@ -81,7 +93,8 @@ function shiftDate(date: Date, milliseconds: number): Date {
   return shifted;
 }
 
-function validTokenPair(value: SessionTokenPair, now: Date): SessionTokenPair {
+function validTokenPair(value: SessionTokenPair, now: Date, invalidReason: SessionFailureReason = "unavailable"): SessionTokenPair {
+  if (value === null || typeof value !== "object") return fail(invalidReason);
   const valid = [
     typeof value.accessToken !== "string" ||
       value.accessToken.length === 0,
@@ -93,7 +106,7 @@ function validTokenPair(value: SessionTokenPair, now: Date): SessionTokenPair {
     validDate(value.accessTokenExpiresAt) && value.accessTokenExpiresAt.getTime() <= now.getTime(),
     validDate(value.accessTokenExpiresAt) && value.accessTokenExpiresAt.getTime() <= value.issuedAtSeconds * 1000,
   ].every((invalid) => !invalid);
-  if (!valid) return fail();
+  if (!valid) return fail(invalidReason);
   return value;
 }
 
@@ -177,12 +190,17 @@ export class SessionService {
   public async refresh(selector: string, now: Date): Promise<Readonly<{ status: "refreshed" | "superseded" }>> {
     try {
       const session = await this.load(selector, now);
-      const providerPair = await this.refreshToken(session.refreshToken);
+      let providerPair: SessionTokenPair;
+      try {
+        providerPair = await this.refreshToken(session.refreshToken);
+      } catch (error) {
+        return providerRefreshFailure(error);
+      }
       const refreshedAtValue = this.clock();
       if (!validTime(refreshedAtValue)) return fail();
       const refreshedAt = new Date(refreshedAtValue);
-      const replacement = validTokenPair(providerPair, refreshedAt);
-      if (replacement.userId !== session.userId) return fail();
+      const replacement = validTokenPair(providerPair, refreshedAt, "expired");
+      if (replacement.userId !== session.userId) return fail("expired");
       const rotation: RotateSessionInput = {
         sessionId: session.sessionId,
         expectedRotationVersion: session.rotationVersion,

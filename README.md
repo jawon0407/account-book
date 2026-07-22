@@ -4,7 +4,7 @@ PC와 모바일에서 사용할 수 있는 보안 우선 동기화형 개인 가
 
 ## Current Stage
 
-인증 기반 Task 9까지 완료되어 server-side 인증 도메인, PostgreSQL opaque session 저장소, server-owned PKCE와 password recovery 상태기계가 구현되었습니다. Next.js BFF route·UI·NestJS API와 실제 Supabase/disposable PostgreSQL 통합 검증은 아직 완료되지 않았습니다.
+인증 기반 Task 10까지 완료되어 server-side 인증 도메인, PostgreSQL opaque session 저장소, server-owned PKCE·password recovery와 14개 same-origin Next.js BFF route가 구현되었습니다. Task 11 인증 UI, Task 12 NestJS API/JWT guard와 실제 Supabase/disposable PostgreSQL 통합 검증은 아직 완료되지 않았습니다. Web test와 production build는 통과했지만 optional branch coverage는 `91.78%`로 100% gate를 충족하지 못합니다.
 
 ## Planned Stack
 

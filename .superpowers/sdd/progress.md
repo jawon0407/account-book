@@ -77,3 +77,25 @@ Start HEAD: `164eddb`
   fresh verification is 56/56 focused tests, 22 files / 389 full web tests,
   typecheck, production build, 44/44 security gate, zero-warning lint, and
   whitespace validation all passing under Node 22 / pnpm 11 with `CI=true`.
+- Task 10 final provider-refresh review: complete. The session boundary now
+  preserves allowlisted refresh failure semantics without importing the
+  provider adapter type or inspecting messages: invalid credentials and
+  malformed/cross-user replacement pairs expire the session, rate limiting
+  returns non-retryable 429, and provider/clock/repository operational failures
+  return retryable 503. CAS-loser behavior remains `superseded`. The final RED
+  evidence and design are recorded in the Task 10 report; fresh verification is
+  68/68 focused tests, 22 files / 401 full web tests, typecheck, production
+  build, 44/44 security gate, zero-warning lint, and whitespace validation all
+  passing under Node 22 / pnpm 11 with `CI=true`.
+- Task 10 controller verification: complete. Root `pnpm test` initially found
+  the approved `sharp` build entry missing from the exact workspace policy
+  assertion; that policy test was updated RED→GREEN. Fresh root test,
+  typecheck, production build, lint, 44/44 security gate, and diff checks all
+  pass under Node 22.15.1 / pnpm 11.9.0. Korean architecture, database, and
+  operations docs now describe the implemented 14-route BFF and retain live
+  Supabase/PostgreSQL and 91.78% coverage caveats. Final stage/commit is pending
+  once because Git mutation approval was rejected at the Codex usage limit.
+  After the limit was restored on 2026-07-22, a fresh root `pnpm verify` passed
+  lint, typecheck, legacy 49 tests, contracts 15 tests, database 8 tests, web
+  401 tests, and the 14-route production build before staging resumed. No push
+  is part of this task.

@@ -109,7 +109,7 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
         return [name, value === "true" ? true : value];
       }),
   );
-  assert.deepEqual(allowBuilds, { esbuild: true });
+  assert.deepEqual(allowBuilds, { esbuild: true, sharp: true });
   for (const policy of ["engine-strict=true", "save-exact=true", "strict-peer-dependencies=true"]) {
     assert.match(npmrc, new RegExp(`^${policy}$`, "m"));
   }

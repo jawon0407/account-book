@@ -7,7 +7,7 @@ vi.mock("server-only", () => ({}));
 const module = await import("./auth-controller.js").catch(() => ({} as Record<string, unknown>));
 const AuthController = module.AuthController as (new (dependencies: Record<string, unknown>) => Record<string, (request: Request, parameters?: Record<string, string>) => Promise<Response>>) | undefined;
 const sessionModule = await import("../session/session-service.js").catch(() => ({} as Record<string, unknown>));
-const SessionOperationError = sessionModule.SessionOperationError as (new (reason: "expired" | "unavailable") => Error & Readonly<{ reason: "expired" | "unavailable" }>) | undefined;
+const SessionOperationError = sessionModule.SessionOperationError as (new (reason: "expired" | "rate_limited" | "unavailable") => Error & Readonly<{ reason: "expired" | "rate_limited" | "unavailable" }>) | undefined;
 
 const now = new Date("2026-07-20T12:00:00.000Z");
 const selector = Buffer.alloc(32, 3).toString("base64url");
@@ -323,6 +323,9 @@ describe("AuthController", () => {
     ["session", "unavailable", 503, "AUTH_PROVIDER_UNAVAILABLE", true],
     ["me", "unavailable", 503, "AUTH_PROVIDER_UNAVAILABLE", true],
     ["refresh", "unavailable", 503, "AUTH_PROVIDER_UNAVAILABLE", true],
+    ["session", "rate_limited", 429, "AUTH_RATE_LIMITED", false],
+    ["me", "rate_limited", 429, "AUTH_RATE_LIMITED", false],
+    ["refresh", "rate_limited", 429, "AUTH_RATE_LIMITED", false],
   ] as const)("maps %s session failures with reason %s", async (endpoint, reason, status, code, retryable) => {
     expect(SessionOperationError).toBeTypeOf("function");
     const subject = setup();

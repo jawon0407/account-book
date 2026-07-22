@@ -55,7 +55,7 @@ const SessionService = serviceModule.SessionService as
       markRevocationPending(sessionId: string, now: Date): Promise<void>;
     })
   | undefined;
-type SessionFailureReason = "expired" | "unavailable";
+type SessionFailureReason = "expired" | "rate_limited" | "unavailable";
 type TypedSessionError = Error & Readonly<{ reason: SessionFailureReason }>;
 const SessionOperationError = serviceModule.SessionOperationError as (new (reason: SessionFailureReason) => TypedSessionError) | undefined;
 
@@ -383,7 +383,7 @@ describe("SessionService", () => {
   it("fails closed when the post-refresh clock is invalid", async () => {
     const setup = await createSession();
     const subject = new SessionService!(setup.repository, keyring, async () => tokenPair(), () => id, () => new Date("invalid"));
-    await expectSafeFailure(() => subject.refresh(setup.created.selector, now));
+    await expectFailureReason(() => subject.refresh(setup.created.selector, now), "unavailable");
     expect(setup.repository.calls.rotate).toBe(0);
   });
 
@@ -392,7 +392,19 @@ describe("SessionService", () => {
     const { repository, created } = await createSession();
     const subject = new SessionService!(repository, keyring, async () => tokenPair({ userId: replacementUserId }), () => id, () => new Date(now));
 
-    await expectSafeFailure(() => subject.refresh(created.selector, now), replacementUserId, created.selector);
+    await expectFailureReason(() => subject.refresh(created.selector, now), "expired", replacementUserId, created.selector);
+    expect(repository.calls.rotate).toBe(0);
+  });
+
+  it.each([
+    ["non-object token pair", undefined as unknown as TokenPair],
+    ["empty access token", tokenPair({ accessToken: "" })],
+    ["expired access token", tokenPair({ accessTokenExpiresAt: now })],
+  ] as const)("classifies a malformed replacement pair as expired: %s", async (_label, replacement) => {
+    const { repository, created } = await createSession();
+    const subject = new SessionService!(repository, keyring, async () => replacement, () => id, () => new Date(now));
+
+    await expectFailureReason(() => subject.refresh(created.selector, now), "expired", created.selector);
     expect(repository.calls.rotate).toBe(0);
   });
 
@@ -423,6 +435,29 @@ describe("SessionService", () => {
     const third = await createSession();
     third.repository.fail = true;
     await expectSafeFailure(() => third.service.revokeCurrent(third.created.selector, now), "database-secret", third.created.selector);
+  });
+
+  it.each([
+    ["AUTH_INVALID_CREDENTIALS", "expired"],
+    ["AUTH_EMAIL_VERIFICATION_REQUIRED", "expired"],
+    ["AUTH_OAUTH_TRANSACTION_INVALID", "expired"],
+    ["AUTH_RATE_LIMITED", "rate_limited"],
+    ["AUTH_PROVIDER_UNAVAILABLE", "unavailable"],
+  ] as const)("preserves allowlisted provider refresh code %s as %s", async (code, reason) => {
+    const failedRefresher = vi.fn(async () => Promise.reject(Object.assign(new Error("provider-secret"), { code })));
+    const { repository, created } = await createSession();
+    const subject = new SessionService!(repository, keyring, failedRefresher, () => id, () => new Date(now));
+
+    await expectFailureReason(() => subject.refresh(created.selector, now), reason, "provider-secret", created.selector);
+    expect(repository.calls.rotate).toBe(0);
+  });
+
+  it("does not classify a provider failure by its message", async () => {
+    const failedRefresher = vi.fn(async () => Promise.reject(new Error("AUTH_RATE_LIMITED")));
+    const { repository, created } = await createSession();
+    const subject = new SessionService!(repository, keyring, failedRefresher, () => id, () => new Date(now));
+
+    await expectFailureReason(() => subject.refresh(created.selector, now), "unavailable", "AUTH_RATE_LIMITED", created.selector);
   });
 
   it("validates and delegates revocation operations", async () => {

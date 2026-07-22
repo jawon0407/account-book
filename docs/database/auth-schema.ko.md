@@ -1,6 +1,6 @@
 # 인증 데이터베이스 스키마 레퍼런스
 
-> **English Summary:** Six authentication tables live in the private `app_private` schema. The `app_session_bff` role receives explicit CRUD grants only on those tables, while browser-facing roles and default future-table grants are revoked. Drizzle models the final state after migrations 001 through 003.
+> **English Summary:** Six authentication tables live in the private `app_private` schema. The BFF reuses one process-scoped Drizzle database client while rebuilding repository and auth services per request. The `app_session_bff` role receives explicit CRUD grants only on those tables, while browser-facing roles and default future-table grants are revoked.
 
 이 문서는 현재 [`Drizzle auth schema`](../../packages/database/src/schema/auth.ts), 세 SQL migration, [`AuthRepository`](../../apps/web/src/server/persistence/auth-repository.ts), [`PostgresAuthRepository`](../../apps/web/src/server/persistence/postgres-auth-repository.ts)를 기준으로 한다. PostgreSQL 식별자는 `snake_case`, TypeScript 필드는 대응하는 `camelCase`다.
 
@@ -88,6 +88,17 @@ role 속성은 다음과 같다.
 001은 migration owner인 `postgres`가 앞으로 만드는 `app_private` 테이블의 default privileges에서도 `PUBLIC`, browser-facing roles, `service_role`, `app_session_bff` 권한을 revoke한다. 따라서 새 테이블은 별도 migration의 명시적 grant 없이는 BFF가 접근할 수 없다.
 
 `NOLOGIN` role 자체로 연결할 수 없으므로 실제 배포 연결 role과 `SET ROLE` 정책은 별도 운영 구성이다. 현재 저장소에는 그 연결 구성이 없다.
+
+## BFF database client 수명
+
+Task 10은 schema나 migration을 바꾸지 않고 [`createRequestContainer`](../../apps/web/src/server/container.ts)에서 persistence graph를 연결했다.
+
+- [`createDatabaseClient`](../../packages/database/src/client.ts)는 검증된 `DATABASE_URL`로 Drizzle/node-postgres client를 만든다.
+- container module은 user/session 상태가 없는 database client 하나와 connection string의 SHA-256 fingerprint만 process 범위에서 lazy 재사용한다.
+- 같은 connection string의 다음 요청은 기존 client를 공유한다. process가 살아 있는 동안 다른 fingerprint가 들어오면 새 client를 만들거나 URL을 출력하지 않고 `AUTH_CONFIGURATION_INVALID`로 실패한다.
+- `PostgresAuthRepository`, provider adapter, `SessionService`, email/OAuth/recovery service와 `AuthController`는 요청마다 새로 만든다. 복호화한 credential이나 user session을 module scope에 cache하지 않는다.
+
+이 lifecycle은 실제 connection pool의 staging 부하·종료 동작을 검증했다는 뜻이 아니다. live Supabase/disposable PostgreSQL integration과 pool lifecycle 검증은 아직 미실행이다.
 
 ## `auth_user_security_state`
 

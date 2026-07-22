@@ -1,24 +1,24 @@
 # 인증 백엔드 아키텍처
 
-> **English Summary:** The implemented server layer provides opaque sessions, server-owned PKCE, encrypted provider credentials, one-shot authentication transactions, strict Supabase response parsing, and PostgreSQL compare-and-swap operations. Next.js BFF routes, HTTP cache headers, cookie issuance, rate-limit use cases, and live provider wiring remain follow-up work.
+> **English Summary:** The implemented authentication boundary now includes 14 same-origin Next.js BFF routes, always-Secure opaque cookies, selector-bound CSRF, server-owned OAuth redirect handoff, request-scoped services over a shared database client, encrypted provider credentials, and typed refresh failures. Task 11 UI, Task 12 NestJS API/JWT validation, rate-limit use cases, and live Supabase/PostgreSQL verification remain unfinished.
 
-이 문서는 현재 코드에 구현된 인증 도메인과 저장소가 왜 이런 경계를 택했는지 설명한다. HTTP 엔드포인트가 이미 존재한다고 가정하지 않는다. 구현 근거는 [`apps/web/src/server`](../../apps/web/src/server/)와 [인증 DB 스키마](../database/auth-schema.ko.md)다.
+이 문서는 현재 코드에 구현된 인증 도메인, 저장소, same-origin HTTP 경계가 왜 이런 구조를 택했는지 설명한다. 구현 근거는 [`apps/web/src/server`](../../apps/web/src/server/), [`apps/web/src/app/api`](../../apps/web/src/app/api/), browser query 계층과 [인증 DB 스키마](../database/auth-schema.ko.md)다.
 
 ## 현재 구현 범위
 
 | 상태 | 범위 |
 | --- | --- |
-| 구현됨 | 인증 계약, Supabase server-only adapter, 이메일 가입·로그인·확인 서비스, OAuth 시작·완료 서비스, 비밀번호 복구 시작·교환·변경 서비스, 불투명 세션 서비스, 암호화·PKCE·CSRF·Origin 검증 도구, PostgreSQL 저장소 |
+| 구현됨 | 인증 계약과 도메인 서비스, Supabase server-only adapter, opaque session·PostgreSQL 저장소, Next.js BFF 14개 route, request-scoped controller/container, same-origin CSRF, server-owned OAuth redirect handoff, always-Secure cookie, no-store 응답, ky 2 browser client와 TanStack Query binding |
 | 스키마만 구현됨 | `auth_rate_limits` 테이블. 이를 사용하는 rate-limit use case는 없다. |
-| Task 10 후속 | Next.js BFF route/controller/container, canonical configured origin, 시작마다 새 interaction cookie 발급, 실제 `Set-Cookie`, no-store 응답, CSRF·Origin 검증과 use case의 HTTP 조립 |
-| 아직 없음 | 인증 UI, NestJS API/JWT guard, 관리자 페이지, 실제 BFF endpoint |
+| 아직 없음 | Task 11 인증 UI, Task 12 NestJS `/v1/me` API와 JWT guard, 관리자 페이지, rate-limit use case, revocation retry worker |
 | 이 작업 공간에서 미검증 | 실제 Supabase Auth와 disposable PostgreSQL에 대한 live 통합 검증 |
+| 품질 후속 | web test 401개와 production build는 통과했다. optional coverage는 기존 instrumentation 범위에서 branch `91.78%`로 100% threshold를 충족하지 못하며 Task 10 신규 경계가 아직 include되지 않았다. |
 
 ## 문제와 선택
 
 브라우저가 Supabase token을 직접 보관하면 XSS나 브라우저 저장소 유출이 곧 provider session 탈취로 이어진다. 반대로 모든 token을 서버에 두면 요청마다 저장소 조회가 필요하고 서버가 암호화 키와 세션 수명을 책임져야 한다. 이 구현은 후자의 비용을 선택했다.
 
-- **same-origin BFF**: 브라우저의 인증 진입점을 같은 origin의 서버로 제한한다. 현재는 이를 뒷받침하는 도메인 코드만 있고 route는 Task 10 범위다.
+- **same-origin BFF**: 브라우저의 인증 진입점을 `/api` 아래 14개 Next.js route로 제한하고 provider token과 내부 URL을 서버에 둔다.
 - **opaque session**: 브라우저에는 의미 없는 256비트 selector만 두고, DB에는 그 SHA-256 digest만 저장한다.
 - **server-owned PKCE**: PKCE verifier를 브라우저나 Supabase SDK 저장소에 맡기지 않고 서버에서 생성·암호화한다.
 - **AES-256-GCM envelope**: token 평문을 DB에 저장하지 않고 record ID와 token kind를 AAD(추가 인증 데이터)에 결합한다.
@@ -30,24 +30,26 @@
 ```mermaid
 flowchart LR
   Browser["Browser\n신뢰하지 않는 경계"]
-  BFF["Next.js BFF route\nTask 10 후속"]
-  Guard["cookie · CSRF · Origin\n구현된 도구, 미조립"]
+  BFF["Next.js BFF 14 routes\nroute adapter · controller"]
+  Guard["cookie · CSRF · exact Origin\nFetch Metadata · body limit"]
   UseCase["EmailAuthService · OAuthService\nPasswordRecoveryService · SessionService"]
   Adapter["SupabaseAuthAdapter\nserver-only"]
   Supabase["Supabase Auth\n외부 신뢰 경계"]
   Repo["PostgresAuthRepository"]
   DB["PostgreSQL app_private\n암호화 token · digest"]
+  API["NestJS /v1/me\nTask 12 미구현"]
 
-  Browser -->|"향후 same-origin 요청\nopaque cookie만"| BFF
+  Browser -->|"same-origin 요청\nopaque cookie만"| BFF
   BFF --> Guard
   Guard --> UseCase
   UseCase -->|"검증된 입력"| Adapter
   Adapter -->|"HTTPS · anon/publishable key\nPKCE code exchange"| Supabase
   UseCase --> Repo
   Repo -->|"단일 조건 update · transaction"| DB
+  BFF -.->|"고정 API_INTERNAL_URL\nBearer access JWT"| API
 ```
 
-브라우저와 HTTP header는 신뢰하지 않는다. BFF도 아직 없으므로 서비스에 전달되는 callback URL, 시간, interaction selector는 현재 호출자가 신뢰 경계 안에서 구성해야 한다. Supabase adapter는 공급자 응답을 그대로 신뢰하지 않고 사용자 UUID, session UUID, email 확인 시각, JWT `iat`·`exp`, token lifetime 일관성을 다시 검사한다. 다만 JWT 서명을 독립 검증하는 NestJS guard는 아직 구현되지 않았다.
+브라우저 URL, `Host`, forwarding header와 request body는 신뢰하지 않는다. BFF는 callback URL을 canonical `APP_ORIGIN`에서 만들고 selector를 두 `__Host-` cookie에서만 읽으며, 입력과 upstream JSON을 stream byte 기준으로 제한한다. Supabase adapter는 공급자 응답의 사용자 UUID, session UUID, email 확인 시각, JWT `iat`·`exp`, token lifetime 일관성을 다시 검사한다. `/api/me`가 호출하는 NestJS `/v1/me`와 JWT 서명 guard는 Task 12 범위라 아직 구현되지 않았다.
 
 ## 비밀값과 selector의 위치
 
@@ -59,7 +61,7 @@ flowchart LR
 | PKCE verifier | 서버 CSPRNG | `encrypted_pkce_verifier` envelope, provider code 교환 직전 서버 메모리 | 브라우저, SDK persistence, URL, 로그, 평문 DB |
 | PKCE challenge | verifier의 S256 digest | Supabase signup/recover/authorize 요청 | verifier를 대신하는 비밀 저장소로 사용하지 않음 |
 | OAuth `state` | 서버 CSPRNG | provider 왕복 URL의 protocol 값, DB에는 `state_hash`만 | cookie·브라우저 영구 저장소·평문 DB·로그 |
-| interaction selector | 향후 BFF가 서버에서 생성 | `__Host-ab_interaction` HttpOnly cookie, 서비스 호출 시 서버 문맥 | 요청 body/query, DB 평문, 로그. Task 10은 호출자가 고른 값의 수용·재사용을 금지해야 함 |
+| interaction selector | BFF가 signup·OAuth start·recovery start마다 새로 생성 | `__Host-ab_interaction` HttpOnly·Secure cookie, 서비스 호출 시 서버 문맥 | 요청 body/query, DB 평문, 로그, 기존 selector의 시작 흐름 재사용 |
 | session selector | `SessionService` CSPRNG | `__Host-ab_session` HttpOnly cookie, lookup 시 서버 메모리 | DB 평문, 브라우저 JavaScript 저장소, 로그 |
 
 `state`는 OAuth protocol상 redirect URL을 왕복하지만 저장 시에는 32바이트 digest만 남는다. interaction selector와 session selector는 둘 다 canonical base64url 43자이며 원본의 역할이 다르다.
@@ -86,7 +88,7 @@ flowchart LR
 ### 가입
 
 1. `SignUpInputSchema`가 이메일과 12~1024자 비밀번호를 strict하게 검증한다.
-2. caller가 제공한 trusted confirmation URL, interaction selector, 시각을 검사한다.
+2. BFF가 canonical `APP_ORIGIN`으로 만든 confirmation URL, 새 interaction selector와 시각을 서비스 경계에서 다시 검사한다.
 3. 서버가 transaction UUID와 PKCE verifier를 만든다.
 4. interaction selector는 SHA-256으로 바꾸고 verifier는 `tokenKind: "pkce"`로 암호화한다.
 5. 15분 수명의 `email_confirmation_transactions` 행을 **provider 요청 전에** 만든다.
@@ -117,13 +119,13 @@ provider 교환이 실패해도 claim은 되돌리지 않는다. 사용자는 �
 
 ### 시작
 
-1. provider는 `google | kakao | naver`만 허용한다.
-2. return path는 정확히 `/app` 또는 `/settings/security`만 허용한다.
-3. callback base URL은 HTTPS 또는 loopback HTTP만 허용하며 사용자 정보·fragment와 기존 `provider`·`state` query를 거부한다.
-4. 서버가 `state`, PKCE verifier, transaction UUID를 새로 만든다.
-5. `state`와 interaction selector는 각각 32바이트 digest로, verifier는 암호화 envelope로 저장한다.
+1. CSRF가 적용된 `POST /api/auth/oauth/{provider}/start`는 `google | kakao | naver`와 `/app | /settings/security`만 허용한다.
+2. POST는 provider transaction이나 `state`를 만들지 않는다. 새 interaction cookie와 고정된 same-origin `/api/auth/oauth/{provider}/continue?returnPath=...` 경로만 JSON으로 돌려준다.
+3. 브라우저가 그 경로로 document navigation을 수행하면 continue GET가 exact same-origin Fetch Metadata, interaction cookie와 allowlist를 검사한다.
+4. 이 GET에서만 canonical `APP_ORIGIN` 기반 callback URL을 만들고 `OAuthService.start`를 호출한다.
+5. 서버가 `state`, PKCE verifier, transaction UUID를 만들고, 두 selector digest와 암호화 verifier를 저장한다.
 6. transaction은 정확히 10분 후 만료한다.
-7. callback URL에 검증된 provider와 새 `state`를 추가한 뒤 Supabase authorize URL을 만든다.
+7. BFF는 검증된 HTTPS 또는 exact loopback HTTP provider URL만 `303 Location`으로 전달한다. credential·fragment·public HTTP URL은 거부한다.
 
 Supabase provider mapping은 Google `google`, Kakao `kakao`, Naver `custom:naver`로 고정된다.
 
@@ -161,14 +163,14 @@ Supabase provider mapping은 Google `google`, Kakao `kakao`, Naver `custom:naver
 
 ### revoke
 
-현재 구현된 primitive는 다음과 같다.
+구현된 primitive는 다음과 같다.
 
 - selector digest로 현재 local session을 한 번만 revoke한다.
 - 사용자 UUID의 모든 active local session을 revoke한다.
 - local revoke 뒤 외부 revoke 재시도가 필요하면 `revocation_pending_at`을 기록한다.
 - provider port에는 `signOut(accessToken, refreshToken)`이 있다.
 
-이 primitive를 “local revoke → cookie 제거 → provider sign-out → 실패 시 pending 표시” 순서로 묶는 HTTP use case와 route는 아직 없다. 따라서 실제 로그아웃 endpoint가 구현됐다고 해석하면 안 된다.
+`POST /api/auth/sign-out`은 session을 resolve한 뒤 local revoke를 먼저 commit하고 provider sign-out을 시도한다. provider 실패 시 `revocation_pending_at`을 기록하며 성공·실패 응답 모두에서 session cookie를 제거한다. local session을 되살리는 rollback은 없다. 다만 pending 외부 revoke를 재시도하는 worker는 아직 없다.
 
 ## 비밀번호 복구 상태기계
 
@@ -224,25 +226,21 @@ provider 비밀번호 변경이 실패하면 row는 update-claimed 상태로 남
 
 ## 요청 방어와 cookie 정책
 
-### 구현된 순수 도구
+### 구현된 cookie와 request 경계
 
 - cookie 이름은 `__Host-ab_session`, `__Host-ab_interaction` 두 개뿐이다.
-- cookie builder는 `HttpOnly: true`, `SameSite: "lax"`, `Path: "/"`, `Priority: "high"`를 고정하고 `Domain`을 제공하지 않는다.
-- `Secure`는 caller가 boolean으로 전달한다. 운영에서 true로 강제하는 route 설정은 Task 10 범위다.
+- cookie builder는 `HttpOnly: true`, `Secure: true`, `SameSite: "lax"`, `Path: "/"`, `Priority: "high"`를 고정하고 `Domain`을 제공하지 않는다. `Secure: false`는 loopback에서도 거부한다.
 - CSRF token은 selector, 32바이트 HMAC key, 새 32바이트 nonce에 묶인다. 발급 시각을 초 단위로 내림한 값에 300초를 더한 expiry 경계부터 거부하므로 실제 유효 시간은 최대 300초다.
-- state-changing request validator는 대문자 `POST`, JSON content type, exact `Origin` 또는 same-origin `Referer`, `Sec-Fetch-Site: same-origin | none`, 제한된 mode, 비어 있는 destination, 단일 `X-CSRF-Token`을 모두 요구한다.
+- state-changing request validator는 대문자 `POST`, JSON content type, exact `Origin` 또는 same-origin `Referer`, `Sec-Fetch-Site: same-origin | none`, 단일 `X-CSRF-Token`을 요구한다. `Sec-Fetch-Mode`와 `Sec-Fetch-Dest`는 header가 있을 때만 각각 allowlist와 빈 destination을 검증한다. controller의 mutation route가 use case 호출 전에 이를 실행한다.
 - allowed origin 문자열은 URL의 exact `origin`과 같아야 하며 path·query·fragment·credential·공백·control character를 허용하지 않는다.
+- request JSON은 stream을 읽으며 최대 16,384바이트, 내부 `/v1/me` 응답은 최대 65,536바이트로 제한한다. `Content-Length`가 없거나 chunked여도 실제 누적 byte가 한도를 넘으면 reader를 cancel한다.
+- 성공, 오류, redirect, 405 응답은 모두 `Cache-Control: private, no-store`, `Pragma: no-cache`, `Expires: 0`를 포함한다. 14개 route는 지원하지 않는 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS를 공통 405 handler로 명시한다.
 
-### 아직 HTTP에 조립되지 않은 정책
+### 브라우저 query 경계
 
-실제 `Set-Cookie`, cookie 삭제, CSRF 발급 route, request validator 호출, `Cache-Control: private, no-store`, `Pragma: no-cache`, `Expires: 0`은 현재 응답에 적용되지 않는다. route 자체가 없기 때문이다. 이 정책은 설계 기준이지만 구현 완료 상태는 아니다.
+ky 2 client는 `prefix: "/api"`, same-origin credential, 10초 timeout, retry 0을 사용한다. mutation마다 CSRF token을 새로 받고 browser storage에는 token이나 selector를 저장하지 않는다. TanStack Query는 query/mutation retry를 기본적으로 끄며, current-user GET가 `AUTH_SESSION_REFRESH_REQUIRED`를 받을 때만 CSRF-protected refresh POST 한 번과 원래 GET 한 번을 수행한다.
 
-Task 10은 특히 다음을 지켜야 한다.
-
-1. callback URL을 request host나 forwarding header로 만들지 않고 하나의 canonical configured application origin만 사용한다.
-2. 이메일 가입, OAuth 시작, recovery 시작마다 caller 값의 수용이나 기존 값 재사용 없이 새 interaction selector를 만들고 hardened cookie로 발급한다.
-3. interaction/session selector는 cookie에서만 받고 body·query로 받지 않는다.
-4. browser에는 opaque selector만 전달하고 provider token, verifier, recovery credential, transaction 내부 값을 전달하지 않는다.
+session 조회와 `/api/me`는 access token 만료까지 60초 이하이면 자동 refresh하지 않고 `AUTH_SESSION_REFRESH_REQUIRED`를 반환한다. refresh 결과는 session 계층의 typed reason에 따라 expired는 401, provider rate limit은 429, operational unavailable은 retryable 503으로 매핑한다.
 
 ## 고정 오류와 비노출
 
@@ -254,7 +252,7 @@ provider boundary가 허용하는 오류 코드는 다음 다섯 개다.
 - `AUTH_RATE_LIMITED`
 - `AUTH_PROVIDER_UNAVAILABLE`
 
-세션 서비스는 내부 원인과 관계없이 `AUTH_SESSION_OPERATION_FAILED`, CSRF/request boundary는 `AUTH_CSRF_REJECTED`, envelope은 `TOKEN_ENVELOPE_INVALID`로 실패한다. 외부 provider message, code 원문, email, selector, token, SQL 오류를 error message에 붙이지 않는다. `packages/contracts`의 공개 API 오류 enum에는 세션 관련 `AUTH_SESSION_EXPIRED`와 `AUTH_SESSION_REFRESH_REQUIRED`도 있지만 이를 반환할 BFF는 아직 없다.
+세션 서비스는 message를 `AUTH_SESSION_OPERATION_FAILED`로 고정하고 `expired | rate_limited | unavailable` reason만 내부 경계에 제공한다. BFF는 이를 각각 `AUTH_SESSION_EXPIRED`, `AUTH_RATE_LIMITED`, `AUTH_PROVIDER_UNAVAILABLE` 공개 envelope로 바꾼다. 60초 refresh 경계에는 `AUTH_SESSION_REFRESH_REQUIRED`를 사용한다. CSRF/request boundary는 `AUTH_CSRF_REJECTED`, envelope은 `TOKEN_ENVELOPE_INVALID`로 실패하며 외부 provider message, code 원문, email, selector, token, SQL 오류를 응답에 붙이지 않는다.
 
 가입과 recovery 시작은 명시적으로 인식한 account existence/absence provider code만 동일 acknowledgement로 축약한다. 실제 HTTP status가 body 안의 가짜 status보다 우선하며, 429는 body가 malformed여도 `AUTH_RATE_LIMITED`로 매핑한다.
 
@@ -268,7 +266,7 @@ provider boundary가 허용하는 오류 코드는 다음 다섯 개다.
 | exact provider/return path | open redirect와 provider 혼동 축소 | 새 provider/path 추가 시 코드·DB constraint·migration 동시 변경 필요 |
 | strict malformed-row rejection | 손상·공격 데이터의 fail-closed 처리 | 자동 복구 대신 인증 재시작 또는 운영 조사 필요 |
 | shared per-user issuance gate | 비밀번호 변경과 늦은 로그인 race 차단 | 같은 초 token까지 거부할 수 있고 사용자별 lock 경합 발생 |
-| local-first revoke primitive | 외부 장애 중에도 local 접근 차단 가능 | 외부 revoke orchestration과 retry worker는 아직 없음 |
+| local-first logout orchestration | 외부 장애 중에도 local 접근과 browser cookie를 먼저 제거 | pending 외부 revoke retry worker는 아직 없음 |
 
 ## 관련 문서
 

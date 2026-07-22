@@ -1,8 +1,8 @@
 # How to: 인증 백엔드와 DB 경계를 검증하는 방법
 
-> **English Summary:** Use the pinned Node and pnpm versions, run deterministic workspace and security gates locally, and opt in explicitly before pointing the database test at a disposable PostgreSQL instance. No live Supabase smoke harness or Next.js BFF endpoint exists yet.
+> **English Summary:** Validate the implemented 14-route Next.js authentication BFF with the pinned runtime, strict server configuration, web tests, production build, and security gates. Live Supabase and disposable PostgreSQL integration remain unexecuted release blockers, and optional branch coverage is currently 91.78%.
 
-이 가이드는 현재 구현된 server auth domain, persistence adapter, migration source를 재현 가능하게 검증하는 절차다. 실제 로그인 endpoint를 호출하는 가이드가 아니다.
+이 가이드는 현재 구현된 server auth domain, persistence adapter, Next.js same-origin BFF와 browser client를 재현 가능하게 검증하는 절차다. 실제 credential이나 production data를 사용하는 live smoke 절차는 제공하지 않는다.
 
 ## 전제 조건
 
@@ -42,21 +42,47 @@
 
 ## 2. 환경 변수 경계 확인
 
-현재 production source는 `process.env`를 직접 읽지 않는다. `SupabaseAuthAdapter`는 `{ url, anonKey }`, `createDatabaseClient`는 connection string, 암호화/CSRF 모듈은 key를 constructor 또는 함수 인자로 받는다. 따라서 존재하지 않는 runtime 변수 이름을 임의로 추가하지 않는다.
+[`createRequestContainer`](../../apps/web/src/server/container.ts)는 server-only 경계에서 `process.env`를 읽고 모든 값을 fail-closed로 검증한다. route 파일은 환경 변수를 직접 읽지 않고 request마다 container만 생성한다.
 
 | 이름 | 현재 코드에서의 상태 | 역할 |
 | --- | --- | --- |
 | `TEST_DATABASE_URL` | [`tests/database/auth-migration.test.ts`](../../tests/database/auth-migration.test.ts)가 직접 읽음 | 폐기 가능한 PostgreSQL owner 연결. 로그·문서에 값을 복사하지 않음 |
 | `TEST_DATABASE_DISPOSABLE` | 같은 test가 직접 읽음 | 정확히 `true`일 때만 destructive migration test 허용 |
-| `DATABASE_URL` | Task 9 report의 미실행 통합 조건에만 언급, 현재 자동 wiring 없음 | 향후 server DB connection input |
-| `SUPABASE_URL` | Task 9 report의 미실행 통합 조건에만 언급, 현재 자동 wiring 없음 | 향후 `SupabaseAuthAdapter` public base URL input |
-| `SUPABASE_ANON_KEY` | Task 9 report의 미실행 통합 조건에만 언급, 현재 자동 wiring 없음 | 향후 server-side public anon/publishable key input |
-| `AUTH_ADAPTER_MODE` | Task 10 계획에만 존재, 현재 미구현 | 향후 local fake와 Supabase adapter 선택 |
-| `API_INTERNAL_URL` | Task 10 계획에만 존재, 현재 미구현 | 향후 BFF에서 NestJS로 가는 고정 server URL |
+| `APP_ORIGIN` | 모든 BFF mode에서 필수 | path/query/fragment/credential 없는 exact origin. production은 HTTPS만, non-production은 exact loopback에 한해 HTTP 허용 |
+| `AUTH_ADAPTER_MODE` | optional, default `supabase` | `supabase | fake`. `fake`는 non-production exact loopback에서만 허용 |
+| `DATABASE_URL` | BFF 필수 | `postgres:` 또는 `postgresql:` connection. process-shared DB client 생성에 사용하며 로그에 출력하지 않음 |
+| `API_INTERNAL_URL` | BFF 필수 | root-only `http:`/`https:` server URL. `/api/me`가 고정 `/v1/me`를 조립 |
+| `AUTH_TOKEN_KEY_ID` | BFF 필수 | 현재 AES-GCM key ID, `[A-Za-z0-9._-]` 1~128자 |
+| `AUTH_TOKEN_KEY` | BFF 필수 secret | canonical base64url로 인코딩한 정확히 32바이트 key |
+| `AUTH_TOKEN_PREVIOUS_KEYS` | optional secret | 이전 key ID에서 32바이트 canonical base64url key로 가는 JSON object. 현재 ID와 중복 금지 |
+| `AUTH_CSRF_HMAC_KEY` | BFF 필수 secret | canonical base64url로 인코딩한 정확히 32바이트 HMAC key |
+| `SUPABASE_URL` | `supabase` mode에서 필수 | credential 없는 root-only `http:`/`https:` Supabase base URL |
+| `SUPABASE_ANON_KEY` | `supabase` mode에서 필수 | server-side Supabase anon/publishable key input |
 
-session encryption keyring, CSRF HMAC key, canonical application origin의 최종 환경 변수 이름과 parser는 아직 구현되지 않았다. 이름·인코딩·rotation 계약이 코드에 생기기 전에는 운영 변수로 간주하지 않는다.
+production은 `APP_ORIGIN`에 HTTPS exact origin을 사용해야 한다. container는 cookie 정책에 항상 `Secure: true`를 전달하므로 loopback HTTP에서 `fake` mode를 선택할 수 있어도 실제 browser cookie flow의 운영 대체물이 아니다.
 
 실제 key, token, cookie, OAuth code, DB URL을 shell history, 문서, test output에 넣지 않는다. 이 문서는 실제 형식의 secret 예시를 제공하지 않는다.
+
+### 구현된 HTTP 표면
+
+| method | path | 역할 |
+| --- | --- | --- |
+| GET | `/api/auth/csrf` | session 또는 interaction selector에 묶인 최대 300초 CSRF token 발급 |
+| POST | `/api/auth/sign-up` | enumeration-resistant email signup 시작 |
+| POST | `/api/auth/sign-in` | email login과 opaque session cookie 발급 |
+| GET | `/api/auth/email/callback` | interaction-bound email confirmation 완료 |
+| POST | `/api/auth/oauth/{provider}/start` | 새 interaction cookie와 same-origin continue path 발급 |
+| GET | `/api/auth/oauth/{provider}/continue` | document navigation 검증 뒤 provider authorization redirect |
+| GET | `/api/auth/callback` | OAuth callback 완료와 allowlisted app redirect |
+| GET | `/api/auth/session` | refresh 없이 session 상태 확인 |
+| POST | `/api/auth/session/refresh` | session-bound CSRF 뒤 token pair CAS refresh |
+| POST | `/api/auth/sign-out` | local-first revoke, cookie 제거, provider logout 시도 |
+| POST | `/api/auth/password/reset-request` | enumeration-resistant recovery 시작 |
+| GET | `/api/auth/password/callback` | recovery code를 제한된 server context로 교환 |
+| POST | `/api/auth/password/update` | interaction-bound recovery password 변경 |
+| GET | `/api/me` | 고정 internal `/v1/me`에 server-held access JWT 전달 |
+
+각 route는 지원하지 않는 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS를 명시적 405 `ApiError`로 처리한다. 모든 성공·오류·redirect·405는 no-store 3종 header를 포함한다. mutation request JSON은 최대 16,384바이트, `/v1/me` upstream JSON은 최대 65,536바이트이며 chunked stream도 실제 byte 수로 제한한다.
 
 ## 3. deterministic unit test 실행
 
@@ -75,6 +101,11 @@ pnpm --filter @account-book/web test
 - Supabase adapter의 provider mapping과 malformed token fail-closed
 - opaque session 7일 idle·30일 absolute 수명과 refresh CAS
 - PostgreSQL repository가 만드는 SQL predicate와 transaction 순서
+- 14개 Next route wiring, explicit method 405와 no-store header
+- canonical origin/container, process-shared DB client와 request-scoped auth graph
+- bounded request/upstream streaming JSON, OAuth continue redirect handoff, local-first logout
+- 60초 refresh threshold, typed expired/rate-limited/unavailable mapping
+- ky 2 `prefix: "/api"`, mutation별 CSRF와 TanStack Query의 단 한 번 refresh/retry
 
 ### 계약과 최종 Drizzle schema
 
@@ -104,7 +135,21 @@ pnpm lint
 
 두 명령 모두 종료 코드 `0`이어야 한다. `typecheck`는 contracts, database, web의 TypeScript 검사를 실행한다. `lint`는 repository 전체를 warning 0 기준으로 검사한다.
 
-현재 `apps/web/package.json`에는 `dev`와 `build` script가 없다. 따라서 Next.js dev server나 production build를 인증 백엔드 검증 단계로 실행할 수 없다. root `build`가 manifest에 있더라도 Task 10 이전의 web package는 Next build 대상이 아니다.
+Next.js production route generation까지 확인한다.
+
+```powershell
+pnpm --filter @account-book/web build
+```
+
+성공한 build에는 OAuth continue를 포함한 14개 dynamic BFF route가 있어야 한다. 로컬 개발 서버가 필요하면 `pnpm --filter @account-book/web dev`를 사용하지만, 실제 secret을 terminal command line에 넣지 않고 승인된 process 환경 주입을 사용한다.
+
+### optional coverage 상태
+
+```powershell
+pnpm --filter @account-book/web test:coverage
+```
+
+Task 10의 마지막 full web 검증은 22개 파일, 401개 test가 통과했다. 별도 coverage 명령의 최신 기록은 기존 Task 5~9 instrumentation 범위에서 branch `91.78%`(`670/730`)이며 global 100% threshold 때문에 종료 코드 `1`이다. Task 10의 controller/container/route/client 파일은 아직 coverage include 밖이다. 이를 “test 실패”나 “100% 통과”로 기록하지 말고 coverage gate 미충족으로 분리한다.
 
 ## 5. security gate 실행
 
@@ -174,15 +219,15 @@ git config --local --get core.hooksPath
 
 ## 7. live Supabase smoke 상태 확인
 
-현재 저장소에는 live Supabase smoke script, Next.js BFF route, callback endpoint가 없다. 따라서 지금 실행할 수 있는 정확한 smoke command도 없다. deterministic adapter test가 실제 provider 통합 성공을 대신하지 않는다.
+Next.js BFF와 callback route는 구현됐지만 live Supabase smoke script와 test credential은 저장소에 없다. 따라서 deterministic route/adapter test와 production build가 실제 provider 통합 성공을 대신하지 않는다.
 
 향후 smoke에는 최소한 다음이 필요하다.
 
 - 개발 전용 Supabase project와 승인된 server configuration
 - email confirmation과 recovery redirect 설정
 - Google, Kakao, Naver `custom:naver` provider 설정
-- Task 10의 canonical configured application origin과 실제 callback route
-- 시작마다 새 `__Host-ab_interaction` cookie를 발급하는 BFF
+- canonical `APP_ORIGIN`과 provider console에 등록된 실제 email/OAuth/recovery callback
+- 시작마다 새 `__Host-ab_interaction` cookie를 발급하고 두 cookie를 항상 Secure로 전송할 HTTPS BFF
 - browser history, network response, application storage, server log를 검사할 안전한 test account
 
 공급자별로 정상 로그인, 사용자 취소, 잘못된 state, callback replay, email 누락을 확인해야 한다. provider token, PKCE verifier, recovery credential, code, selector 원문이 browser storage·response body·history·로그에 남지 않아야 한다.
@@ -247,6 +292,13 @@ git config --local --get core.hooksPath
 3. SDK client가 매 호출 새로 생성되고 `persistSession: false`인지 확인한다.
 4. provider 원문 오류를 assertion이나 로그에 복사하지 않는다.
 
+### BFF가 `AUTH_CONFIGURATION_INVALID`로 시작하지 못함
+
+1. 필수 환경 변수의 공백·control character·URL protocol과 root-only 조건을 확인한다. 값을 출력하지 않는다.
+2. production `APP_ORIGIN`이 path와 trailing slash 없는 exact HTTPS origin인지 확인한다.
+3. `fake` mode가 production 또는 public host에서 선택되지 않았는지 확인한다.
+4. 현재 process에서 이미 만든 shared DB client와 다른 `DATABASE_URL`을 주입하지 않았는지 확인한다. URL을 바꿔야 하면 process를 새로 시작한다.
+
 ## 검증 완료 기준
 
 현재 구현에 대해 다음이 모두 종료 코드 `0`이면 deterministic 검증을 완료한 것이다.
@@ -257,6 +309,7 @@ pnpm --filter @account-book/contracts test
 pnpm --filter @account-book/database test
 pnpm typecheck
 pnpm lint
+pnpm --filter @account-book/web build
 pnpm test:security-gate
 git diff --check
 git diff --cached --check
