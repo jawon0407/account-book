@@ -79,7 +79,7 @@ function workspaceScalarOverrides(workspace) {
       .trimEnd()
       .split(/\r?\n/)
       .map((line) => {
-        const scalar = line.match(/^  "([^"]+)": "([^"]+)"$/u);
+        const scalar = line.match(/^ {2}"([^"]+)": "([^"]+)"$/u);
         assert.notEqual(scalar, null, `workspace override must be a quoted scalar entry: ${line}`);
         return [scalar[1], scalar[2]];
       }),
