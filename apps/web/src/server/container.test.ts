@@ -1,13 +1,30 @@
+import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
 vi.mock("@account-book/database", () => ({ createDatabaseClient: vi.fn(() => ({ sharedDatabase: true })) }));
 const module = await import("./container.js").catch(() => ({} as Record<string, unknown>));
 const resolveAuthRuntime = module.resolveAuthRuntime as ((environment: Readonly<Record<string, string | undefined>>) => { mode: string; origin: URL }) | undefined;
-const createRequestContainer = module.createRequestContainer as ((environment: Readonly<Record<string, string | undefined>>) => { authController: unknown }) | undefined;
+const createRequestContainer = module.createRequestContainer as ((environment: Readonly<Record<string, string | undefined>>) => {
+  authController: unknown;
+  delegatedJwtSigner: { sign: unknown };
+}) | undefined;
 const { createDatabaseClient } = await import("@account-book/database");
 
 const key = Buffer.alloc(32, 7).toString("base64url");
+const signingPair = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+const signingPrivateKeyDer = signingPair.privateKey.export({ format: "der", type: "pkcs8" });
+const signingPrivateKey = signingPrivateKeyDer.toString("base64url");
+const noncanonicalPrivateKeyDer = Buffer.concat([signingPrivateKeyDer, Buffer.from([0])]).toString("base64url");
+const p384PrivateKey = generateKeyPairSync("ec", { namedCurve: "secp384r1" })
+  .privateKey.export({ format: "der", type: "pkcs8" }).toString("base64url");
+const rsaPrivateKey = generateKeyPairSync("rsa", { modulusLength: 2048 })
+  .privateKey.export({ format: "der", type: "pkcs8" }).toString("base64url");
+const publicKeyDer = signingPair.publicKey.export({ format: "der", type: "spki" }).toString("base64url");
+const delegatedEnvironment = {
+  BFF_JWT_KEY_ID: "bff-test-a",
+  BFF_JWT_PRIVATE_KEY: signingPrivateKey,
+} as const;
 const runtimeEnvironment = {
   NODE_ENV: "test",
   APP_ORIGIN: "http://localhost:3000",
@@ -17,6 +34,7 @@ const runtimeEnvironment = {
   AUTH_TOKEN_KEY_ID: "current",
   AUTH_TOKEN_KEY: key,
   AUTH_CSRF_HMAC_KEY: key,
+  ...delegatedEnvironment,
 } as const;
 
 describe("authentication runtime selection", () => {
@@ -83,5 +101,31 @@ describe("authentication runtime selection", () => {
     expect(csrf.headers.get("Set-Cookie")).toMatch(/__Host-ab_interaction=.*; Secure;/u);
     expect(() => createRequestContainer!({ ...runtimeEnvironment, DATABASE_URL: "postgres://other.example.test/account_book" })).toThrow("AUTH_CONFIGURATION_INVALID");
     expect(createDatabaseClient).toHaveBeenCalledTimes(1);
+  });
+
+  it("exposes a request-owned delegated signer only for a canonical PKCS8 P-256 private key", () => {
+    const first = createRequestContainer!(runtimeEnvironment);
+    const second = createRequestContainer!(runtimeEnvironment);
+
+    expect(first.delegatedJwtSigner.sign).toBeTypeOf("function");
+    expect(first.delegatedJwtSigner).not.toBe(second.delegatedJwtSigner);
+  });
+
+  it.each([
+    ["missing kid", { BFF_JWT_KEY_ID: undefined }],
+    ["blank kid", { BFF_JWT_KEY_ID: "" }],
+    ["unsafe kid", { BFF_JWT_KEY_ID: "key/../../x" }],
+    ["missing private key", { BFF_JWT_PRIVATE_KEY: undefined }],
+    ["non-base64 key", { BFF_JWT_PRIVATE_KEY: "not-a-key" }],
+    ["noncanonical base64url key", { BFF_JWT_PRIVATE_KEY: `${signingPrivateKey}=` }],
+    ["noncanonical PKCS8 DER", { BFF_JWT_PRIVATE_KEY: noncanonicalPrivateKeyDer }],
+    ["wrong curve", { BFF_JWT_PRIVATE_KEY: p384PrivateKey }],
+    ["non-EC private key", { BFF_JWT_PRIVATE_KEY: rsaPrivateKey }],
+    ["public key", { BFF_JWT_PRIVATE_KEY: publicKeyDer }],
+    ["reused token secret", { BFF_JWT_PRIVATE_KEY: key }],
+  ] satisfies ReadonlyArray<readonly [string, Readonly<Record<string, string | undefined>>]>)
+  ("rejects delegated signer configuration: %s", (_name, override) => {
+    expect(() => createRequestContainer!({ ...runtimeEnvironment, ...override }))
+      .toThrow(/^AUTH_CONFIGURATION_INVALID$/u);
   });
 });

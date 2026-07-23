@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createHash } from "node:crypto";
+import { createHash, createPrivateKey, type KeyObject } from "node:crypto";
 import { createDatabaseClient } from "@account-book/database";
 import { EmailAuthService } from "./auth/email-auth-service.js";
 import { FakeAuthProvider } from "./auth/fake-auth-provider.js";
@@ -10,6 +10,7 @@ import { SupabaseAuthAdapter } from "./auth/supabase-auth-adapter.js";
 import { AuthController } from "./http/auth-controller.js";
 import { PostgresAuthRepository } from "./persistence/postgres-auth-repository.js";
 import { SessionService } from "./session/session-service.js";
+import { DelegatedJwtSigner } from "./security/delegated-jwt-signer.js";
 import type { TokenKeyring } from "./security/token-envelope.js";
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
@@ -97,6 +98,42 @@ function keyring(environment: Readonly<Record<string, string | undefined>>): Tok
   return { currentKeyId, keys };
 }
 
+/**
+ * Parses one canonical PKCS8 DER base64url value and accepts only a P-256 EC private key.
+ * @param environment Server-only values containing the dedicated delegated-JWT key and its rotation ID.
+ * @returns A validated key ID and private `KeyObject` suitable only for ES256 signing.
+ * @throws `AUTH_CONFIGURATION_INVALID` without secret or parser detail for every malformed or unsafe value.
+ */
+function delegatedSigningKey(
+  environment: Readonly<Record<string, string | undefined>>,
+): Readonly<{ keyId: string; privateKey: KeyObject }> {
+  const keyId = required(environment, "BFF_JWT_KEY_ID");
+  if (!/^[A-Za-z0-9._-]{1,128}$/u.test(keyId)) return invalidConfiguration();
+  const encoded = required(environment, "BFF_JWT_PRIVATE_KEY");
+  if (encoded === environment.AUTH_TOKEN_KEY || !/^[A-Za-z0-9_-]+$/u.test(encoded)) {
+    return invalidConfiguration();
+  }
+  const der = Buffer.from(encoded, "base64url");
+  if (der.length === 0 || der.toString("base64url") !== encoded) return invalidConfiguration();
+  let privateKey: KeyObject;
+  let canonicalDer: Buffer;
+  try {
+    privateKey = createPrivateKey({ key: der, format: "der", type: "pkcs8" });
+    canonicalDer = privateKey.export({ format: "der", type: "pkcs8" });
+  } catch {
+    return invalidConfiguration();
+  }
+  if (
+    !canonicalDer.equals(der) ||
+    privateKey.type !== "private" ||
+    privateKey.asymmetricKeyType !== "ec" ||
+    privateKey.asymmetricKeyDetails?.namedCurve !== "prime256v1"
+  ) {
+    return invalidConfiguration();
+  }
+  return Object.freeze({ keyId, privateKey });
+}
+
 function databaseClient(connectionString: string): ReturnType<typeof createDatabaseClient> {
   const fingerprint = createHash("sha256").update(connectionString).digest("base64url");
   if (sharedDatabase === undefined) {
@@ -108,8 +145,14 @@ function databaseClient(connectionString: string): ReturnType<typeof createDatab
   return sharedDatabase;
 }
 
-/** The request-owned dependency graph exposed to the route adapter. */
-export type RequestContainer = Readonly<{ authController: AuthController }>;
+/**
+ * The request-owned dependency graph exposed to route adapters.
+ * The delegated signer remains separate until Task 3 replaces controller token passthrough.
+ */
+export type RequestContainer = Readonly<{
+  authController: AuthController;
+  delegatedJwtSigner: DelegatedJwtSigner;
+}>;
 
 /**
  * Reuses one process-scoped infrastructure database client while constructing fresh request-scoped repository, provider, session, use-case, and HTTP objects.
@@ -124,6 +167,7 @@ export function createRequestContainer(environment: Readonly<Record<string, stri
     const apiInternalUrl = serverUrl(required(environment, "API_INTERNAL_URL"), new Set(["http:", "https:"]), true);
     const tokenKeyring = keyring(environment);
     const csrfKey = canonicalKey(required(environment, "AUTH_CSRF_HMAC_KEY"));
+    const signingKey = delegatedSigningKey(environment);
     const repository = new PostgresAuthRepository(databaseClient(databaseUrl));
     const provider = runtime.mode === "fake"
       ? new FakeAuthProvider(environment.AUTH_FAKE_PROVIDER_URL === undefined ? undefined : { tokenUrl: fakeProviderUrl(required(environment, "AUTH_FAKE_PROVIDER_URL")) })
@@ -135,7 +179,13 @@ export function createRequestContainer(environment: Readonly<Record<string, stri
     const email = new EmailAuthService(provider, sessions, repository, tokenKeyring);
     const oauth = new OAuthService(repository, provider, sessions, tokenKeyring);
     const recovery = new PasswordRecoveryService(repository, provider, tokenKeyring);
+    const delegatedJwtSigner = new DelegatedJwtSigner({
+      keyId: signingKey.keyId,
+      privateKey: signingKey.privateKey,
+      now: () => new Date(),
+    });
     return {
+      delegatedJwtSigner,
       authController: new AuthController({
         configuredOrigin: runtime.origin,
         apiInternalUrl,
