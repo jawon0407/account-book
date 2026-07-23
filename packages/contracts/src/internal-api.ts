@@ -27,7 +27,11 @@ function invalid(): never {
   throw new Error("DELEGATED_REQUEST_INVALID");
 }
 
-/** Normalizes the only content types currently accepted by protected internal APIs. */
+/**
+ * Normalizes the only content types accepted by protected internal APIs to prevent ambiguous request bindings.
+ * @param value Raw `Content-Type` header value, or `null` when the header is absent.
+ * @returns The canonical content type used in the delegated request binding.
+ */
 export function normalizeDelegatedContentType(value: string | null): "" | "application/json" {
   if (value === null) return "";
   if (Array.from(value).some((character) => character.charCodeAt(0) <= 31 || character.charCodeAt(0) === 127)) return invalid();
@@ -36,7 +40,11 @@ export function normalizeDelegatedContentType(value: string | null): "" | "appli
   return invalid();
 }
 
-/** Builds the cross-runtime request-binding string without hashing or reading secrets. */
+/**
+ * Builds the cross-runtime request-binding string without hashing or reading secrets, rejecting ambiguous inputs.
+ * @param input Validated request data to bind to a delegated JWT.
+ * @returns The newline-delimited canonical request representation.
+ */
 export function canonicalDelegatedRequest(input: DelegatedRequestInput): string {
   const method = MethodSchema.safeParse(input.method);
   const digest = DigestSchema.safeParse(input.bodySha256);
