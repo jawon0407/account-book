@@ -162,8 +162,7 @@ describe("authentication runtime selection", () => {
     ["CSRF key used as private scalar", {
       BFF_JWT_PRIVATE_KEY: p256Pkcs8FromScalar(Buffer.from(csrfKey, "base64url")),
     }],
-  ] satisfies ReadonlyArray<readonly [string, Readonly<Record<string, string | undefined>>]>)
-  ("rejects delegated signer configuration: %s", (_name, override) => {
+  ] satisfies ReadonlyArray<readonly [string, Readonly<Record<string, string | undefined>>]>)("rejects delegated signer configuration: %s", (_name, override) => {
     expect(() => createRequestContainer!({ ...runtimeEnvironment, ...override }))
       .toThrow(/^AUTH_CONFIGURATION_INVALID$/u);
   });
