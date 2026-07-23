@@ -45,6 +45,11 @@ const approvedPackageLocalSkipLibCheck = [
   "tests/database/tsconfig.json",
 ];
 
+const expectedWorkspaceOverrides = {
+  "next@16.2.11>sharp": "-",
+  "next@16.2.11>postcss": "8.5.10",
+};
+
 function tsconfigFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
@@ -57,6 +62,28 @@ function tsconfigFiles(directory) {
 
 function workspaceTsconfigFiles() {
   return ["apps", "packages", "tests"].flatMap((directory) => tsconfigFiles(join(rootDir, directory)));
+}
+
+/**
+ * Extracts the top-level scalar entries from the workspace `overrides` map.
+ *
+ * @param {string} workspace The pnpm workspace YAML source to inspect.
+ * @returns {Record<string, string>} The exact quoted selector-to-value entries in `overrides`.
+ */
+function workspaceScalarOverrides(workspace) {
+  const overrideBlock = workspace.match(/^overrides:\r?\n((?: {2}[^\r\n]+\r?\n?)*)/mu)?.[1];
+  assert.notEqual(overrideBlock, undefined, "pnpm workspace must define an overrides map");
+
+  return Object.fromEntries(
+    overrideBlock
+      .trimEnd()
+      .split(/\r?\n/)
+      .map((line) => {
+        const scalar = line.match(/^  "([^"]+)": "([^"]+)"$/u);
+        assert.notEqual(scalar, null, `workspace override must be a quoted scalar entry: ${line}`);
+        return [scalar[1], scalar[2]];
+      }),
+  );
 }
 
 test("workspace pins strict TypeScript, boundaries, and verification policy", () => {
@@ -118,8 +145,7 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
   // Next 16.2.11 pulls sharp 0.34.5 only as an optional image optimizer.
   // The app has no next/image usage, so keep that unused native dependency absent.
   // Its production PostCSS dependency is pinned to the patched 8.5.10 release.
-  assert.match(workspace, /^ {2}"next@16\.2\.11>sharp": "-"$/mu);
-  assert.match(workspace, /^ {2}"next@16\.2\.11>postcss": "8\.5\.10"$/mu);
+  assert.deepEqual(workspaceScalarOverrides(workspace), expectedWorkspaceOverrides);
   for (const policy of ["engine-strict=true", "save-exact=true", "strict-peer-dependencies=true"]) {
     assert.match(npmrc, new RegExp(`^${policy}$`, "m"));
   }
