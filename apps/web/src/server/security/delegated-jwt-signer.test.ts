@@ -90,6 +90,28 @@ describe("DelegatedJwtSigner", () => {
     expect(differentPayload.rbh).not.toBe(firstPayload.rbh);
   });
 
+  it("changes the request binding for method, body, and allowed content type", async () => {
+    const baseline = (await jwtVerify(
+      (await signer().sign(validInput)).token,
+      p256.publicKey,
+      { currentDate: now },
+    )).payload.rbh;
+    const variants = [
+      { ...validInput, method: "POST" as const },
+      { ...validInput, body: new TextEncoder().encode("{}") },
+      { ...validInput, contentType: "application/json" },
+    ];
+
+    for (const variant of variants) {
+      const payload = (await jwtVerify(
+        (await signer().sign(variant)).token,
+        p256.publicKey,
+        { currentDate: now },
+      )).payload;
+      expect(payload.rbh).not.toBe(baseline);
+    }
+  });
+
   it("uses unique default request IDs and token IDs", async () => {
     const productionSigner = new DelegatedJwtSigner({
       keyId: "bff-2026-07-a",

@@ -1,6 +1,11 @@
 import "server-only";
 
-import { createHash, createPrivateKey, type KeyObject } from "node:crypto";
+import {
+  createHash,
+  createPrivateKey,
+  timingSafeEqual,
+  type KeyObject,
+} from "node:crypto";
 import { createDatabaseClient } from "@account-book/database";
 import { EmailAuthService } from "./auth/email-auth-service.js";
 import { FakeAuthProvider } from "./auth/fake-auth-provider.js";
@@ -101,25 +106,31 @@ function keyring(environment: Readonly<Record<string, string | undefined>>): Tok
 /**
  * Parses one canonical PKCS8 DER base64url value and accepts only a P-256 EC private key.
  * @param environment Server-only values containing the dedicated delegated-JWT key and its rotation ID.
+ * @param tokenKeyring Validated current and previous app-token keys that the signing scalar must not reuse.
+ * @param csrfKey Validated CSRF HMAC key that the signing scalar must not reuse.
  * @returns A validated key ID and private `KeyObject` suitable only for ES256 signing.
  * @throws `AUTH_CONFIGURATION_INVALID` without secret or parser detail for every malformed or unsafe value.
  */
 function delegatedSigningKey(
   environment: Readonly<Record<string, string | undefined>>,
+  tokenKeyring: TokenKeyring,
+  csrfKey: Uint8Array,
 ): Readonly<{ keyId: string; privateKey: KeyObject }> {
   const keyId = required(environment, "BFF_JWT_KEY_ID");
   if (!/^[A-Za-z0-9._-]{1,128}$/u.test(keyId)) return invalidConfiguration();
   const encoded = required(environment, "BFF_JWT_PRIVATE_KEY");
-  if (encoded === environment.AUTH_TOKEN_KEY || !/^[A-Za-z0-9_-]+$/u.test(encoded)) {
-    return invalidConfiguration();
-  }
+  if (!/^[A-Za-z0-9_-]+$/u.test(encoded)) return invalidConfiguration();
   const der = Buffer.from(encoded, "base64url");
   if (der.length === 0 || der.toString("base64url") !== encoded) return invalidConfiguration();
   let privateKey: KeyObject;
   let canonicalDer: Buffer;
+  let privateScalar: Uint8Array;
   try {
     privateKey = createPrivateKey({ key: der, format: "der", type: "pkcs8" });
     canonicalDer = privateKey.export({ format: "der", type: "pkcs8" });
+    const jwk = privateKey.export({ format: "jwk" });
+    if (typeof jwk.d !== "string") return invalidConfiguration();
+    privateScalar = canonicalKey(jwk.d);
   } catch {
     return invalidConfiguration();
   }
@@ -131,6 +142,11 @@ function delegatedSigningKey(
   ) {
     return invalidConfiguration();
   }
+  let reusedSymmetricKey = false;
+  for (const activeKey of [csrfKey, ...tokenKeyring.keys.values()]) {
+    reusedSymmetricKey = timingSafeEqual(privateScalar, activeKey) || reusedSymmetricKey;
+  }
+  if (reusedSymmetricKey) return invalidConfiguration();
   return Object.freeze({ keyId, privateKey });
 }
 
@@ -167,7 +183,7 @@ export function createRequestContainer(environment: Readonly<Record<string, stri
     const apiInternalUrl = serverUrl(required(environment, "API_INTERNAL_URL"), new Set(["http:", "https:"]), true);
     const tokenKeyring = keyring(environment);
     const csrfKey = canonicalKey(required(environment, "AUTH_CSRF_HMAC_KEY"));
-    const signingKey = delegatedSigningKey(environment);
+    const signingKey = delegatedSigningKey(environment, tokenKeyring, csrfKey);
     const repository = new PostgresAuthRepository(databaseClient(databaseUrl));
     const provider = runtime.mode === "fake"
       ? new FakeAuthProvider(environment.AUTH_FAKE_PROVIDER_URL === undefined ? undefined : { tokenUrl: fakeProviderUrl(required(environment, "AUTH_FAKE_PROVIDER_URL")) })

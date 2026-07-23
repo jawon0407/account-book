@@ -1,4 +1,8 @@
-import { generateKeyPairSync } from "node:crypto";
+import {
+  createECDH,
+  createPrivateKey,
+  generateKeyPairSync,
+} from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
@@ -12,6 +16,31 @@ const createRequestContainer = module.createRequestContainer as ((environment: R
 const { createDatabaseClient } = await import("@account-book/database");
 
 const key = Buffer.alloc(32, 7).toString("base64url");
+const csrfKey = Buffer.alloc(32, 8).toString("base64url");
+const previousKey = Buffer.alloc(32, 9).toString("base64url");
+
+/**
+ * Wraps a chosen 32-byte P-256 scalar in a canonical PKCS8 key to exercise byte-level secret separation.
+ * @param scalar Symmetric-key bytes intentionally reused as the EC private scalar.
+ * @returns Canonical PKCS8 DER encoded as unpadded base64url.
+ */
+function p256Pkcs8FromScalar(scalar: Buffer): string {
+  const ecdh = createECDH("prime256v1");
+  ecdh.setPrivateKey(scalar);
+  const publicPoint = ecdh.getPublicKey(undefined, "uncompressed");
+  const privateKey = createPrivateKey({
+    format: "jwk",
+    key: {
+      crv: "P-256",
+      d: scalar.toString("base64url"),
+      kty: "EC",
+      x: publicPoint.subarray(1, 33).toString("base64url"),
+      y: publicPoint.subarray(33, 65).toString("base64url"),
+    },
+  });
+  return privateKey.export({ format: "der", type: "pkcs8" }).toString("base64url");
+}
+
 const signingPair = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
 const signingPrivateKeyDer = signingPair.privateKey.export({ format: "der", type: "pkcs8" });
 const signingPrivateKey = signingPrivateKeyDer.toString("base64url");
@@ -33,7 +62,7 @@ const runtimeEnvironment = {
   API_INTERNAL_URL: "http://api.internal.test:3001",
   AUTH_TOKEN_KEY_ID: "current",
   AUTH_TOKEN_KEY: key,
-  AUTH_CSRF_HMAC_KEY: key,
+  AUTH_CSRF_HMAC_KEY: csrfKey,
   ...delegatedEnvironment,
 } as const;
 
@@ -122,7 +151,17 @@ describe("authentication runtime selection", () => {
     ["wrong curve", { BFF_JWT_PRIVATE_KEY: p384PrivateKey }],
     ["non-EC private key", { BFF_JWT_PRIVATE_KEY: rsaPrivateKey }],
     ["public key", { BFF_JWT_PRIVATE_KEY: publicKeyDer }],
-    ["reused token secret", { BFF_JWT_PRIVATE_KEY: key }],
+    ["raw symmetric token secret", { BFF_JWT_PRIVATE_KEY: key }],
+    ["current token key used as private scalar", {
+      BFF_JWT_PRIVATE_KEY: p256Pkcs8FromScalar(Buffer.from(key, "base64url")),
+    }],
+    ["previous token key used as private scalar", {
+      AUTH_TOKEN_PREVIOUS_KEYS: JSON.stringify({ previous: previousKey }),
+      BFF_JWT_PRIVATE_KEY: p256Pkcs8FromScalar(Buffer.from(previousKey, "base64url")),
+    }],
+    ["CSRF key used as private scalar", {
+      BFF_JWT_PRIVATE_KEY: p256Pkcs8FromScalar(Buffer.from(csrfKey, "base64url")),
+    }],
   ] satisfies ReadonlyArray<readonly [string, Readonly<Record<string, string | undefined>>]>)
   ("rejects delegated signer configuration: %s", (_name, override) => {
     expect(() => createRequestContainer!({ ...runtimeEnvironment, ...override }))
