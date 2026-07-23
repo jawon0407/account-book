@@ -16,6 +16,8 @@ Focused GREEN: workflow policy exit 0 (15/15), web exit 0 (24 files, 435/435), E
 
 Task 14의 첫 clean-checkout CI는 공유 package의 `dist`가 만들어지기 전에 API typecheck가 실행되는 로컬 산출물 의존성을 발견했다. 루트 `typecheck`가 contracts/database를 먼저 빌드하도록 정책 테스트와 script 순서를 함께 고정했다. 다음 CI는 실제 Chromium `fetch()`가 보내는 표준 `Sec-Fetch-Dest: empty`를 CSRF 경계가 거부하는 문제를 발견했다. [W3C Fetch Metadata](https://www.w3.org/TR/fetch-metadata/#sec-fetch-dest-header)는 빈 Fetch destination을 `empty` token으로 전송하도록 정의하므로, exact Origin·`same-origin` Site·허용 Mode·CSRF token 검사를 유지하면서 destination `empty`만 추가로 허용하고 회귀 테스트를 남겼다.
 
+E2E는 오류 feedback의 실제 접근성 role인 `alert`를 검사한다. Next 개발 서버가 자체 `__next_debug_channel:` 항목을 session storage에 둘 수 있으므로, 이 exact framework prefix 외의 session key와 모든 local-storage 항목을 거부하고 전체 key/value에서 provider sentinel, access/refresh token 이름, JWT 형태가 없는지 검사한다. 로그인 성공 직후 `/app` 이동과 응답 본문 읽기의 경합을 피하기 위해 Playwright response event에서 본문을 즉시 복사하되 브라우저 storage에는 저장하지 않는다.
+
 Next.js 16.2.10이 선택적으로 설치하던 `sharp@0.34.5`는 현재 앱에서 `next/image`를 사용하지 않으므로 pnpm override로 제거했다. GHSA-f88m-g3jw-g9cj의 high-severity 경로를 없앤 뒤 웹 프로덕션 빌드와 `pnpm audit --prod --audit-level high`를 다시 통과시켰다. 추후 이미지 최적화를 도입할 때는 패치된 `sharp`와 Next.js의 호환성을 별도 검토해야 한다.
 
 감사에는 Next.js가 정확히 고정한 `postcss@8.4.31` 경로의 moderate GHSA-qx2v-qp2m-jg93 한 건이 남는다. 이 취약점은 신뢰할 수 없는 CSS를 파싱·문자열화해 HTML `<style>`에 넣을 때 문제가 되며 현재 앱에는 해당 입력 경로가 없다. 다만 Next.js 선언 범위를 벗어난 강제 override는 호환성 검증 없이 적용하지 않고, 패치된 PostCSS를 허용하는 Next.js 릴리스로 갱신하거나 별도 호환성 테스트를 통과할 때까지 출시 위험 검토 항목으로 유지한다.

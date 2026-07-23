@@ -11,7 +11,24 @@ async function expectTokenFreeStorage(page: Page): Promise<void> {
     local: Object.entries(localStorage),
     session: Object.entries(sessionStorage),
   }));
-  expect(storage).toEqual({ local: [], session: [] });
+  expect(storage.local).toEqual([]);
+  for (const [key] of storage.session) expect(key).toMatch(/^__next_debug_channel:[A-Za-z0-9_-]+$/u);
+  const serialized = JSON.stringify(storage);
+  expect(serialized).not.toContain(providerRefreshToken);
+  expect(serialized).not.toMatch(/access.?token|refresh.?token|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/iu);
+}
+
+/**
+ * Starts reading one authentication response as soon as Playwright observes it, before success navigation can discard its body.
+ * @param page - Active browser page whose same-origin authentication request is observed.
+ * @param suffix - Fixed API pathname suffix that identifies the expected response.
+ * @returns The status and body copied into the test process without persisting them in browser storage.
+ */
+function authResponse(page: Page, suffix: string): Promise<Readonly<{ body: string; status: number }>> {
+  return page.waitForResponse((response) => response.url().endsWith(suffix)).then(async (response) => ({
+    body: await response.text(),
+    status: response.status(),
+  }));
 }
 
 test("login is responsive, labelled, keyboard reachable, and axe-clean", async ({ page }) => {
@@ -34,15 +51,14 @@ test("failed login stays fixed and never creates browser token state", async ({ 
   await page.goto("/login");
   await page.locator("#sign-in-email").fill(email);
   await page.locator("#sign-in-password").fill(`${password}!wrong`);
-  const responsePromise = page.waitForResponse((response) => response.url().endsWith("/api/auth/sign-in"));
+  const responsePromise = authResponse(page, "/api/auth/sign-in");
   await page.locator('button[type="submit"]').first().click();
   const response = await responsePromise;
-  expect(response.status()).toBe(401);
-  const body = await response.text();
-  expect(body).not.toContain(email);
-  expect(body).not.toContain(password);
-  await expect(page.locator('[role="status"]')).toBeVisible();
-  await expect(page.locator('[role="status"]')).not.toContainText(email);
+  expect(response.status).toBe(401);
+  expect(response.body).not.toContain(email);
+  expect(response.body).not.toContain(password);
+  await expect(page.locator('[role="alert"]')).toBeVisible();
+  await expect(page.locator('[role="alert"]')).not.toContainText(email);
   expect((await context.cookies()).filter((cookie) => cookie.name.includes("ab_session"))).toEqual([]);
   await expectTokenFreeStorage(page);
 });
@@ -53,11 +69,11 @@ test("successful login creates only an opaque cookie, reaches the real API, and 
   await page.goto("/login");
   await page.locator("#sign-in-email").fill(email);
   await page.locator("#sign-in-password").fill(password);
-  const responsePromise = page.waitForResponse((response) => response.url().endsWith("/api/auth/sign-in"));
+  const responsePromise = authResponse(page, "/api/auth/sign-in");
   await page.locator('button[type="submit"]').first().click();
   const signIn = await responsePromise;
-  expect(signIn.status()).toBe(200);
-  const signInText = await signIn.text();
+  expect(signIn.status).toBe(200);
+  const signInText = signIn.body;
   expect(signInText).not.toContain(providerRefreshToken);
   const publicBody = JSON.parse(signInText) as Record<string, unknown>;
   expect(Object.keys(publicBody).sort()).toEqual(["absoluteExpiresAt", "expiresAt", "user"]);
