@@ -5,4 +5,5 @@ packages:
 allowBuilds:
   esbuild: true
 overrides:
-  "next@16.2.10>sharp": "-"
+  "next@16.2.11>sharp": "-"
+  "next@16.2.11>postcss": "8.5.10"

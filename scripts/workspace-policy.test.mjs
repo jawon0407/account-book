@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const packagePath = join(rootDir, "package.json");
+const webPackagePath = join(rootDir, "apps", "web", "package.json");
 const tsconfigPath = join(rootDir, "tsconfig.base.json");
 const workspacePath = join(rootDir, "pnpm-workspace.yaml");
 const npmrcPath = join(rootDir, ".npmrc");
@@ -60,11 +61,13 @@ function workspaceTsconfigFiles() {
 
 test("workspace pins strict TypeScript, boundaries, and verification policy", () => {
   const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
+  const webPackage = JSON.parse(readFileSync(webPackagePath, "utf8"));
   const tsconfig = JSON.parse(readFileSync(tsconfigPath, "utf8"));
   const workspace = readFileSync(workspacePath, "utf8");
   const npmrc = readFileSync(npmrcPath, "utf8");
 
   assert.deepEqual(pkg.devDependencies, expectedDevDependencies);
+  assert.equal(webPackage.dependencies.next, "16.2.11");
   assert.equal(
     pkg.scripts["test:legacy"],
     "node --test scripts/verify-structure.test.mjs scripts/workspace-policy.test.mjs scripts/security/*.test.mjs scripts/security-gate.test.mjs scripts/setup-hooks.test.mjs",
@@ -112,9 +115,11 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
       }),
   );
   assert.deepEqual(allowBuilds, { esbuild: true });
-  // Next 16.2.10 pulls vulnerable sharp 0.34.5 only as an optional image optimizer.
+  // Next 16.2.11 pulls sharp 0.34.5 only as an optional image optimizer.
   // The app has no next/image usage, so keep that unused native dependency absent.
-  assert.match(workspace, /^overrides:\r?\n {2}"next@16\.2\.10>sharp": "-"$/mu);
+  // Its production PostCSS dependency is pinned to the patched 8.5.10 release.
+  assert.match(workspace, /^ {2}"next@16\.2\.11>sharp": "-"$/mu);
+  assert.match(workspace, /^ {2}"next@16\.2\.11>postcss": "8\.5\.10"$/mu);
   for (const policy of ["engine-strict=true", "save-exact=true", "strict-peer-dependencies=true"]) {
     assert.match(npmrc, new RegExp(`^${policy}$`, "m"));
   }
