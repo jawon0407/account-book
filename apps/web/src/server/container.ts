@@ -163,7 +163,7 @@ function databaseClient(connectionString: string): ReturnType<typeof createDatab
 
 /**
  * The request-owned dependency graph exposed to route adapters.
- * The delegated signer remains separate until Task 3 replaces controller token passthrough.
+ * The exposed signer is the exact instance injected into the request-owned controller.
  */
 export type RequestContainer = Readonly<{
   authController: AuthController;
@@ -200,20 +200,22 @@ export function createRequestContainer(environment: Readonly<Record<string, stri
       privateKey: signingKey.privateKey,
       now: () => new Date(),
     });
+    const authController = new AuthController({
+      configuredOrigin: runtime.origin,
+      apiInternalUrl,
+      secureCookies: true,
+      csrfKey,
+      now: () => new Date(),
+      email,
+      oauth,
+      recovery,
+      sessions,
+      provider,
+      delegatedSigner: delegatedJwtSigner,
+    });
     return {
       delegatedJwtSigner,
-      authController: new AuthController({
-        configuredOrigin: runtime.origin,
-        apiInternalUrl,
-        secureCookies: true,
-        csrfKey,
-        now: () => new Date(),
-        email,
-        oauth,
-        recovery,
-        sessions,
-        provider,
-      }),
+      authController,
     };
   } catch {
     return invalidConfiguration();

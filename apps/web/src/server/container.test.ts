@@ -135,9 +135,17 @@ describe("authentication runtime selection", () => {
   it("exposes a request-owned delegated signer only for a canonical PKCS8 P-256 private key", () => {
     const first = createRequestContainer!(runtimeEnvironment);
     const second = createRequestContainer!(runtimeEnvironment);
+    const firstControllerDependencies = (first.authController as {
+      dependencies?: Readonly<{ delegatedSigner?: unknown }>;
+    }).dependencies;
+    const secondControllerDependencies = (second.authController as {
+      dependencies?: Readonly<{ delegatedSigner?: unknown }>;
+    }).dependencies;
 
     expect(first.delegatedJwtSigner.sign).toBeTypeOf("function");
     expect(first.delegatedJwtSigner).not.toBe(second.delegatedJwtSigner);
+    expect(firstControllerDependencies?.delegatedSigner).toBe(first.delegatedJwtSigner);
+    expect(secondControllerDependencies?.delegatedSigner).toBe(second.delegatedJwtSigner);
   });
 
   it.each([

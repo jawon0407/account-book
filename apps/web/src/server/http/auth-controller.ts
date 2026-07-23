@@ -71,6 +71,23 @@ export type AuthControllerDependencies = Readonly<{
   recovery: Pick<PasswordRecoveryService, "start" | "exchange" | "update">;
   sessions: SessionBoundary;
   provider: Pick<AuthProviderPort, "signOut">;
+  delegatedSigner: Readonly<{
+    /**
+     * Mints a credential for only the fixed empty-body current-user GET and never accepts browser or provider credentials.
+     * @param input Canonical local user/session IDs plus the exact method, target, content type, body, and allowlisted scope.
+     * @returns The delegated token and its matching request ID for one bounded upstream request.
+     * @throws May reject; the controller collapses every rejection to its fixed no-secret upstream error.
+     */
+    sign(input: Readonly<{
+      body: Uint8Array;
+      contentType: null;
+      method: "GET";
+      scope: "me:read";
+      sessionId: string;
+      target: "/v1/me";
+      userId: string;
+    }>): Promise<Readonly<{ requestId: string; token: string }>>;
+  }>;
   fetcher?: typeof fetch;
 }>;
 
@@ -464,7 +481,7 @@ export class AuthController {
     }
   }
 
-  /** Proxies only the fixed internal current-user endpoint with the server-held access JWT. */
+  /** Proxies only the fixed internal current-user endpoint with a fresh request-bound delegated JWT. */
   public async me(request: Request): Promise<Response> {
     try {
       const selected = this.sessionSelector(request);
@@ -473,7 +490,24 @@ export class AuthController {
       if (resolved.accessTokenExpiresAt.getTime() - now.getTime() <= REFRESH_THRESHOLD_MS) return fail("AUTH_SESSION_REFRESH_REQUIRED", 401);
       let upstream: Response;
       try {
-        upstream = await this.fetcher(this.apiMeUrl, { method: "GET", headers: { accept: "application/json", authorization: `Bearer ${resolved.accessToken}` } });
+        const signed = await this.dependencies.delegatedSigner.sign({
+          body: new Uint8Array(),
+          contentType: null,
+          method: "GET",
+          scope: "me:read",
+          sessionId: resolved.sessionId,
+          target: "/v1/me",
+          userId: resolved.userId,
+        });
+        upstream = await this.fetcher(this.apiMeUrl, {
+          method: "GET",
+          headers: {
+            accept: "application/json",
+            authorization: `Bearer ${signed.token}`,
+            "x-request-id": signed.requestId,
+          },
+          signal: AbortSignal.timeout(3_000),
+        });
       } catch {
         throw new BoundaryError("AUTH_PROVIDER_UNAVAILABLE", 502);
       }

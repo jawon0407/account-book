@@ -16,6 +16,8 @@ const sessionSelector = Buffer.alloc(32, 5).toString("base64url");
 const csrfKey = randomBytes(32);
 const csrfToken = issueCsrfToken({ selector }, now, csrfKey);
 const user = { id: "123e4567-e89b-12d3-a456-426614174001", email: "person@example.test", emailVerified: true };
+const delegatedRequestId = "123e4567-e89b-42d3-a456-426614174004";
+const delegatedToken = "delegated-fixture-token";
 
 function request(path: string, init: RequestInit = {}, selected = selector): Request {
   const headers = new Headers();
@@ -70,6 +72,12 @@ function setup(overrides: Record<string, unknown> = {}) {
     markRevocationPending: vi.fn(async () => { events.push("pending"); }),
   };
   const provider = { signOut: vi.fn(async () => { events.push("provider-sign-out"); }) };
+  const delegatedSigner = {
+    sign: vi.fn(async () => ({
+      requestId: delegatedRequestId,
+      token: delegatedToken,
+    })),
+  };
   const fetcher = vi.fn(async () => new Response(JSON.stringify(user), { status: 200, headers: { "Content-Type": "application/json", "Set-Cookie": "upstream=forbidden" } }));
   expect(AuthController).toBeTypeOf("function");
   const controller = new AuthController!({
@@ -84,10 +92,11 @@ function setup(overrides: Record<string, unknown> = {}) {
     recovery,
     sessions,
     provider,
+    delegatedSigner,
     fetcher,
     ...overrides,
   });
-  return { controller, email, oauth, recovery, sessions, provider, fetcher, events };
+  return { controller, email, oauth, recovery, sessions, provider, delegatedSigner, fetcher, events };
 }
 
 async function callSessionEndpoint(subject: ReturnType<typeof setup>, endpoint: "session" | "me" | "refresh"): Promise<Response> {
@@ -268,16 +277,72 @@ describe("AuthController", () => {
     expect(await response.text()).not.toContain("provider detail");
   });
 
-  it("uses only the fixed /v1/me URL and server JWT and validates upstream payloads", async () => {
+  it("sends only one request-bound delegated JWT to the fixed current-user endpoint", async () => {
     const subject = setup();
-    const response = await subject.controller.me!(request("/api/me?url=https://evil.test", { headers: { Authorization: "Bearer browser", Host: "evil.test", Forwarded: "host=evil.test", Cookie: `__Host-ab_session=${selector}; other=secret` } }));
-    expect(response.status).toBe(200);
-    const [url, init] = subject.fetcher.mock.calls[0] as unknown as [URL, RequestInit];
-    expect(url.toString()).toBe("http://api.internal.test:3001/v1/me");
-    expect(init).toMatchObject({ method: "GET", headers: { accept: "application/json", authorization: "Bearer server-access-jwt" } });
-    expect(JSON.stringify(init)).not.toMatch(/browser|evil|cookie|forwarded/iu);
-    expect(response.headers.get("Set-Cookie")).toBeNull();
-    expectNoStore(response);
+    const timeoutSignal = new AbortController().signal;
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(timeoutSignal);
+    try {
+      const response = await subject.controller.me!(request("/api/me?url=https://evil.test&provider=credential", {
+        headers: {
+          Authorization: "Bearer browser-access-credential",
+          Cookie: `__Host-ab_session=${selector}; provider_refresh=provider-refresh-credential`,
+          Forwarded: "host=evil.test",
+          Host: "evil.test",
+          "Proxy-Authorization": "Bearer proxy-credential",
+          "X-Forwarded-Host": "evil.test",
+          "X-Forwarded-Proto": "http",
+          "X-Original-URL": "https://evil.test/provider-credential",
+        },
+      }));
+
+      expect(response.status).toBe(200);
+      expect(subject.delegatedSigner.sign).toHaveBeenCalledTimes(1);
+      expect(subject.delegatedSigner.sign).toHaveBeenCalledWith({
+        body: new Uint8Array(),
+        contentType: null,
+        method: "GET",
+        scope: "me:read",
+        sessionId: "123e4567-e89b-12d3-a456-426614174002",
+        target: "/v1/me",
+        userId: user.id,
+      });
+      expect(subject.fetcher).toHaveBeenCalledTimes(1);
+      const [url, init] = subject.fetcher.mock.calls[0] as unknown as [URL, RequestInit];
+      const headers = new Headers(init.headers);
+      expect(url.toString()).toBe("http://api.internal.test:3001/v1/me");
+      expect(init.method).toBe("GET");
+      expect([...headers.keys()].sort()).toEqual(["accept", "authorization", "x-request-id"]);
+      expect(headers.get("accept")).toBe("application/json");
+      expect(headers.get("authorization") === `Bearer ${delegatedToken}`).toBe(true);
+      expect(headers.get("authorization")?.includes("server-access-jwt")).toBe(false);
+      expect(headers.get("x-request-id")).toBe(delegatedRequestId);
+      expect(timeout).toHaveBeenCalledOnce();
+      expect(timeout).toHaveBeenCalledWith(3_000);
+      expect(init.signal).toBe(timeoutSignal);
+      const serialized = `${url.toString()}\n${JSON.stringify(init)}`.toLowerCase();
+      expect([
+        "browser-access-credential",
+        "server-access-jwt",
+        "server-refresh-token",
+        "provider-refresh-credential",
+        "proxy-credential",
+        "123e4567-e89b-12d3-a456-426614174002",
+        "123e4567-e89b-12d3-a456-426614174003",
+        selector.toLowerCase(),
+        "cookie",
+        "forwarded",
+        "evil.test",
+        "provider=credential",
+      ].some((secret) => serialized.includes(secret))).toBe(false);
+      expect(response.headers.get("Set-Cookie")).toBeNull();
+      expectNoStore(response);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("preserves safe current-user response mapping and status behavior", async () => {
+    const subject = setup();
 
     subject.fetcher.mockResolvedValueOnce(new Response(JSON.stringify({ ...user, token: "forbidden" }), { status: 200 }));
     const malformed = await subject.controller.me!(request("/api/me", { headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
@@ -293,6 +358,79 @@ describe("AuthController", () => {
     const unavailable = await subject.controller.me!(request("/api/me", { headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
     expect(unavailable.status).toBe(502);
     expect(await unavailable.json()).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: false });
+  });
+
+  it("does not sign or fetch when the provider access token requires refresh", async () => {
+    const subject = setup({
+      sessions: {
+        ...setup().sessions,
+        resolve: vi.fn(async () => ({
+          accessToken: "expired-provider-access-credential",
+          refreshToken: "provider-refresh-credential",
+          sessionId: "123e4567-e89b-12d3-a456-426614174002",
+          userId: user.id,
+          supabaseSessionId: "123e4567-e89b-12d3-a456-426614174003",
+          accessTokenExpiresAt: new Date(now.getTime() + 60_000),
+          rotationVersion: 0,
+        })),
+      },
+    });
+
+    const response = await subject.controller.me!(request("/api/me", {
+      headers: { Cookie: `__Host-ab_session=${selector}` },
+    }, ""));
+
+    expect(response.status).toBe(401);
+    expect(subject.delegatedSigner.sign).not.toHaveBeenCalled();
+    expect(subject.fetcher).not.toHaveBeenCalled();
+    expect(await response.json()).toMatchObject({
+      code: "AUTH_SESSION_REFRESH_REQUIRED",
+      retryable: false,
+    });
+    expectNoStore(response);
+  });
+
+  it("maps signer failure to the fixed upstream error without fetching or reflecting secrets", async () => {
+    const subject = setup();
+    subject.delegatedSigner.sign.mockRejectedValueOnce(
+      new Error("provider-refresh-credential signer detail"),
+    );
+
+    const response = await subject.controller.me!(request("/api/me", {
+      headers: { Cookie: `__Host-ab_session=${selector}` },
+    }, ""));
+    const text = await response.text();
+
+    expect(response.status).toBe(502);
+    expect(subject.delegatedSigner.sign).toHaveBeenCalledOnce();
+    expect(subject.fetcher).not.toHaveBeenCalled();
+    expect(JSON.parse(text)).toMatchObject({
+      code: "AUTH_PROVIDER_UNAVAILABLE",
+      retryable: false,
+    });
+    expect(text.includes("provider-refresh-credential")).toBe(false);
+    expectNoStore(response);
+  });
+
+  it("does not reflect a delegated credential or request ID when the bounded fetch fails", async () => {
+    const subject = setup();
+    subject.fetcher.mockRejectedValueOnce(
+      new DOMException(`${delegatedToken} ${delegatedRequestId}`, "TimeoutError"),
+    );
+
+    const response = await subject.controller.me!(request("/api/me", {
+      headers: { Cookie: `__Host-ab_session=${selector}` },
+    }, ""));
+    const text = await response.text();
+
+    expect(response.status).toBe(502);
+    expect(JSON.parse(text)).toMatchObject({
+      code: "AUTH_PROVIDER_UNAVAILABLE",
+      retryable: false,
+    });
+    expect(text.includes(delegatedToken)).toBe(false);
+    expect(text.includes(delegatedRequestId)).toBe(false);
+    expectNoStore(response);
   });
 
   it("cancels a chunked upstream stream immediately after the response limit", async () => {
