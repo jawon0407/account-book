@@ -102,7 +102,7 @@ test("successful login creates only an opaque cookie, reaches the real API, and 
     return { body: await response.json() as unknown, status: response.status };
   });
   expect(signOut).toEqual({ body: { signedOut: true }, status: 200 });
-  expect((await context.cookies()).filter((cookie) => cookie.name.startsWith("__Host-ab_"))).toEqual([]);
+  expect((await context.cookies()).some((cookie) => cookie.name.startsWith("__Host-ab_"))).toBe(false);
   const afterLogout = await page.evaluate(async () => (await fetch("/api/me")).status);
   expect(afterLogout).toBe(401);
   const replay = await requestFactory.newContext({
