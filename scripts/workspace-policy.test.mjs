@@ -10,6 +10,7 @@ const packagePath = join(rootDir, "package.json");
 const webPackagePath = join(rootDir, "apps", "web", "package.json");
 const tsconfigPath = join(rootDir, "tsconfig.base.json");
 const workspacePath = join(rootDir, "pnpm-workspace.yaml");
+const lockfilePath = join(rootDir, "pnpm-lock.yaml");
 const npmrcPath = join(rootDir, ".npmrc");
 const configReadmePath = join(rootDir, "packages", "config", "README.md");
 const eslintConfigPath = join(rootDir, "eslint.config.mjs");
@@ -85,6 +86,36 @@ function workspaceScalarOverrides(workspace) {
         return [scalar[1], scalar[2]];
       }),
   );
+}
+
+/**
+ * Verifies that both lockfile graphs resolve the production dependencies to
+ * reviewed patch versions and retain no package entry for the vulnerable versions.
+ *
+ * @param {string} lockfile The generated pnpm lockfile source.
+ * @returns {void}
+ */
+function assertPatchedProductionResolutions(lockfile) {
+  const packagesStart = lockfile.indexOf("packages:");
+  const snapshotsStart = lockfile.indexOf("\nsnapshots:");
+  assert.notEqual(packagesStart, -1, "lockfile must contain a packages section");
+  assert.notEqual(snapshotsStart, -1, "lockfile must contain a snapshots section");
+
+  const resolutionSections = [
+    lockfile.slice(packagesStart, snapshotsStart),
+    lockfile.slice(snapshotsStart),
+  ];
+  const patchedEntries = [/^ {2}postcss@8\.5\.19:\r?$/mu, /^ {2}find-my-way@9\.7\.0:\r?$/mu];
+  const vulnerableEntries = [/^ {2}postcss@8\.5\.10:\r?$/mu, /^ {2}find-my-way@9\.6\.0:\r?$/mu];
+
+  for (const section of resolutionSections) {
+    for (const patchedEntry of patchedEntries) {
+      assert.match(section, patchedEntry, "patched production dependency resolution must exist");
+    }
+    for (const vulnerableEntry of vulnerableEntries) {
+      assert.doesNotMatch(section, vulnerableEntry, "vulnerable production dependency resolution must be absent");
+    }
+  }
 }
 
 test("workspace pins strict TypeScript, boundaries, and verification policy", () => {
@@ -178,4 +209,18 @@ test("workspace policy detects unapproved local TypeScript config overrides", ()
   } finally {
     rmSync(helperPath, { force: true });
   }
+});
+
+test("lockfile resolves only the patched PostCSS and Fastify router versions", () => {
+  const lockfile = readFileSync(lockfilePath, "utf8");
+
+  assertPatchedProductionResolutions(lockfile);
+  assert.throws(
+    () => assertPatchedProductionResolutions(lockfile.replaceAll("postcss@8.5.19", "postcss@8.5.10")),
+    /patched production dependency resolution/u,
+  );
+  assert.throws(
+    () => assertPatchedProductionResolutions(lockfile.replaceAll("find-my-way@9.7.0", "find-my-way@9.6.0")),
+    /patched production dependency resolution/u,
+  );
 });
