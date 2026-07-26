@@ -8,8 +8,12 @@ if (!connectionString || process.env.TEST_DATABASE_DISPOSABLE !== "true") {
   throw new Error("TEST_DATABASE_URL and TEST_DATABASE_DISPOSABLE=true are required for disposable database migration tests");
 }
 
-const migration = await readFile(
+const baseMigration = await readFile(
   new URL("../../supabase/migrations/202607200001_security_auth_foundation.sql", import.meta.url),
+  "utf8",
+);
+const replayMigration = await readFile(
+  new URL("../../supabase/migrations/202607230001_delegated_jwt_replay.sql", import.meta.url),
   "utf8",
 );
 const admin = new Client({ connectionString });
@@ -58,6 +62,7 @@ beforeAll(async () => {
       if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role nologin; end if;
       if exists (select 1 from pg_roles where rolname = 'app_session_bff') then drop role app_session_bff; end if;
       create role app_session_bff nologin;
+      if exists (select 1 from pg_roles where rolname = 'app_api') then drop role app_api; end if;
     end
     $$;
   `);
@@ -66,7 +71,8 @@ beforeAll(async () => {
   await admin.query("grant all privileges on schema app_private to app_session_bff");
   await admin.query("grant all privileges on app_private.preexisting_probe to app_session_bff");
   await admin.query("alter default privileges for role postgres in schema app_private grant select on tables to app_session_bff");
-  await admin.query(migration);
+  await admin.query(baseMigration);
+  await admin.query(replayMigration);
   await verifyPostgresOwner();
   await admin.query("create table app_private.after_migration_probe (id integer primary key)");
 });
@@ -158,6 +164,131 @@ describe("private authentication migration", () => {
         and acl.grantee = (select oid from pg_roles where rolname = 'app_session_bff')
     `);
     expect(defaultGrants.rows[0]?.grant_count).toBe(0);
+  });
+
+  it("allows app_api to consume one digest exactly once with no read, delete, auth, or DDL access", async () => {
+    const role = await admin.query<{
+      rolbypassrls: boolean;
+      rolcanlogin: boolean;
+      rolcreatedb: boolean;
+      rolcreaterole: boolean;
+      rolinherit: boolean;
+      rolreplication: boolean;
+      rolsuper: boolean;
+      schema_create: boolean;
+      schema_usage: boolean;
+    }>(`
+      select
+        rolbypassrls,
+        rolcanlogin,
+        rolcreatedb,
+        rolcreaterole,
+        rolinherit,
+        rolreplication,
+        rolsuper,
+        has_schema_privilege('app_api', 'app_private', 'create') as schema_create,
+        has_schema_privilege('app_api', 'app_private', 'usage') as schema_usage
+      from pg_roles
+      where rolname = 'app_api'
+    `);
+    expect(role.rows[0]).toEqual({
+      rolbypassrls: false,
+      rolcanlogin: true,
+      rolcreatedb: false,
+      rolcreaterole: false,
+      rolinherit: false,
+      rolreplication: false,
+      rolsuper: false,
+      schema_create: false,
+      schema_usage: true,
+    });
+
+    const privileges = await admin.query<{
+      delete_access: boolean;
+      insert_access: boolean;
+      references_access: boolean;
+      select_access: boolean;
+      trigger_access: boolean;
+      truncate_access: boolean;
+      update_access: boolean;
+    }>(`
+      select
+        has_table_privilege('app_api', 'app_private.api_jwt_replays', 'select') as select_access,
+        has_table_privilege('app_api', 'app_private.api_jwt_replays', 'insert') as insert_access,
+        has_table_privilege('app_api', 'app_private.api_jwt_replays', 'update') as update_access,
+        has_table_privilege('app_api', 'app_private.api_jwt_replays', 'delete') as delete_access,
+        has_table_privilege('app_api', 'app_private.api_jwt_replays', 'truncate') as truncate_access,
+        has_table_privilege('app_api', 'app_private.api_jwt_replays', 'references') as references_access,
+        has_table_privilege('app_api', 'app_private.api_jwt_replays', 'trigger') as trigger_access
+    `);
+    expect(privileges.rows[0]).toEqual({
+      delete_access: false,
+      insert_access: true,
+      references_access: false,
+      select_access: false,
+      trigger_access: false,
+      truncate_access: false,
+      update_access: false,
+    });
+
+    await asRole("app_api", async () => {
+      const digest = Buffer.alloc(32, 7);
+      const first = await admin.query(
+        "insert into app_private.api_jwt_replays (jti_digest, expires_at) values ($1, now() + interval '45 seconds') on conflict do nothing",
+        [digest],
+      );
+      const replay = await admin.query(
+        "insert into app_private.api_jwt_replays (jti_digest, expires_at) values ($1, now() + interval '45 seconds') on conflict do nothing",
+        [digest],
+      );
+      expect(first.rowCount).toBe(1);
+      expect(replay.rowCount).toBe(0);
+      await expect(admin.query("select * from app_private.api_jwt_replays")).rejects.toThrow(/permission denied/u);
+      await expect(admin.query("delete from app_private.api_jwt_replays")).rejects.toThrow(/permission denied/u);
+      await expect(admin.query("select * from app_private.auth_sessions")).rejects.toThrow(/permission denied/u);
+      await expect(admin.query("create table app_private.api_probe (id integer)")).rejects.toThrow(/permission denied/u);
+    });
+  });
+
+  it("enforces exact digest length and future expiry", async () => {
+    await expect(admin.query(
+      "insert into app_private.api_jwt_replays (jti_digest, expires_at) values ($1, now() + interval '45 seconds')",
+      [Buffer.alloc(31, 1)],
+    )).rejects.toThrow(/check/u);
+    await expect(admin.query(
+      "insert into app_private.api_jwt_replays (jti_digest, expires_at) values ($1, now())",
+      [Buffer.alloc(32, 2)],
+    )).rejects.toThrow(/check/u);
+  });
+
+  it("keeps replay data inaccessible to browser and BFF roles", async () => {
+    for (const role of [...browserRoles, "app_session_bff"]) {
+      await asRole(role, async () => {
+        await expect(admin.query("select * from app_private.api_jwt_replays")).rejects.toThrow(/permission denied/u);
+        await expect(admin.query(
+          "insert into app_private.api_jwt_replays (jti_digest, expires_at) values ($1, now() + interval '45 seconds')",
+          [Buffer.alloc(32, 3)],
+        )).rejects.toThrow(/permission denied/u);
+      });
+    }
+  });
+
+  it("registers the single expected cleanup job when pg_cron is available", async () => {
+    const extension = await admin.query<{ available: boolean }>(
+      "select exists (select 1 from pg_available_extensions where name = 'pg_cron') as available",
+    );
+    if (!extension.rows[0]?.available) return;
+
+    const jobs = await admin.query<{ command: string; jobname: string; schedule: string }>(`
+      select jobname, schedule, command
+      from cron.job
+      where jobname = 'account-book-api-jwt-replay-cleanup'
+    `);
+    expect(jobs.rows).toEqual([{
+      command: "delete from app_private.api_jwt_replays where expires_at <= now()",
+      jobname: "account-book-api-jwt-replay-cleanup",
+      schedule: "* * * * *",
+    }]);
   });
 
   it("allows the BFF to perform CRUD on all four authentication tables", async () => {

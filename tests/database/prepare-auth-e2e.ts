@@ -7,6 +7,7 @@ const migrations = [
   "202607200001_security_auth_foundation.sql",
   "202607200002_server_pkce_transactions.sql",
   "202607200003_user_security_state.sql",
+  "202607230001_delegated_jwt_replay.sql",
 ] as const;
 
 const prepareRoles = `
@@ -31,6 +32,11 @@ begin
     drop role app_session_bff;
   end if;
   create role app_session_bff nologin nosuperuser nocreatedb nocreaterole noinherit noreplication nobypassrls;
+
+  if exists (select 1 from pg_roles where rolname = 'app_api') then
+    drop role app_api;
+  end if;
+  create role app_api login nosuperuser nocreatedb nocreaterole noinherit noreplication nobypassrls;
 end
 $$;
 `;
@@ -46,9 +52,14 @@ type CreateAdmin = (connectionString: string) => DatabaseAdmin;
 const createPostgresAdmin: CreateAdmin = (connectionString) => new Client({ connectionString });
 
 /**
- * Rebuilds only the exact local disposable authentication schema and applies every auth migration in order.
+ * Rebuilds only the exact local disposable authentication schema, roles, and ordered migrations.
+ * The guarded local database receives a fixed synthetic `app_api` password only after its
+ * postgres owner and exact database name have been verified; no production credential is accepted.
  * @param environment - Must contain the exact disposable flag and reviewed local test database URL.
  * @param createAdmin - Injectable PostgreSQL admin factory used by focused tests; production code uses `pg.Client`.
+ * @returns Nothing after migrations and the disposable-only runtime password are applied.
+ * @throws Fixed configuration/admin errors before destructive work; database failures propagate only
+ * to the CLI's fixed stderr boundary without being logged here.
  */
 export async function prepareAuthE2e(
   environment: Readonly<Record<string, string | undefined>> = process.env,
@@ -77,6 +88,7 @@ export async function prepareAuthE2e(
       const sql = await readFile(new URL(`../../supabase/migrations/${migration}`, import.meta.url), "utf8");
       await admin.query(sql);
     }
+    await admin.query("alter role app_api password 'account-book-e2e-only'");
   } finally {
     await admin.end();
   }

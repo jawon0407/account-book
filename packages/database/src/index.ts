@@ -1,4 +1,5 @@
 export { createDatabaseClient } from "./client.js";
+export { apiJwtReplays } from "./schema/api.js";
 export {
   authRateLimits,
   authRecoveryTransactions,
