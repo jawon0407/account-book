@@ -1,5 +1,5 @@
 import { createECDH, createHash, randomUUID } from "node:crypto";
-import { SignJWT, importJWK } from "jose";
+import { SignJWT, importJWK, jwtVerify } from "jose";
 import { beforeAll, describe, expect, it } from "vitest";
 import { canonicalDelegatedRequest, type DelegatedScope } from "@account-book/contracts/internal-api";
 import type { ReplayStore } from "../persistence/replay-store.js";
@@ -33,22 +33,25 @@ let privateKey: CryptoKey;
 let publicKey: CryptoKey;
 let otherPrivateKey: CryptoKey;
 let otherPublicKey: CryptoKey;
+let wrongAlgorithmPrivateKey: CryptoKey;
+let wrongAlgorithmPublicKey: CryptoKey;
 
 beforeAll(async () => {
-  ({ privateKey, publicKey } = await deterministicP256Pair("0000000000000000000000000000000000000000000000000000000000000001"));
-  ({ privateKey: otherPrivateKey, publicKey: otherPublicKey } = await deterministicP256Pair("0000000000000000000000000000000000000000000000000000000000000002"));
+  ({ privateKey, publicKey } = await deterministicEcPair("prime256v1", "P-256", "ES256", "0000000000000000000000000000000000000000000000000000000000000001", 32));
+  ({ privateKey: otherPrivateKey, publicKey: otherPublicKey } = await deterministicEcPair("prime256v1", "P-256", "ES256", "0000000000000000000000000000000000000000000000000000000000000002", 32));
+  ({ privateKey: wrongAlgorithmPrivateKey, publicKey: wrongAlgorithmPublicKey } = await deterministicEcPair("secp384r1", "P-384", "ES384", "0000000000000000000000000000000000000000000000000000000000000001", 48));
 });
 
-async function deterministicP256Pair(privateScalarHex: string): Promise<Readonly<{ privateKey: CryptoKey; publicKey: CryptoKey }>> {
+async function deterministicEcPair(curve: "prime256v1" | "secp384r1", crv: "P-256" | "P-384", algorithm: "ES256" | "ES384", privateScalarHex: string, coordinateBytes: number): Promise<Readonly<{ privateKey: CryptoKey; publicKey: CryptoKey }>> {
   const scalar = Buffer.from(privateScalarHex, "hex");
-  const ecdh = createECDH("prime256v1");
+  const ecdh = createECDH(curve);
   ecdh.setPrivateKey(scalar);
   const point = ecdh.getPublicKey();
-  const x = point.subarray(1, 33).toString("base64url");
-  const y = point.subarray(33, 65).toString("base64url");
+  const x = point.subarray(1, 1 + coordinateBytes).toString("base64url");
+  const y = point.subarray(1 + coordinateBytes, 1 + (coordinateBytes * 2)).toString("base64url");
   return {
-    privateKey: await importJWK({ kty: "EC", crv: "P-256", d: scalar.toString("base64url"), x, y }, "ES256") as CryptoKey,
-    publicKey: await importJWK({ kty: "EC", crv: "P-256", x, y }, "ES256") as CryptoKey,
+    privateKey: await importJWK({ kty: "EC", crv, d: scalar.toString("base64url"), x, y }, algorithm) as CryptoKey,
+    publicKey: await importJWK({ kty: "EC", crv, x, y }, algorithm) as CryptoKey,
   };
 }
 
@@ -66,7 +69,7 @@ function binding(value: RequestDescriptor): string {
   })).digest("base64url");
 }
 
-async function token(value = request(), overrides: Readonly<Record<string, unknown>> = {}, header: Record<string, unknown> = { alg: "ES256", typ: "at+jwt", kid: "key-1" }, signingKey = privateKey): Promise<string> {
+async function token(value = request(), overrides: Readonly<Record<string, unknown>> = {}, header: Record<string, unknown> = { alg: "ES256", typ: "at+jwt", kid: "key-1" }, signingKey = privateKey, signingOptions: Readonly<{ crit?: Record<string, boolean> }> = {}): Promise<string> {
   return new SignJWT({
     aud: "urn:account-book:api",
     exp: now + 30,
@@ -80,12 +83,25 @@ async function token(value = request(), overrides: Readonly<Record<string, unkno
     sid: sessionId,
     sub: userId,
     ...overrides,
-  }).setProtectedHeader(header).sign(signingKey);
+  }).setProtectedHeader(header).sign(signingKey, signingOptions);
 }
 
-function withHeader(signed: string, header: Record<string, unknown>): string {
-  const [, payload, signature] = signed.split(".");
-  return `${Buffer.from(JSON.stringify(header)).toString("base64url")}.${payload}.${signature}`;
+async function tokenWithoutAlgorithm(value = request(), overrides: Readonly<Record<string, unknown>> = {}): Promise<string> {
+  const signed = await token(value, overrides);
+  const [, payload] = signed.split(".");
+  const header = Buffer.from(JSON.stringify({ typ: "at+jwt", kid: "key-1" })).toString("base64url");
+  const data = new TextEncoder().encode(`${header}.${payload}`);
+  const signature = Buffer.from(await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, privateKey, data)).toString("base64url");
+  return `${header}.${payload}.${signature}`;
+}
+
+async function expectSignedToken(signed: string, key: CryptoKey, algorithm: "ES256" | "ES384"): Promise<void> {
+  await expect(jwtVerify(signed, key, {
+    algorithms: [algorithm],
+    audience: "urn:account-book:api",
+    issuer: "urn:account-book:bff",
+    currentDate: new Date(now * 1000),
+  })).resolves.toBeDefined();
 }
 
 class MemoryReplayStore implements ReplayStore {
@@ -191,21 +207,44 @@ describe("DelegatedJwtVerifier", () => {
     expect(unknown.store.calls).toBe(0);
 
     const critical = verifier();
-    const signed = await token();
-    const [, payload, signature] = signed.split(".");
-    const unsupportedCriticalHeader = Buffer.from(JSON.stringify({ alg: "ES256", typ: "at+jwt", kid: "key-1", crit: ["x"], x: true })).toString("base64url");
-    await expect(critical.verifier.verify({ token: `${unsupportedCriticalHeader}.${payload}.${signature}`, request: request(), requiredScope: "me:read" })).rejects.toMatchObject({ message: "AUTH_ACCESS_TOKEN_INVALID" });
+    await expect(critical.verifier.verify({ token: await token(request(), {}, { alg: "ES256", typ: "at+jwt", kid: "key-1", crit: ["x"], x: true }, privateKey, { crit: { x: true } }), request: request(), requiredScope: "me:read" })).rejects.toMatchObject({ message: "AUTH_ACCESS_TOKEN_INVALID" });
     expect(critical.store.calls).toBe(0);
   });
 
   it.each([
-    ["missing algorithm", { typ: "at+jwt", kid: "key-1" }],
-    ["wrong algorithm", { alg: "RS256", typ: "at+jwt", kid: "key-1" }],
+    ["missing protected kid", { alg: "ES256", typ: "at+jwt" }],
     ["missing token type", { alg: "ES256", kid: "key-1" }],
     ["wrong token type", { alg: "ES256", typ: "JWT", kid: "key-1" }],
   ])("rejects %s before replay consumption", async (_name, header) => {
     const { verifier: subject, store } = verifier();
-    await expect(subject.verify({ token: withHeader(await token(), header), request: request(), requiredScope: "me:read" })).rejects.toMatchObject({ message: "AUTH_ACCESS_TOKEN_INVALID" });
+    const signed = await token(request(), {}, header);
+    await expectSignedToken(signed, publicKey, "ES256");
+    await expect(subject.verify({ token: signed, request: request(), requiredScope: "me:read" })).rejects.toMatchObject({ message: "AUTH_ACCESS_TOKEN_INVALID" });
+    expect(store.calls).toBe(0);
+  });
+
+  it("rejects a validly signed wrong algorithm header before replay consumption", async () => {
+    const { verifier: subject, store } = verifier(undefined, { keyring: { "key-1": wrongAlgorithmPublicKey } });
+    const signed = await token(request(), {}, { alg: "ES384", typ: "at+jwt", kid: "key-1" }, wrongAlgorithmPrivateKey);
+    await expectSignedToken(signed, wrongAlgorithmPublicKey, "ES384");
+
+    await expect(subject.verify({ token: signed, request: request(), requiredScope: "me:read" })).rejects.toMatchObject({ message: "AUTH_ACCESS_TOKEN_INVALID" });
+    expect(store.calls).toBe(0);
+  });
+
+  it("rejects a validly signed missing algorithm header before replay consumption", async () => {
+    const { verifier: subject, store } = verifier();
+    const signed = await tokenWithoutAlgorithm();
+    const [encodedHeader, payload, signature] = signed.split(".");
+    const validSignature = await crypto.subtle.verify(
+      { name: "ECDSA", hash: "SHA-256" },
+      publicKey,
+      Buffer.from(signature!, "base64url"),
+      new TextEncoder().encode(`${encodedHeader}.${payload}`),
+    );
+    expect(validSignature).toBe(true);
+
+    await expect(subject.verify({ token: signed, request: request(), requiredScope: "me:read" })).rejects.toMatchObject({ message: "AUTH_ACCESS_TOKEN_INVALID" });
     expect(store.calls).toBe(0);
   });
 

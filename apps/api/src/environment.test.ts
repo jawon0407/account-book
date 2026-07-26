@@ -1,14 +1,18 @@
-import { createPublicKey } from "node:crypto";
-import { exportJWK, generateKeyPair } from "jose";
-import { beforeAll, describe, expect, it } from "vitest";
+import { createECDH, createPublicKey } from "node:crypto";
+import { describe, expect, it } from "vitest";
 import { parseApiEnvironment } from "./environment.js";
 
-let publicKey: string;
-
-beforeAll(async () => {
-  const pair = await generateKeyPair("ES256", { extractable: true });
-  publicKey = Buffer.from(createPublicKey({ key: await exportJWK(pair.publicKey), format: "jwk" }).export({ format: "der", type: "spki" })).toString("base64url");
-});
+const publicKey = (() => {
+  const scalar = Buffer.from("0000000000000000000000000000000000000000000000000000000000000001", "hex");
+  const ecdh = createECDH("prime256v1");
+  ecdh.setPrivateKey(scalar);
+  const point = ecdh.getPublicKey();
+  const key = createPublicKey({
+    key: { kty: "EC", crv: "P-256", x: point.subarray(1, 33).toString("base64url"), y: point.subarray(33, 65).toString("base64url") },
+    format: "jwk",
+  });
+  return Buffer.from(key.export({ format: "der", type: "spki" })).toString("base64url");
+})();
 
 function validEnvironment(overrides: Readonly<Record<string, string>> = {}): Record<string, string> {
   return {
@@ -43,6 +47,8 @@ describe("parseApiEnvironment", () => {
     ["unencrypted public database URL", { API_DATABASE_URL: "postgresql://app_api:password@db.example.test/db" }],
     ["database fragment", { API_DATABASE_URL: "postgresql://app_api:password@127.0.0.1/db?sslmode=disable#fragment" }],
     ["internal credential whitespace", { API_DATABASE_URL: "postgresql://app_api:literal space@127.0.0.1/db?sslmode=disable" }],
+    ["non-breaking credential whitespace", { API_DATABASE_URL: "postgresql://app_api:literal\u00a0space@127.0.0.1/db?sslmode=disable" }],
+    ["em-space credential whitespace", { API_DATABASE_URL: "postgresql://app_api:literal\u2003space@127.0.0.1/db?sslmode=disable" }],
     ["repeated contradictory loopback TLS modes", { API_DATABASE_URL: "postgresql://app_api:password@127.0.0.1/db?sslmode=require&sslmode=disable" }],
     ["repeated contradictory public TLS modes", { API_DATABASE_URL: "postgresql://app_api:password@db.example.test/db?sslmode=require&sslmode=disable" }],
     ["unsupported public TLS mode", { API_DATABASE_URL: "postgresql://app_api:password@db.example.test/db?sslmode=disable" }],

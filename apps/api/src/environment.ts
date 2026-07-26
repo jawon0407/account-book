@@ -53,7 +53,7 @@ function parseListener(input: Readonly<Record<string, string | undefined>>): Pic
 
 /** Validates the API-owned database connection without disclosing credentials on failure. */
 function parseDatabaseUrl(value: string | undefined): string {
-  if (!safeEnvironmentValue(value) || /[\u0000-\u0020\u007f]/u.test(value)) throw new Error("API_CONFIGURATION_INVALID");
+  if (!safeEnvironmentValue(value) || /[\s\p{White_Space}]/u.test(value)) throw new Error("API_CONFIGURATION_INVALID");
   let url: URL;
   try {
     url = new URL(value);
