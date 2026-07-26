@@ -47,7 +47,8 @@ const approvedPackageLocalSkipLibCheck = [
 
 const expectedWorkspaceOverrides = {
   "next@16.2.11>sharp": "-",
-  "next@16.2.11>postcss": "8.5.10",
+  "next@16.2.11>postcss": "8.5.19",
+  "find-my-way@9.6.0": "9.7.0",
 };
 
 function tsconfigFiles(directory) {
@@ -144,7 +145,7 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
   assert.deepEqual(allowBuilds, { esbuild: true });
   // Next 16.2.11 pulls sharp 0.34.5 only as an optional image optimizer.
   // The app has no next/image usage, so keep that unused native dependency absent.
-  // Its production PostCSS dependency is pinned to the patched 8.5.10 release.
+  // Its production PostCSS dependency and Fastify router are pinned to patched releases.
   assert.deepEqual(workspaceScalarOverrides(workspace), expectedWorkspaceOverrides);
   for (const policy of ["engine-strict=true", "save-exact=true", "strict-peer-dependencies=true"]) {
     assert.match(npmrc, new RegExp(`^${policy}$`, "m"));
