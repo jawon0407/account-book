@@ -188,7 +188,8 @@ format
 
 - [ ] 성공 응답에 provider token이 없고 hardened opaque cookie 하나만 생성된다.
 - [ ] Browser storage와 browser Authorization header에 token state가 없다.
-- [ ] `/api/me` 200이 real BFF와 remote-JWKS API를 통과한다. 401/503은 성공이 아니다.
+- [ ] `/api/me` 200이 real BFF와 static public-key/accepted-`kid` delegated ES256 API를 통과한다. request binding과 atomic `jti` replay consume을 확인하며 401/503은 성공이 아니다.
+- [ ] API `BFF_AUTH_DISABLED` kill switch, keyring overlap, accepted `kid` 제거 rotation drill이 같은 SHA에서 통과한다.
 - [ ] Logout 뒤 `/api/me`가 401이고 DB session이 revoked다.
 - [ ] 390x844/1440x900 label, keyboard, axe, overflow가 통과한다.
 - [ ] Production fake adapter가 readiness 전에 process startup을 fail closed한다.

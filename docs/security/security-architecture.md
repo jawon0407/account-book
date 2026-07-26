@@ -223,6 +223,6 @@ GitHub 서버는 현재 무료 플랜의 비공개 저장소에서 `main` PR 의
 
 ## 17. Opaque authentication session boundary
 
-Browser에는 provider token 대신 hardened `__Host-ab_session` opaque selector만 존재한다. PostgreSQL은 selector SHA-256 digest와 encrypted provider credentials를 보유하며 BFF만 fixed internal `/v1/me` 호출에 사용한다. API는 remote JWKS, exact algorithm/issuer/audience/expiry, canonical UUID claims를 검증한다.
+Browser에는 provider token 대신 hardened `__Host-ab_session` opaque selector만 존재한다. PostgreSQL은 selector SHA-256 digest와 encrypted provider credentials를 보유하며 BFF만 fixed internal `/v1/me` 호출에 사용한다. BFF는 요청마다 request-bound 30초 delegated ES256 JWT를 만들고, API는 static P-256 public-key keyring, accepted `kid`, exact issuer/audience, scope, request binding, expiry, canonical UUID claims와 atomic `jti` replay consume을 검증한다. API kill switch와 key rotation allowlist는 BFF와 분리된 운영 경계다.
 
 Session은 7일 idle/30일 absolute lifetime이고 logout은 local revocation을 먼저 수행한다. Production/public-host fake adapter는 fail closed이다. CI는 digest-pinned disposable PostgreSQL 뒤에 HTTPS browser smoke, production audit, commit-range scan을 순서대로 실행한다. 상세는 [ADR 0001](../architecture/adr/0001-opaque-auth-sessions.md)과 [환경 가이드](../guides/auth-environment.md)를 따른다.

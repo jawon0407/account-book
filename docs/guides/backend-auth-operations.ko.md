@@ -80,7 +80,7 @@ production은 `APP_ORIGIN`에 HTTPS exact origin을 사용해야 한다. contain
 | POST | `/api/auth/password/reset-request` | enumeration-resistant recovery 시작 |
 | GET | `/api/auth/password/callback` | recovery code를 제한된 server context로 교환 |
 | POST | `/api/auth/password/update` | interaction-bound recovery password 변경 |
-| GET | `/api/me` | 고정 internal `/v1/me`에 server-held access JWT 전달 |
+| GET | `/api/me` | 고정 internal `/v1/me`에 request-bound delegated ES256 JWT 전달 |
 
 각 route는 지원하지 않는 GET/POST/PUT/PATCH/DELETE/HEAD/OPTIONS를 명시적 405 `ApiError`로 처리한다. 모든 성공·오류·redirect·405는 no-store 3종 header를 포함한다. mutation request JSON은 최대 16,384바이트, `/v1/me` upstream JSON은 최대 65,536바이트이며 chunked stream도 실제 byte 수로 제한한다.
 

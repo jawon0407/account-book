@@ -46,28 +46,28 @@ flowchart LR
   Adapter -->|"HTTPS · anon/publishable key\nPKCE code exchange"| Supabase
   UseCase --> Repo
   Repo -->|"단일 조건 update · transaction"| DB
-  BFF -.->|"고정 API_INTERNAL_URL\nBearer access JWT"| API
+  BFF -.->|"고정 API_INTERNAL_URL\nrequest-bound delegated ES256 JWT"| API
 ```
 
-브라우저 URL, `Host`, forwarding header와 request body는 신뢰하지 않는다. BFF는 callback URL을 canonical `APP_ORIGIN`에서 만들고 selector를 두 `__Host-` cookie에서만 읽으며, 입력과 upstream JSON을 stream byte 기준으로 제한한다. Supabase adapter는 공급자 응답의 사용자 UUID, session UUID, email 확인 시각, JWT `iat`·`exp`, token lifetime 일관성을 다시 검사한다. `/api/me`는 고정 `API_INTERNAL_URL/v1/me`에 server-held access JWT를 전달하고, NestJS API가 이를 독립 검증해 BFF와 provider adapter 자체를 암묵적으로 신뢰하지 않는다.
+브라우저 URL, `Host`, forwarding header와 request body는 신뢰하지 않는다. BFF는 callback URL을 canonical `APP_ORIGIN`에서 만들고 selector를 두 `__Host-` cookie에서만 읽으며, 입력과 upstream JSON을 stream byte 기준으로 제한한다. Supabase adapter는 공급자 응답의 사용자 UUID, session UUID, email 확인 시각, JWT `iat`·`exp`, token lifetime 일관성을 다시 검사한다. `/api/me`는 고정 `API_INTERNAL_URL/v1/me`에 요청별 30초 delegated ES256 JWT와 request binding을 전달하고, NestJS API가 static public-key keyring·accepted `kid`·scope·`jti` replay consume을 독립 검증해 BFF와 provider adapter 자체를 암묵적으로 신뢰하지 않는다.
 
-## NestJS API JWT 신뢰 경계
+## NestJS API delegated JWT 신뢰 경계
 
 [`apps/api/src/auth`](../../apps/api/src/auth/)는 HTTP header와 JWT를 다음 순서로 검증한다.
 
 1. Node raw header pair에서 `Authorization`이 정확히 한 개인지 확인한다.
 2. 전체 값이 8192바이트 이하이고 제어 문자, 앞뒤 공백, 병합된 값이 없는 canonical `Bearer <JWT>` 형식인지 확인한다.
 3. 지원하지 않는 protected `crit` 확장을 key resolver 호출 전에 invalid credential로 거부한다.
-4. production에서 `createRemoteJWKSet`으로 얻은 key와 설정된 단일 `ES256 | RS256` 알고리즘으로 서명을 검증한다.
-5. 정확한 issuer와 scalar audience, 필수 `exp`, 유효한 optional `nbf`를 검증한다. audience 배열이나 추가 audience는 허용하지 않는다.
-6. `sub`와 `session_id`가 canonical UUID인지 확인한 뒤 두 값만 immutable `AuthPrincipal`로 만든다.
+4. static P-256 public-key keyring에서 accepted `kid`를 찾고 ES256 서명을 검증한다. private signing key나 remote key fetch는 API에 없다.
+5. 정확한 issuer와 scalar audience, 필수 `exp`, 유효한 optional `nbf`, 단일 scope, request binding을 검증한다. audience 배열이나 추가 audience는 허용하지 않는다.
+6. `sub`, session UUID, `jti`가 canonical 형식인지 확인하고 PostgreSQL에서 `jti`를 원자적으로 한 번만 consume한 뒤 최소 immutable `AuthPrincipal`을 만든다.
 7. 모든 검증이 끝난 뒤에만 Fastify request에 principal을 부착한다.
 
 따라서 body, query, 일반 header나 이메일·역할 같은 임의 JWT claim으로 사용자 소유권을 결정할 수 없다. `/v1/me`는 공유 `CurrentUser` 계약에 맞춰 검증된 `userId`, `email: null`, 기존 verified-session 불변조건을 나타내는 `emailVerified: true`만 반환한다.
 
-잘못된 credential은 세부 원인을 구분하지 않는 401 `AUTH_SESSION_EXPIRED`, JWKS나 내부 운영 실패는 503 `AUTH_PROVIDER_UNAVAILABLE`로 고정한다. 두 경우 모두 strict `ApiError`, 서버 생성 UUID `X-Request-Id`, `Cache-Control: private, no-store`를 사용하며 exception, token, 공급자 URL/message, header/body나 환경값을 직렬화하거나 로그로 남기지 않는다. Helmet은 등록하고 CORS는 등록하지 않는다.
+잘못된 credential은 세부 원인을 구분하지 않는 401 `AUTH_SESSION_EXPIRED`, keyring·replay store·내부 운영 실패는 503 `AUTH_PROVIDER_UNAVAILABLE`로 고정한다. 두 경우 모두 strict `ApiError`, 서버 생성 UUID `X-Request-Id`, `Cache-Control: private, no-store`를 사용하며 exception, token, 공급자 URL/message, header/body나 환경값을 직렬화하거나 로그로 남기지 않는다. Helmet은 등록하고 CORS는 등록하지 않는다.
 
-환경 변수는 Zod로 한 번 파싱하고 frozen snapshot으로 재사용한다. JWKS와 issuer URL은 HTTPS가 원칙이며 Task 13 로컬 IDP에 한해 exact `localhost`, `127.0.0.1`, `[::1]` HTTP를 허용한다. credentials, fragment, public HTTP와 numeric loopback 우회 표기는 거부한다.
+환경 변수는 Zod로 한 번 파싱하고 frozen snapshot으로 재사용한다. API는 `API_DATABASE_URL`, `BFF_AUTH_DISABLED`, static `BFF_JWT_ACCEPTED_KIDS`, static `BFF_JWT_PUBLIC_KEYS`만으로 trust boundary를 구성한다. key rotation은 allowlist overlap과 제거 drill로 증명하고 BFF private signing key는 API에 배포하지 않는다.
 
 과거 `apps/api/tsconfig.json`에 두었던 package-local `skipLibCheck: true` 예외는 제거했다. 동일 Node 22 계열의 `@types/node`를 TypeScript 6.0.3 호환 선언이 포함된 22.20.1로 갱신해 `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`와 외부 선언 검사를 모두 유지한다.
 
@@ -310,4 +310,4 @@ provider boundary가 허용하는 오류 코드는 다음 다섯 개다.
 
 모든 BFF route는 Node.js, `iad1`, dynamic, 10초 maxDuration 정책을 명시한다. E2E는 프로세스 수명의 ephemeral P-256 key pair로 private BFF signing key와 public API verification key를 분리한다. secret, key material, JWT, selector, request-binding hash, DB 연결 문자열은 문서·로그·trace·snapshot에 기록하지 않는다.
 
-Task 7 로컬 증거 code commit은 `6e8968313385136758bb373af8c570e553da8533`이다. focused route-wiring GREEN은 25 files/479 tests, E2E environment isolation test 1개, E2E typecheck와 `pnpm run verify`는 exit 0이었다. child process는 OS/toolchain 변수만 상속하고 API/BFF/legacy JWT boundary 변수는 explicit allowlist 전 삭제한다. PostgreSQL listener 부재로 guarded DB preparation과 browser E2E를 실행하지 않았고, npm advisory 접근 차단으로 production audit도 통과하지 않았다. Node 22.15.1 pinned-runtime, same-SHA GitHub security gate, live replay cleanup/role privilege/catalog, Supabase cron cleanup, key rotation removal, kill-switch evidence는 출시 전 책임자가 동일 SHA에서 수집해야 하는 차단 조건이다.
+Task 7 로컬 증거 code commit은 `80b933c0897784038c534031d2dc413b285920e1`이다. focused route-wiring GREEN은 25 files/479 tests, mixed-case E2E environment builder test 1개, E2E typecheck와 `pnpm run verify`는 exit 0이었다. child process는 OS/toolchain 변수만 상속하고 Windows case-insensitive API/BFF/auth/database boundary 변수를 explicit allowlist 전 삭제한다. PostgreSQL listener 부재로 guarded DB preparation과 browser E2E를 실행하지 않았고, npm advisory 접근 차단으로 production audit도 통과하지 않았다. Node 22.15.1 pinned-runtime, same-SHA GitHub security gate, live replay cleanup/role privilege/catalog, Supabase cron cleanup, key rotation removal, kill-switch evidence는 출시 전 책임자가 동일 SHA에서 수집해야 하는 차단 조건이다.

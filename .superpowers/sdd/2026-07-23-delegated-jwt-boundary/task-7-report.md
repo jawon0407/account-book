@@ -2,7 +2,7 @@
 
 ## Evidence identity
 
-- Code evidence commit: `6e8968313385136758bb373af8c570e553da8533` (`fix: isolate E2E security environments`)
+- Code evidence commit: `80b933c0897784038c534031d2dc413b285920e1` (`fix: harden E2E environment isolation`)
 - Evidence scope: Task 7 runtime and E2E boundary implementation at that exact code commit.
 - Local runtime: Node 24.14.0; repository pin is Node 22.15.1. This is a warning, not pinned-runtime evidence.
 
@@ -23,8 +23,8 @@ Result: exit 1. The new route-policy assertions failed for all 14 BFF routes bec
 | `pnpm --filter @account-book/web test -- route-wiring.test.ts` | exit 0; 25 test files, 479 tests passed |
 | `pnpm --filter @account-book/e2e typecheck` | exit 0 |
 | `tsx --test tests/e2e/playwright-environment.test.ts` | exit 0; 1 test passed |
-| legacy API-JWT setting absence check | exit 0; no legacy remote-JWKS/IDP JWT setting remains in Playwright config |
-| `pnpm run verify` | exit 0 in 158.6 seconds; legacy 52, contracts 22, database 12, API 113, web 479 tests passed; production build completed |
+| obsolete API-IDP setting absence check | exit 0; no obsolete API-IDP JWT setting remains in Playwright config |
+| `pnpm run verify` | exit 0 in 145.2 seconds; legacy 52, contracts 22, database 12, API 113, web 479 tests passed; production build completed |
 | `pnpm audit --prod --audit-level high` | exit 1; npm advisory service access failed in the restricted environment, so no audit pass is claimed |
 
 `git diff --check` after the report and documentation changes exited 0.
@@ -37,7 +37,10 @@ Result: exit 1. The new route-policy assertions failed for all 14 BFF routes bec
 - `tests/e2e/playwright-environment.ts`
 - `tests/e2e/playwright-environment.test.ts`
 - `docs/guides/security-auth-testing.md`
+- `docs/guides/backend-auth-operations.ko.md`
 - `docs/architecture/backend-authentication.ko.md`
+- `docs/security/security-architecture.md`
+- `docs/security/verification-checklist.md`
 - `docs/superpowers/specs/2026-07-23-managed-deployment-platform-design.md`
 - This report
 
@@ -47,8 +50,8 @@ The unrelated legacy `.superpowers/sdd/progress.md` was not modified or staged b
 
 - Every BFF route explicitly selects Node.js, `iad1`, dynamic rendering, and a 10-second maximum duration while remaining a thin request adapter.
 - One ephemeral P-256 pair is created in the Playwright config process. The BFF process receives only private signing material; the API process receives only public verification material, an accepted-key allowlist, and an independent enabled kill-switch setting.
-- E2E child environments retain non-security OS/toolchain variables but delete inherited security-boundary variables before each child receives its explicit allowlist.
-- Legacy API remote-JWKS/IDP JWT environment settings are absent from the E2E API process.
+- The actual IDP/API/BFF environment builder retains non-security OS/toolchain variables but case-insensitively deletes inherited `API_`, `AUTH_`, `BFF_`, `SUPABASE_`, database, test-database, migration-database, and app-origin boundary variables before each child receives its explicit allowlist.
+- Obsolete API-IDP JWT environment settings are absent from the E2E API process.
 - Browser E2E keeps the opaque-cookie `/api/me` contract and does not extract an internal delegated JWT.
 - No key material, JWT, selector, request-binding hash, or database connection value is included in this report.
 
