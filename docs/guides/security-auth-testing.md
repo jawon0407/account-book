@@ -27,6 +27,7 @@ GitHub `security-gate` run 30211236719는 PostCSS 파일 읽기·경로 순회 2
 ```powershell
 pnpm setup:hooks
 $env:CI='true'; pnpm run verify
+pnpm test:e2e-preflight
 $env:TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/account_book_test'
 $env:TEST_DATABASE_DISPOSABLE='true'
 pnpm test:db
@@ -38,6 +39,8 @@ git status --short --branch
 ```
 
 DB/E2E는 환경 변수가 없으면 skip하지 않고 실패한다. `prepare:e2e`는 위의 정확한 disposable flag와 `127.0.0.1/account_book_test` 관리자 URL만 허용하고, `current_user=postgres`와 DB 이름을 확인한 뒤 인증 schema/role을 정리하고 migration 001→002→003을 적용한다. Local DB/browser 부재의 대체 evidence는 같은 commit SHA의 GitHub `security-gate` 성공뿐이다. Dependency audit exit 0이 필수이며 registry/network 실패는 출시 승인으로 바꾸지 않는다. Log에는 token, cookie, credential, connection string을 출력하지 않는다.
+
+`test:e2e-preflight`는 DB나 브라우저 없이 production fake-adapter 시작 차단과 Playwright child-process 환경의 case-insensitive secret sanitization을 함께 검사한다. 루트 `pnpm run verify`가 이 preflight를 실행하고, `@account-book/e2e`의 전체 `test`도 Playwright보다 먼저 같은 preflight를 실행한다. workspace policy test는 두 script 연결을 고정하므로 로컬 검증 또는 GitHub security gate에서 sanitization 회귀 테스트가 조용히 빠질 수 없다.
 
 브라우저 성공 테스트는 test IDP의 고정 refresh-token sentinel이 응답·storage·모든 cookie에 없음을 확인하고, cookie는 `__Host-ab_session` 하나만 허용한다. 로그아웃 전 selector를 별도 HTTP context에서 재전송해 401을 확인하므로 브라우저 cookie 삭제만이 아니라 서버의 DB session 폐기도 검증한다. Production fake adapter는 `pnpm start`의 사전 guard와 Next config의 이중 방어로 readiness 전에 고정 오류와 함께 종료되며, 별도 process test가 이를 확인한다.
 
