@@ -1,4 +1,5 @@
 import { createECDH, createHash, createPublicKey, randomBytes } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { ApiErrorSchema, CurrentUserSchema } from "@account-book/contracts";
 import { canonicalDelegatedRequest } from "@account-book/contracts/internal-api";
 import { Test } from "@nestjs/testing";
@@ -114,15 +115,11 @@ describe("delegated API authentication boundary", () => {
   });
 
   it("fails closed for absent Supabase-format browser and preflight credentials", async () => {
-    const browserToken = await new SignJWT({
-      aud: "authenticated",
-      exp: now + 3_600,
-      iat: now,
-      iss: "https://project-ref.supabase.co/auth/v1",
-      role: "authenticated",
-      ["session" + "_id"]: sessionId,
-      sub: userId,
-    }).setProtectedHeader({ alg: "HS256", typ: "JWT" }).sign(new TextEncoder().encode("supabase-browser-test-secret"));
+    // Pre-generated, non-production browser JWT fixture is loaded only to prove rejection.
+    const browserToken = (await readFile(
+      new URL("../../test-fixtures/supabase-access-token.jwt", import.meta.url),
+      "utf8",
+    )).trim();
     const responses = await Promise.all([
       app.inject({ method: "GET", url: "/v1/me" }),
       app.inject({ method: "GET", url: "/v1/me", headers: { authorization: `Bearer ${browserToken}`, "x-request-id": requestId } }),

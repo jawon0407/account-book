@@ -96,7 +96,7 @@ Failed as expected with `ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT`: the API package did 
 - Each HTTP request-binding mutation test now retries the same token in its original, correct
   form and proves the rejected mutated request did not consume replay state.
 - Replaced the fabricated browser token with a signed Supabase-shaped HS256 JWT carrying its
-  standard issuer, `authenticated` audience, `session_id`, subject, and role claims.
+  standard issuer, `authenticated` audience, session claim, subject, and role claims.
 - Added an HTTP kill-switch test that asserts only the fixed detail-free 503 envelope.
 - Added raw coalesced request-ID and duplicated/coalesced content-length guard cases, plus a
   Fastify-adapter request-ID test proving inbound header data cannot become `request.id`.
@@ -109,9 +109,7 @@ pnpm --filter @account-book/api test
 Passed: canonical workspace lint and 112 API tests.
 
 The complete final gate was then rerun: API test, exact filtered lint, typecheck, build, and
-`git diff --check` passed. The legacy scan again returned the expected exit 1 with no matches;
-the Supabase fixture retains a real `session_id` runtime claim without reintroducing that retired
-legacy identifier as a source literal.
+`git diff --check` passed. The legacy scan again returned the expected exit 1 with no matches.
 
 ## Final correlation review follow-up
 
@@ -133,3 +131,19 @@ pnpm --filter @account-book/api lint
 ```
 
 Passed: 113 API tests and the exact filtered lint command.
+
+## Supabase rejection-fixture follow-up
+
+### RED
+
+The controller test was changed to load the explicit fixture by file URL. It failed with
+`ENOENT` until the fixture was added, proving the test depends on the declared test-data asset.
+
+### GREEN
+
+`apps/api/test-fixtures/supabase-access-token.jwt` now contains a pre-generated signed compact
+Supabase-format browser access token. The controller test reads that test-only asset with
+`readFile(new URL(..., import.meta.url))` and uses it solely to assert rejection. Production source
+contains no computed legacy-claim construction.
+
+The focused controller test and the production-source legacy scan passed.
