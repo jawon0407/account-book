@@ -34,7 +34,7 @@ describe("Next authentication route wiring", () => {
     const source = await readFile(route, "utf8");
     expect(source).toContain("handleAuthRoute");
     expect(source).not.toMatch(/Supabase|Postgres|process\.env|DATABASE_URL|API_INTERNAL_URL/u);
-    expect(source).not.toMatch(/export const runtime = ["']edge["'];/u);
+    expect(source).not.toMatch(/(?:export const runtime = ["']edge["'];|globalThis\.EdgeRuntime)/u);
     for (const exportStatement of expectedRoutePolicy) expect(source).toContain(exportStatement);
     expect(source.split(/\r?\n/u).length).toBeLessThanOrEqual(16);
     for (const method of ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]) expect(source).toMatch(new RegExp(`(?:const|as) ${method}\\b`, "u"));
