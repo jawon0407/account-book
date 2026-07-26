@@ -8,6 +8,22 @@ $$;
 
 alter role app_api login nosuperuser nocreatedb nocreaterole noinherit noreplication nobypassrls;
 
+do $$
+declare
+  parent_role name;
+begin
+  for parent_role in
+    select parent_roles.rolname
+    from pg_auth_members memberships
+    join pg_roles parent_roles on parent_roles.oid = memberships.roleid
+    join pg_roles member_roles on member_roles.oid = memberships.member
+    where member_roles.rolname = 'app_api'
+  loop
+    execute format('revoke %I from app_api', parent_role);
+  end loop;
+end
+$$;
+
 create table app_private.api_jwt_replays (
   jti_digest bytea primary key,
   created_at timestamptz not null default now(),

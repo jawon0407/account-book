@@ -60,12 +60,14 @@ beforeAll(async () => {
       if not exists (select 1 from pg_roles where rolname = 'anon') then create role anon nologin; end if;
       if not exists (select 1 from pg_roles where rolname = 'authenticated') then create role authenticated nologin; end if;
       if not exists (select 1 from pg_roles where rolname = 'service_role') then create role service_role nologin; end if;
+      if exists (select 1 from pg_roles where rolname = 'app_api') then drop role app_api; end if;
       if exists (select 1 from pg_roles where rolname = 'app_session_bff') then drop role app_session_bff; end if;
       create role app_session_bff nologin;
-      if exists (select 1 from pg_roles where rolname = 'app_api') then drop role app_api; end if;
+      create role app_api login;
     end
     $$;
   `);
+  await admin.query("grant app_session_bff to app_api");
   await admin.query("create schema app_private");
   await admin.query("create table app_private.preexisting_probe (id integer primary key)");
   await admin.query("grant all privileges on schema app_private to app_session_bff");
@@ -82,6 +84,11 @@ afterAll(async () => {
 });
 
 describe("private authentication migration", () => {
+  it("uses identifier-safe SQL to remove every direct app_api parent-role membership", () => {
+    expect(replayMigration).toMatch(/from pg_auth_members memberships[\s\S]*join pg_roles parent_roles[\s\S]*join pg_roles member_roles[\s\S]*where member_roles\.rolname = 'app_api'/iu);
+    expect(replayMigration).toMatch(/execute format\('revoke %I from app_api', parent_role\)/iu);
+  });
+
   it("creates all private tables with their required columns", async () => {
     const result = await admin.query<{ table_name: string; column_name: string }>(`
       select table_name, column_name
@@ -247,6 +254,21 @@ describe("private authentication migration", () => {
       await expect(admin.query("delete from app_private.api_jwt_replays")).rejects.toThrow(/permission denied/u);
       await expect(admin.query("select * from app_private.auth_sessions")).rejects.toThrow(/permission denied/u);
       await expect(admin.query("create table app_private.api_probe (id integer)")).rejects.toThrow(/permission denied/u);
+    });
+  });
+
+  it("removes every preexisting direct parent-role membership from app_api", async () => {
+    const memberships = await admin.query<{ parent_role: string }>(`
+      select parent_roles.rolname as parent_role
+      from pg_auth_members memberships
+      join pg_roles parent_roles on parent_roles.oid = memberships.roleid
+      join pg_roles member_roles on member_roles.oid = memberships.member
+      where member_roles.rolname = 'app_api'
+    `);
+    expect(memberships.rows).toEqual([]);
+
+    await asRole("app_api", async () => {
+      await expect(admin.query("set role app_session_bff")).rejects.toThrow(/permission denied/u);
     });
   });
 
