@@ -109,7 +109,7 @@ class MemoryReplayStore implements ReplayStore {
   public calls = 0;
   public failure: Error | undefined;
 
-  public async consume(digest: Uint8Array, _expiresAt: Date): Promise<boolean> {
+  public async consume(digest: Uint8Array): Promise<boolean> {
     this.calls += 1;
     if (this.failure) throw this.failure;
     const value = Buffer.from(digest).toString("hex");

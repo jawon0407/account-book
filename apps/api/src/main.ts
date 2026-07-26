@@ -29,6 +29,7 @@ async function bootstrap(): Promise<void> {
     { logger: false },
   );
   await configureApiApplication(app);
+  app.enableShutdownHooks();
   await app.listen(environment.apiPort, environment.apiHost);
 }
 

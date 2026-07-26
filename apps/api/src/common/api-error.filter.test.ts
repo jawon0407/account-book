@@ -1,10 +1,10 @@
 import { ApiErrorSchema } from "@account-book/contracts";
 import type { ArgumentsHost } from "@nestjs/common";
 import { describe, expect, it } from "vitest";
-import { InvalidAccessTokenError } from "../auth/jwt-verifier.js";
+import { AccessTokenVerificationUnavailableError, InvalidAccessTokenError } from "../auth/jwt-verifier.js";
 import { ApiErrorFilter } from "./api-error.filter.js";
 
-function run(exception: unknown, requestId = "unsafe\r\ninbound") {
+function run(exception: unknown, requestId = "unsafe\r\ninbound", principal?: { requestId: string }) {
   const headers = new Map<string, string>();
   let status = 0;
   let body: unknown;
@@ -15,7 +15,7 @@ function run(exception: unknown, requestId = "unsafe\r\ninbound") {
   };
   const host = {
     switchToHttp: () => ({
-      getRequest: () => ({ id: requestId, headers: { authorization: "Bearer response-secret" } }),
+      getRequest: () => ({ id: requestId, principal, headers: { authorization: "Bearer response-secret" } }),
       getResponse: () => reply,
     }),
   } as unknown as ArgumentsHost;
@@ -44,5 +44,15 @@ describe("ApiErrorFilter", () => {
     expect(response.body).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: true, fieldErrors: [] });
     expect(serialized).not.toMatch(/provider-message|exception-secret|response-secret|unsafe|inbound/iu);
     expect(response.headers.get("cache-control")).toBe("private, no-store");
+  });
+
+  it("uses a verified principal correlation ID and maps unavailable verification to a fixed 503", () => {
+    const verifiedId = "123e4567-e89b-12d3-a456-426614174002";
+    const response = run(new AccessTokenVerificationUnavailableError(), "123e4567-e89b-12d3-a456-426614174003", { requestId: verifiedId });
+    const parsed = ApiErrorSchema.parse(response.body);
+
+    expect(response.status).toBe(503);
+    expect(parsed).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: true, requestId: verifiedId });
+    expect(response.headers.get("x-request-id")).toBe(verifiedId);
   });
 });

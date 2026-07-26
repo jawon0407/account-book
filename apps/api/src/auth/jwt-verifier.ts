@@ -7,7 +7,6 @@ import {
   DELEGATED_JWT_TTL_SECONDS,
   DelegatedScopeSchema,
   canonicalDelegatedRequest,
-  normalizeDelegatedContentType,
   type DelegatedScope,
 } from "@account-book/contracts/internal-api";
 import { decodeProtectedHeader, errors, jwtVerify, type CryptoKey } from "jose";
@@ -45,18 +44,18 @@ export type DelegatedJwtVerifierOptions = Readonly<{
   now?: () => Date;
 }>;
 
-/** Injection token for the request-bound verifier; legacy string calls fail closed during the Task 6 transition. */
+/** Injection token for the request-bound delegated verifier. */
 export const ACCESS_TOKEN_VERIFIER = Symbol("ACCESS_TOKEN_VERIFIER");
 
-/** Request-principal verification port retaining only a fail-closed compatibility signature for current consumers. */
+/** Request-principal verification port accepting only a token bound to the current request. */
 export interface AccessTokenVerifier {
   /**
    * Verifies a request-bound delegated token.
-   * @param input - New delegated input; a legacy raw string is rejected as unavailable.
+   * @param input - Delegated token and the one HTTP request it authorizes.
    * @returns A frozen verified principal.
    * @throws A fixed invalid-token or unavailable error without token-derived detail.
    */
-  verify(input: VerifyDelegatedTokenInput | string): Promise<AuthPrincipal>;
+  verify(input: VerifyDelegatedTokenInput): Promise<AuthPrincipal>;
 }
 
 /** Fixed non-secret failure used for malformed, invalid, expired, mismatched, or replayed delegated tokens. */
@@ -127,7 +126,9 @@ function requestBinding(request: DelegatedRequestDescriptor): Uint8Array {
     const canonical = canonicalDelegatedRequest({
       method: request.method,
       target: request.target,
-      contentType: normalizeDelegatedContentType(request.contentType),
+      // The contracts helper owns content-type normalization; pre-normalizing `null`
+      // to an empty string would turn an intentionally absent GET content type into invalid input.
+      contentType: request.contentType,
       bodySha256,
       requestId: request.requestId,
     });
@@ -162,12 +163,12 @@ export class DelegatedJwtVerifier implements AccessTokenVerifier {
 
   /**
    * Validates header, signature, strict claims, request binding, then atomically consumes the replay identifier.
-   * @param input - A delegated token with the request it must authorize; raw legacy strings fail closed.
+   * @param input - A delegated token with the request it must authorize.
    * @returns A frozen principal only after replay storage accepts the token exactly once.
    * @throws Fixed invalid-token failures for all token problems and fixed unavailable failures for disabled/operational state.
    */
-  public async verify(input: VerifyDelegatedTokenInput | string): Promise<AuthPrincipal> {
-    if (this.options.authDisabled || typeof input === "string") throw new AccessTokenVerificationUnavailableError();
+  public async verify(input: VerifyDelegatedTokenInput): Promise<AuthPrincipal> {
+    if (this.options.authDisabled) throw new AccessTokenVerificationUnavailableError();
     if (typeof input.token !== "string" || Buffer.byteLength(input.token, "utf8") > DELEGATED_JWT_MAX_BYTES) throw new InvalidAccessTokenError();
     let header: ReturnType<typeof decodeProtectedHeader>;
     try {
@@ -208,14 +209,4 @@ export class DelegatedJwtVerifier implements AccessTokenVerifier {
     }
     return claims.principal;
   }
-}
-
-/**
- * Fail-closed Task 6 compatibility bridge for existing module wiring only.
- * @param _ignored - Legacy policy-shaped input, intentionally ignored and never used for key resolution.
- * @returns A verifier that rejects every raw-string legacy call as unavailable.
- * @throws Verification always fails with the fixed unavailable error when invoked.
- */
-export function createRemoteAccessTokenVerifier(_ignored: unknown): AccessTokenVerifier {
-  return { verify: async () => { throw new AccessTokenVerificationUnavailableError(); } };
 }

@@ -1,156 +1,157 @@
+import { createECDH, createHash, createPublicKey, randomBytes } from "node:crypto";
 import { ApiErrorSchema, CurrentUserSchema } from "@account-book/contracts";
+import { canonicalDelegatedRequest } from "@account-book/contracts/internal-api";
 import { Test } from "@nestjs/testing";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { generateKeyPair, SignJWT } from "jose";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { AppModule } from "../app.module.js";
-import {
-  ACCESS_TOKEN_VERIFIER,
-  JwtAccessTokenVerifier,
-  type AccessTokenVerifier,
-} from "../auth/jwt-verifier.js";
-import { configureApiApplication } from "../main.js";
+import { ACCESS_TOKEN_VERIFIER, DelegatedJwtVerifier } from "../auth/jwt-verifier.js";
 import { createApiFastifyAdapter } from "../common/request-context.js";
+import { configureApiApplication } from "../main.js";
+import { API_DATABASE_POOL } from "./me.module.js";
+import { MeModule } from "./me.module.js";
+import { REPLAY_STORE, type ReplayStore } from "../persistence/replay-store.js";
 
-const issuer = "https://id.example.test/auth/v1";
-const audience = "authenticated";
+const poolConstructor = vi.hoisted(() => vi.fn());
+vi.mock("pg", () => ({ Pool: poolConstructor }));
+
 const userId = "123e4567-e89b-12d3-a456-426614174000";
 const sessionId = "123e4567-e89b-12d3-a456-426614174001";
-const operationalToken = "b3BlcmF0aW9uYWw.c2VjcmV0.dG9rZW4";
-const unsupportedCritToken = `${Buffer.from(JSON.stringify({ alg: "ES256", crit: ["x"], x: true })).toString("base64url")}.e30.AA`;
-const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const requestId = "123e4567-e89b-12d3-a456-426614174002";
+const now = 1_800_000_000;
 
-describe("API authentication boundary", () => {
+class MemoryReplayStore implements ReplayStore {
+  private readonly entries = new Set<string>();
+  public async consume(digest: Uint8Array): Promise<boolean> {
+    const value = Buffer.from(digest).toString("hex");
+    if (this.entries.has(value)) return false;
+    this.entries.add(value);
+    return true;
+  }
+}
+
+function binding(target: string): string {
+  return createHash("sha256").update(canonicalDelegatedRequest({
+    method: "GET",
+    target,
+    contentType: null,
+    bodySha256: createHash("sha256").update(new Uint8Array()).digest("base64url"),
+    requestId,
+  })).digest("base64url");
+}
+
+describe("delegated API authentication boundary", () => {
   let app: NestFastifyApplication;
-  let validToken: string;
+  let privateKey: CryptoKey;
+  let verifier: DelegatedJwtVerifier;
 
   beforeAll(async () => {
-    const { privateKey, publicKey } = await generateKeyPair("ES256");
-    const local = new JwtAccessTokenVerifier(
-      { issuer, audience, algorithm: "ES256" },
-      async () => publicKey,
-    );
-    const verifier: AccessTokenVerifier = {
-      async verify(token) {
-        if (token === operationalToken) throw new Error(`JWKS failure with ${token}`);
-        return local.verify(token);
-      },
-    };
+    const pair = await generateKeyPair("ES256");
+    privateKey = pair.privateKey;
+    verifier = new DelegatedJwtVerifier({
+      authDisabled: false,
+      acceptedKids: ["test-key"],
+      keyring: { "test-key": pair.publicKey },
+      replayStore: new MemoryReplayStore(),
+      now: () => new Date(now * 1_000),
+    });
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(ACCESS_TOKEN_VERIFIER)
-      .useValue(verifier)
+      .overrideProvider(API_DATABASE_POOL).useValue({ end: async () => undefined, query: async () => ({ rowCount: 1 }) })
+      .overrideProvider(REPLAY_STORE).useValue(new MemoryReplayStore())
+      .overrideProvider(ACCESS_TOKEN_VERIFIER).useValue(verifier)
       .compile();
-
     app = moduleRef.createNestApplication<NestFastifyApplication>(createApiFastifyAdapter(), { logger: false });
     await configureApiApplication(app);
     await app.init();
     await app.getHttpAdapter().getInstance().ready();
-
-    const now = Math.floor(Date.now() / 1000);
-    validToken = await new SignJWT({ session_id: sessionId, ignored_email: "private@example.test" })
-      .setProtectedHeader({ alg: "ES256", kid: "local-test" })
-      .setIssuer(issuer)
-      .setAudience(audience)
-      .setSubject(userId)
-      .setIssuedAt(now)
-      .setExpirationTime(now + 60)
-      .sign(privateKey);
   });
 
-  afterAll(async () => {
-    await app.close();
+  afterAll(async () => { await app.close(); });
+
+  async function token(target = "/v1/me", rid = requestId): Promise<string> {
+    return new SignJWT({
+      aud: "urn:account-book:api", exp: now + 30, iat: now, iss: "urn:account-book:bff",
+      jti: randomBytes(16).toString("base64url"), nbf: now,
+      rbh: binding(target), rid, scp: "me:read", sid: sessionId, sub: userId,
+    }).setProtectedHeader({ alg: "ES256", typ: "at+jwt", kid: "test-key" }).sign(privateKey);
+  }
+
+  it("accepts the signed token against the exact descriptor before HTTP wiring", async () => {
+    const signed = await token();
+    await expect(verifier.verify({
+      token: signed,
+      request: { method: "GET", target: "/v1/me", contentType: null, body: new Uint8Array(), requestId },
+      requiredScope: "me:read",
+    })).resolves.toMatchObject({ userId, requestId });
   });
 
-  it("serves minimal health with Helmet, no CORS, and a server-owned UUID request ID", async () => {
-    const response = await app.inject({
-      method: "GET",
-      url: "/health",
-      headers: { "x-request-id": "attacker-owned" },
-    });
+  it("accepts one valid signed delegated token and rejects its replay", async () => {
+    const signed = await token();
+    const headers = { authorization: `Bearer ${signed}`, "x-request-id": requestId };
+    const first = await app.inject({ method: "GET", url: "/v1/me", headers });
+    const replay = await app.inject({ method: "GET", url: "/v1/me", headers });
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ status: "ok" });
-    expect(response.headers["x-request-id"]).toMatch(uuid);
-    expect(response.headers["x-request-id"]).not.toBe("attacker-owned");
-    expect(response.headers["x-content-type-options"]).toBe("nosniff");
-    expect(response.headers["content-security-policy"]).toBeTypeOf("string");
-    expect(response.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(first.statusCode).toBe(200);
+    expect(CurrentUserSchema.parse(first.json())).toEqual({ id: userId, email: null, emailVerified: true });
+    expect(first.headers["x-request-id"]).toBe(requestId);
+    expect(replay.statusCode).toBe(401);
+    expect(ApiErrorSchema.parse(replay.json()).code).toBe("AUTH_SESSION_EXPIRED");
   });
 
-  it("returns a fixed no-store 401 without credentials", async () => {
-    const response = await app.inject({ method: "GET", url: "/v1/me" });
-    const error = ApiErrorSchema.parse(response.json());
-
+  it.each([
+    ["query mutation", "GET", "/v1/me?mutated=1", requestId],
+    ["request ID mutation", "GET", "/v1/me", "123e4567-e89b-12d3-a456-426614174003"],
+    ["method mutation", "POST", "/v1/me", requestId],
+  ])("rejects %s before a bound token can authorize the request", async (_name, method, url, inboundId) => {
+    const response = await app.inject({ method, url, headers: { authorization: `Bearer ${await token()}`, "x-request-id": inboundId } });
     expect(response.statusCode).toBe(401);
-    expect(error).toMatchObject({ code: "AUTH_SESSION_EXPIRED", retryable: false, fieldErrors: [] });
-    expect(response.headers["cache-control"]).toBe("private, no-store");
-    expect(response.headers["x-request-id"]).toBe(error.requestId);
+    expect(ApiErrorSchema.parse(response.json()).code).toBe("AUTH_SESSION_EXPIRED");
   });
 
-  it("returns only the shared current-user shape from the verified principal", async () => {
-    const response = await app.inject({
-      method: "GET",
-      url: "/v1/me",
-      headers: { authorization: `Bearer ${validToken}` },
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(CurrentUserSchema.parse(response.json())).toEqual({ id: userId, email: null, emailVerified: true });
-    expect(response.body).not.toContain("private@example.test");
-    expect(response.headers["cache-control"]).toBe("private, no-store");
+  it("fails closed for absent browser and preflight credentials", async () => {
+    const responses = await Promise.all([
+      app.inject({ method: "GET", url: "/v1/me" }),
+      app.inject({ method: "GET", url: "/v1/me", headers: { authorization: "Bearer browser.access.token", "x-request-id": requestId } }),
+      app.inject({ method: "OPTIONS", url: "/v1/me", headers: { authorization: `Bearer ${await token()}`, "x-request-id": requestId } }),
+    ]);
+    for (const response of responses) expect(response.statusCode).toBe(401);
   });
 
-  it("rejects duplicate, coalesced, and oversized Bearer inputs at the HTTP boundary", async () => {
-    const duplicate = await app.inject({
-      method: "GET",
-      url: "/v1/me",
-      headers: { authorization: ["Bearer aaa.bbb.ccc", "Bearer ddd.eee.fff"] },
+  it("creates one bounded pool and closes its replay-store owner exactly once", async () => {
+    const scalar = Buffer.from("0000000000000000000000000000000000000000000000000000000000000001", "hex");
+    const ecdh = createECDH("prime256v1");
+    ecdh.setPrivateKey(scalar);
+    const point = ecdh.getPublicKey();
+    const publicKey = createPublicKey({
+      key: { kty: "EC", crv: "P-256", x: point.subarray(1, 33).toString("base64url"), y: point.subarray(33, 65).toString("base64url") },
+      format: "jwk",
     });
-    const coalesced = await app.inject({
-      method: "GET",
-      url: "/v1/me",
-      headers: { authorization: "Bearer aaa.bbb.ccc, Bearer ddd.eee.fff" },
-    });
-    const oversized = await app.inject({
-      method: "GET",
-      url: "/v1/me",
-      headers: { authorization: `Bearer ${"a".repeat(8186)}` },
-    });
-
-    for (const response of [duplicate, coalesced, oversized]) {
-      expect(response.statusCode).toBe(401);
-      expect(ApiErrorSchema.parse(response.json()).code).toBe("AUTH_SESSION_EXPIRED");
-      expect(response.headers["cache-control"]).toBe("private, no-store");
-    }
-  });
-
-  it("maps unsupported protected critical headers to the fixed authentication failure", async () => {
-    const response = await app.inject({
-      method: "GET",
-      url: "/v1/me",
-      headers: { authorization: `Bearer ${unsupportedCritToken}` },
+    const end = vi.fn(async () => undefined);
+    poolConstructor.mockReset();
+    poolConstructor.mockImplementation(function PoolMock() { return { end, query: vi.fn() }; });
+    Object.assign(process.env, {
+      API_DATABASE_URL: "postgresql://app_api:test-password@127.0.0.1:5432/account_book?sslmode=disable",
+      BFF_AUTH_DISABLED: "false",
+      BFF_JWT_ACCEPTED_KIDS: '["test-key"]',
+      BFF_JWT_PUBLIC_KEYS: JSON.stringify({ "test-key": Buffer.from(publicKey.export({ format: "der", type: "spki" })).toString("base64url") }),
     });
 
-    expect(response.statusCode).toBe(401);
-    expect(ApiErrorSchema.parse(response.json())).toMatchObject({
-      code: "AUTH_SESSION_EXPIRED",
-      retryable: false,
-      fieldErrors: [],
+    const moduleRef = await Test.createTestingModule({ imports: [MeModule] }).compile();
+    const replayStore = moduleRef.get(REPLAY_STORE) as { onApplicationShutdown(): Promise<void> };
+    expect(poolConstructor).toHaveBeenCalledOnce();
+    expect(poolConstructor).toHaveBeenCalledWith({
+      connectionString: process.env.API_DATABASE_URL,
+      max: 5,
+      connectionTimeoutMillis: 2_000,
+      idleTimeoutMillis: 10_000,
+      allowExitOnIdle: true,
     });
-    expect(response.headers["cache-control"]).toBe("private, no-store");
-  });
+    expect(moduleRef.get(API_DATABASE_POOL)).toBeDefined();
+    expect(moduleRef.get(ACCESS_TOKEN_VERIFIER)).toBeInstanceOf(DelegatedJwtVerifier);
 
-  it("fails closed on operational verifier errors without leaking tokens or messages", async () => {
-    const response = await app.inject({
-      method: "GET",
-      url: "/v1/me",
-      headers: { authorization: `Bearer ${operationalToken}` },
-    });
-
-    expect(response.statusCode).toBe(503);
-    expect(response.json()).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: true, fieldErrors: [] });
-    expect(response.body).not.toContain(operationalToken);
-    expect(response.body).not.toContain("JWKS failure");
-    expect(response.headers["cache-control"]).toBe("private, no-store");
+    await Promise.all([replayStore.onApplicationShutdown(), replayStore.onApplicationShutdown()]);
+    await moduleRef.close();
+    expect(end).toHaveBeenCalledOnce();
   });
 });

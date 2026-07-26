@@ -21,15 +21,6 @@ export type ApiEnvironment = Readonly<{
   bffAuthDisabled: boolean;
   bffJwtAcceptedKids: readonly string[];
   bffJwtPublicKeys: DelegatedJwtKeyring;
-}> & Readonly<{
-  /** @deprecated Task 6 removes this compile-only bridge; it is never parsed or present at runtime. */
-  authJwksUrl: never;
-  /** @deprecated Task 6 removes this compile-only bridge; it is never parsed or present at runtime. */
-  authJwtIssuer: never;
-  /** @deprecated Task 6 removes this compile-only bridge; it is never parsed or present at runtime. */
-  authJwtAudience: never;
-  /** @deprecated Task 6 removes this compile-only bridge; it is never parsed or present at runtime. */
-  authJwtAlgorithm: never;
 }>;
 
 /** Rejects environment strings that can hide configuration or cause parser ambiguity. */

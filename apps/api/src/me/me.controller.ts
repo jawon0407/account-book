@@ -1,7 +1,8 @@
 import type { CurrentUser } from "@account-book/contracts";
-import { Controller, Get, Header, Req, UseGuards } from "@nestjs/common";
+import { All, Controller, Header, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { AuthGuard } from "../auth/auth.guard.js";
+import { RequireDelegatedScope } from "../auth/delegated-scope.js";
 import { InvalidAccessTokenError } from "../auth/jwt-verifier.js";
 
 /** Protected current-user endpoint backed only by the verified request principal. */
@@ -14,7 +15,8 @@ export class MeController {
    * @returns Public identity data with no arbitrary JWT profile claims.
    * @throws A fixed authentication failure if the guard invariant is ever absent.
    */
-  @Get()
+  @All()
+  @RequireDelegatedScope("me:read")
   @Header("Cache-Control", "private, no-store")
   public me(@Req() request: FastifyRequest): CurrentUser {
     if (request.principal === undefined) throw new InvalidAccessTokenError();
