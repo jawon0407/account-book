@@ -303,3 +303,11 @@ provider boundary가 허용하는 오류 코드는 다음 다섯 개다.
 - [보안 아키텍처와 위협 모델](../security/security-architecture.md)
 - [구현 설계](../superpowers/specs/2026-07-20-security-auth-foundation-design.md)
 - [SQL migration 001](../../supabase/migrations/202607200001_security_auth_foundation.sql), [002](../../supabase/migrations/202607200002_server_pkce_transactions.sql), [003](../../supabase/migrations/202607200003_user_security_state.sql)
+
+## Delegated JWT 경계와 실행 정책
+
+브라우저는 Vercel same-origin BFF의 HttpOnly opaque cookie만 사용한다. BFF는 세션을 확인한 뒤 Heroku API 요청마다 ES256 delegated JWT를 발급하며, Heroku는 PostgreSQL에서 원자적으로 one-time replay를 consume한다. JWT는 30초 TTL, exact issuer/audience, route scope, request binding, `jti`를 요구한다. Heroku는 static public-key allowlist만 신뢰하고 `BFF_AUTH_DISABLED` kill switch로 BFF를 독립적으로 fail-closed 할 수 있다.
+
+모든 BFF route는 Node.js, `iad1`, dynamic, 10초 maxDuration 정책을 명시한다. E2E는 프로세스 수명의 ephemeral P-256 key pair로 private BFF signing key와 public API verification key를 분리한다. secret, key material, JWT, selector, request-binding hash, DB 연결 문자열은 문서·로그·trace·snapshot에 기록하지 않는다.
+
+Task 7 로컬 증거 기준은 `b84ae721bedfe97b37240229a37b2cfa9bca785a` 위 작업 트리다. focused route-wiring GREEN은 25 files/479 tests, E2E typecheck와 `pnpm run verify`는 exit 0이었다. PostgreSQL listener 부재로 guarded DB preparation과 browser E2E를 실행하지 않았고, npm advisory 접근 차단으로 production audit도 통과하지 않았다. Node 22.15.1 pinned-runtime, same-SHA GitHub security gate, live replay cleanup/role privilege/catalog, Supabase cron cleanup, key rotation removal, kill-switch evidence는 출시 전 책임자가 동일 SHA에서 수집해야 하는 차단 조건이다.

@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { generateKeyPairSync, randomBytes } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "@playwright/test";
 
@@ -13,6 +13,21 @@ if (process.env.DATABASE_URL !== undefined && process.env.DATABASE_URL !== datab
 const baseURL = "https://127.0.0.1:4512";
 const workspaceRoot = fileURLToPath(new URL("../..", import.meta.url));
 const testKey = () => randomBytes(32).toString("base64url");
+
+/**
+ * Creates a one-run P-256 trust boundary: the BFF receives only PKCS8 private DER,
+ * while the API receives only SPKI public DER. These values remain process-local and
+ * disappear when the Playwright config process exits.
+ */
+function createDelegatedJwtKeys(): Readonly<{ privateKey: string; publicKey: string }> {
+  const keyPair = generateKeyPairSync("ec", { namedCurve: "P-256" });
+  return {
+    privateKey: Buffer.from(keyPair.privateKey.export({ format: "der", type: "pkcs8" })).toString("base64url"),
+    publicKey: Buffer.from(keyPair.publicKey.export({ format: "der", type: "spki" })).toString("base64url"),
+  };
+}
+
+const delegatedJwtKeys = createDelegatedJwtKeys();
 
 export default defineConfig({
   testDir: ".",
@@ -42,10 +57,10 @@ export default defineConfig({
         ...process.env,
         API_HOST: "127.0.0.1",
         API_PORT: "4511",
-        AUTH_JWKS_URL: "http://127.0.0.1:4510/jwks",
-        AUTH_JWT_ALGORITHM: "ES256",
-        AUTH_JWT_AUDIENCE: "account-book-api",
-        AUTH_JWT_ISSUER: "http://127.0.0.1:4510",
+        API_DATABASE_URL: "postgresql://app_api:account-book-e2e-only@127.0.0.1:5432/account_book_test",
+        BFF_AUTH_DISABLED: "false",
+        BFF_JWT_ACCEPTED_KIDS: JSON.stringify(["e2e-bff-a"]),
+        BFF_JWT_PUBLIC_KEYS: JSON.stringify({ "e2e-bff-a": delegatedJwtKeys.publicKey }),
       },
       url: "http://127.0.0.1:4511/health",
       reuseExistingServer: false,
@@ -63,6 +78,8 @@ export default defineConfig({
         AUTH_FAKE_PROVIDER_URL: "http://127.0.0.1:4510/token",
         AUTH_TOKEN_KEY: testKey(),
         AUTH_TOKEN_KEY_ID: "e2e-current",
+        BFF_JWT_KEY_ID: "e2e-bff-a",
+        BFF_JWT_PRIVATE_KEY: delegatedJwtKeys.privateKey,
         DATABASE_URL: databaseUrl,
         NODE_ENV: "test",
       },

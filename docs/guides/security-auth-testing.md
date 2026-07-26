@@ -56,3 +56,22 @@ DB/E2E는 환경 변수가 없으면 skip하지 않고 실패한다. `prepare:e2
 ## English summary
 
 Run RED, focused GREEN, then the full ordered gate. Database and browser E2E never skip silently. Only same-commit CI can replace unavailable local PostgreSQL evidence. Live Google, Kakao, and custom Naver OAuth remain release blockers until every path is exercised without credential leakage.
+
+## Task 7 delegated JWT 로컬 증거
+
+로컬 증거의 기준 commit은 `b84ae721bedfe97b37240229a37b2cfa9bca785a`이며, 이 작업 트리에서 BFF route 정책과 E2E key 분리를 검증했다. 모든 browser-facing BFF route는 Node.js runtime, `iad1`, `force-dynamic`, 10초 `maxDuration`을 명시한다. route는 여전히 thin adapter이고 Edge runtime, 직접 환경변수·DB·provider 접근을 포함하지 않는다.
+
+Playwright config 프로세스는 실행마다 P-256 key pair를 메모리에서 만들고 종료 시 함께 소멸한다. BFF에는 private PKCS8 DER base64url과 key ID만, API에는 static public SPKI DER base64url keyring·accepted key-ID allowlist·독립 `BFF_AUTH_DISABLED=false`만 전달한다. API로 private key를 전달하거나 BFF에 public keyring을 전달하지 않으며, 이전 remote-JWKS/IDP JWT 설정은 이 경로에서 제거했다.
+
+브라우저 E2E의 계약은 opaque `__Host-ab_session` cookie 하나, browser Authorization header 부재, BFF를 통한 `/api/me` 200, logout 뒤 selector replay 401, local/session storage credential 부재다. 내부 delegated JWT, `jti`, request-binding hash, selector, key material, DB 연결 문자열은 assertion 출력·trace·report에 남기지 않는다. delegated JWT의 one-time replay는 browser가 token을 추출하지 않고 API 통합 및 DB test에서 별도로 증명한다.
+
+관측된 명령 결과는 다음과 같다.
+
+```powershell
+pnpm --filter @account-book/web test -- route-wiring.test.ts # RED: 14 route policy failures
+pnpm --filter @account-book/web test -- route-wiring.test.ts # GREEN: 25 files, 479 tests passed
+pnpm --filter @account-book/e2e typecheck                 # exit 0
+pnpm run verify                                            # exit 0; legacy 52, contracts 22, database 12, API 113, web 479 tests passed
+```
+
+로컬 PostgreSQL listener가 없어 `pnpm test:db`, guarded `prepare:e2e`, 그리고 Playwright browser journey는 실행하지 않았다. Chromium cache는 있었지만 DB guard를 약화하지 않았다. `pnpm audit --prod --audit-level high`는 npm advisory service 접근이 차단되어 exit 1이었으므로 audit 통과 증거가 아니다. 로컬 Node는 24이고 pinned Node 22.15.1 증거는 아직 없다. 같은 SHA의 GitHub security gate URL, live disposable PostgreSQL migration/catalog/privilege/replay, Supabase `cron.job` cleanup, key rotation overlap/removal, kill-switch drill은 출시 차단 증거로 남아 있다.
