@@ -223,4 +223,18 @@ test("lockfile resolves only the patched PostCSS and Fastify router versions", (
     () => assertPatchedProductionResolutions(lockfile.replaceAll("find-my-way@9.7.0", "find-my-way@9.6.0")),
     /patched production dependency resolution/u,
   );
+  assert.throws(
+    () =>
+      assertPatchedProductionResolutions(
+        lockfile.replace("\nsnapshots:", "\n  postcss@8.5.10:\n\nsnapshots:"),
+      ),
+    /vulnerable production dependency resolution/u,
+  );
+  assert.throws(
+    () =>
+      assertPatchedProductionResolutions(
+        lockfile.replace("\nsnapshots:", "\nsnapshots:\n  find-my-way@9.6.0:"),
+      ),
+    /vulnerable production dependency resolution/u,
+  );
 });
