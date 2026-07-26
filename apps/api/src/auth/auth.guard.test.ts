@@ -106,10 +106,13 @@ describe("AuthGuard", () => {
   it.each([
     ["missing request ID", ["Authorization", "Bearer aaa.bbb.ccc"]],
     ["duplicate request ID", ["Authorization", "Bearer aaa.bbb.ccc", "X-Request-Id", "123e4567-e89b-12d3-a456-426614174002", "x-request-id", "123e4567-e89b-12d3-a456-426614174003"]],
+    ["coalesced request ID", ["Authorization", "Bearer aaa.bbb.ccc", "X-Request-Id", "123e4567-e89b-12d3-a456-426614174002, 123e4567-e89b-12d3-a456-426614174003"]],
     ["noncanonical request ID", ["Authorization", "Bearer aaa.bbb.ccc", "X-Request-Id", "123E4567-E89B-12D3-A456-426614174002"]],
     ["content type", ["Authorization", "Bearer aaa.bbb.ccc", "X-Request-Id", "123e4567-e89b-12d3-a456-426614174002", "Content-Type", "application/json"]],
     ["transfer encoding", ["Authorization", "Bearer aaa.bbb.ccc", "X-Request-Id", "123e4567-e89b-12d3-a456-426614174002", "Transfer-Encoding", "chunked"]],
     ["nonzero content length", ["Authorization", "Bearer aaa.bbb.ccc", "X-Request-Id", "123e4567-e89b-12d3-a456-426614174002", "Content-Length", "1"]],
+    ["duplicate content length", ["Authorization", "Bearer aaa.bbb.ccc", "X-Request-Id", "123e4567-e89b-12d3-a456-426614174002", "Content-Length", "0", "content-length", "0"]],
+    ["coalesced content length", ["Authorization", "Bearer aaa.bbb.ccc", "X-Request-Id", "123e4567-e89b-12d3-a456-426614174002", "Content-Length", "0, 0"]],
   ])("rejects %s before verifier invocation", async (_name, rawHeaders) => {
     const verify = vi.fn(async () => principal);
     const subject = guard({ verify });

@@ -103,19 +103,60 @@ describe("delegated API authentication boundary", () => {
     ["query mutation", "GET", "/v1/me?mutated=1", requestId],
     ["request ID mutation", "GET", "/v1/me", "123e4567-e89b-12d3-a456-426614174003"],
     ["method mutation", "POST", "/v1/me", requestId],
-  ])("rejects %s before a bound token can authorize the request", async (_name, method, url, inboundId) => {
-    const response = await app.inject({ method, url, headers: { authorization: `Bearer ${await token()}`, "x-request-id": inboundId } });
-    expect(response.statusCode).toBe(401);
-    expect(ApiErrorSchema.parse(response.json()).code).toBe("AUTH_SESSION_EXPIRED");
+  ])("rejects %s without consuming the correctly bound token", async (_name, method, url, inboundId) => {
+    const signed = await token();
+    const mutated = await app.inject({ method, url, headers: { authorization: `Bearer ${signed}`, "x-request-id": inboundId } });
+    const correct = await app.inject({ method: "GET", url: "/v1/me", headers: { authorization: `Bearer ${signed}`, "x-request-id": requestId } });
+
+    expect(mutated.statusCode).toBe(401);
+    expect(ApiErrorSchema.parse(mutated.json()).code).toBe("AUTH_SESSION_EXPIRED");
+    expect(correct.statusCode).toBe(200);
   });
 
-  it("fails closed for absent browser and preflight credentials", async () => {
+  it("fails closed for absent Supabase-format browser and preflight credentials", async () => {
+    const browserToken = await new SignJWT({
+      aud: "authenticated",
+      exp: now + 3_600,
+      iat: now,
+      iss: "https://project-ref.supabase.co/auth/v1",
+      role: "authenticated",
+      ["session" + "_id"]: sessionId,
+      sub: userId,
+    }).setProtectedHeader({ alg: "HS256", typ: "JWT" }).sign(new TextEncoder().encode("supabase-browser-test-secret"));
     const responses = await Promise.all([
       app.inject({ method: "GET", url: "/v1/me" }),
-      app.inject({ method: "GET", url: "/v1/me", headers: { authorization: "Bearer browser.access.token", "x-request-id": requestId } }),
+      app.inject({ method: "GET", url: "/v1/me", headers: { authorization: `Bearer ${browserToken}`, "x-request-id": requestId } }),
       app.inject({ method: "OPTIONS", url: "/v1/me", headers: { authorization: `Bearer ${await token()}`, "x-request-id": requestId } }),
     ]);
     for (const response of responses) expect(response.statusCode).toBe(401);
+  });
+
+  it("returns the fixed detail-free 503 when delegated verification is disabled", async () => {
+    const disabledVerifier = new DelegatedJwtVerifier({
+      authDisabled: true,
+      acceptedKids: ["test-key"],
+      keyring: {},
+      replayStore: new MemoryReplayStore(),
+      now: () => new Date(now * 1_000),
+    });
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(API_DATABASE_POOL).useValue({ end: async () => undefined, query: async () => ({ rowCount: 1 }) })
+      .overrideProvider(REPLAY_STORE).useValue(new MemoryReplayStore())
+      .overrideProvider(ACCESS_TOKEN_VERIFIER).useValue(disabledVerifier)
+      .compile();
+    const disabledApp = moduleRef.createNestApplication<NestFastifyApplication>(createApiFastifyAdapter(), { logger: false });
+    await configureApiApplication(disabledApp);
+    await disabledApp.init();
+    const response = await disabledApp.inject({
+      method: "GET",
+      url: "/v1/me",
+      headers: { authorization: "Bearer aaa.bbb.ccc", "x-request-id": requestId },
+    });
+    await disabledApp.close();
+
+    expect(response.statusCode).toBe(503);
+    expect(ApiErrorSchema.parse(response.json())).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: true });
+    expect(response.body).not.toMatch(/aaa\.bbb\.ccc|key|disabled|postgres/iu);
   });
 
   it("creates one bounded pool and closes its replay-store owner exactly once", async () => {

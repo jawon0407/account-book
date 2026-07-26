@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
+    "lint": "pnpm -w lint",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main.js"

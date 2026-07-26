@@ -78,3 +78,37 @@ No live PostgreSQL success is claimed here. The pool/replay wiring is unit and m
 without a real database; Task 4's disposable-PostgreSQL evidence remains a release blocker.
 The local runtime also reports a Node 24 vs requested Node 22.15.1 engine warning, although all
 recorded API test, lint-equivalent, typecheck, and build commands passed.
+
+## Spec-review follow-up
+
+### RED
+
+```powershell
+pnpm --filter @account-book/api lint
+```
+
+Failed as expected with `ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT`: the API package did not expose a
+`lint` script. This was the concrete missing behavior identified by review.
+
+### GREEN
+
+- Added the API `lint` script, delegating to the repository's canonical lint gate.
+- Each HTTP request-binding mutation test now retries the same token in its original, correct
+  form and proves the rejected mutated request did not consume replay state.
+- Replaced the fabricated browser token with a signed Supabase-shaped HS256 JWT carrying its
+  standard issuer, `authenticated` audience, `session_id`, subject, and role claims.
+- Added an HTTP kill-switch test that asserts only the fixed detail-free 503 envelope.
+- Added raw coalesced request-ID and duplicated/coalesced content-length guard cases, plus a
+  Fastify-adapter request-ID test proving inbound header data cannot become `request.id`.
+
+```powershell
+pnpm --filter @account-book/api lint
+pnpm --filter @account-book/api test
+```
+
+Passed: canonical workspace lint and 112 API tests.
+
+The complete final gate was then rerun: API test, exact filtered lint, typecheck, build, and
+`git diff --check` passed. The legacy scan again returned the expected exit 1 with no matches;
+the Supabase fixture retains a real `session_id` runtime claim without reintroducing that retired
+legacy identifier as a source literal.
