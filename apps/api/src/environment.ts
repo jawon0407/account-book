@@ -53,7 +53,7 @@ function parseListener(input: Readonly<Record<string, string | undefined>>): Pic
 
 /** Validates the API-owned database connection without disclosing credentials on failure. */
 function parseDatabaseUrl(value: string | undefined): string {
-  if (!safeEnvironmentValue(value)) throw new Error("API_CONFIGURATION_INVALID");
+  if (!safeEnvironmentValue(value) || /[\u0000-\u0020\u007f]/u.test(value)) throw new Error("API_CONFIGURATION_INVALID");
   let url: URL;
   try {
     url = new URL(value);
@@ -68,8 +68,11 @@ function parseDatabaseUrl(value: string | undefined): string {
     || url.hostname === ""
   ) throw new Error("API_CONFIGURATION_INVALID");
   const loopback = LOOPBACK_HOSTS.has(url.hostname);
-  const sslmode = url.searchParams.get("sslmode");
-  if (!loopback && !["require", "verify-ca", "verify-full"].includes(sslmode ?? "")) throw new Error("API_CONFIGURATION_INVALID");
+  const sslmodes = url.searchParams.getAll("sslmode");
+  if (sslmodes.length > 1) throw new Error("API_CONFIGURATION_INVALID");
+  const sslmode = sslmodes[0];
+  const allowedModes = loopback ? ["disable", "require", "verify-ca", "verify-full"] : ["require", "verify-ca", "verify-full"];
+  if ((sslmode !== undefined && !allowedModes.includes(sslmode)) || (!loopback && sslmode === undefined)) throw new Error("API_CONFIGURATION_INVALID");
   return value;
 }
 
