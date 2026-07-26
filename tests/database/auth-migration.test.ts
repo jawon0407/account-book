@@ -37,6 +37,21 @@ async function asRole(role: string, operation: () => Promise<void>): Promise<voi
   }
 }
 
+/**
+ * Runs one live privilege assertion with `app_api` as the actual session authority.
+ * @param operation - Database operation that must be authorized as `app_api`, not the postgres session user.
+ * @returns Nothing after the operation and mandatory session-authorization reset complete.
+ * @throws Propagates setup, operation, or reset failures after always attempting reset once authorization changed.
+ */
+async function asAppApiSessionAuthorization(operation: () => Promise<void>): Promise<void> {
+  await admin.query("set session authorization app_api");
+  try {
+    await operation();
+  } finally {
+    await admin.query("reset session authorization");
+  }
+}
+
 async function expectRoleDenied(role: string, table: (typeof privateTables)[number]): Promise<void> {
   await asRole(role, async () => {
     await expect(admin.query(`select * from app_private.${table}`)).rejects.toThrow(/permission denied/u);
@@ -267,7 +282,7 @@ describe("private authentication migration", () => {
     `);
     expect(memberships.rows).toEqual([]);
 
-    await asRole("app_api", async () => {
+    await asAppApiSessionAuthorization(async () => {
       await expect(admin.query("set role app_session_bff")).rejects.toThrow(/permission denied/u);
     });
   });
