@@ -1,8 +1,10 @@
 import { ApiErrorSchema } from "@account-book/contracts";
 import type { ArgumentsHost } from "@nestjs/common";
-import { describe, expect, it } from "vitest";
+import type { FastifyInstance } from "fastify";
+import { describe, expect, it, vi } from "vitest";
 import { AccessTokenVerificationUnavailableError, InvalidAccessTokenError } from "../auth/jwt-verifier.js";
 import { ApiErrorFilter } from "./api-error.filter.js";
+import { registerRequestContext } from "./request-context.js";
 
 function run(exception: unknown, requestId = "unsafe\r\ninbound", principal?: { requestId: string }) {
   const headers = new Map<string, string>();
@@ -54,5 +56,27 @@ describe("ApiErrorFilter", () => {
     expect(response.status).toBe(503);
     expect(parsed).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: true, requestId: verifiedId });
     expect(response.headers.get("x-request-id")).toBe(verifiedId);
+  });
+
+  it("preserves the error envelope fallback ID when onSend runs after a malformed internal candidate", () => {
+    let hook: ((request: never, reply: never, payload: unknown, done: () => void) => void) | undefined;
+    const server = { addHook: vi.fn((_name: string, value: typeof hook) => { hook = value; }) } as unknown as FastifyInstance;
+    const headers = new Map<string, string>();
+    let body: unknown;
+    const request = { id: "unsafe", principal: { requestId: "also-unsafe" } };
+    const reply = {
+      header(name: string, value: string) { headers.set(name.toLowerCase(), value); return this; },
+      status() { return this; },
+      send(value: unknown) { body = value; return this; },
+    };
+    const host = {
+      switchToHttp: () => ({ getRequest: () => request, getResponse: () => reply }),
+    } as unknown as ArgumentsHost;
+
+    new ApiErrorFilter().catch(new InvalidAccessTokenError(), host);
+    registerRequestContext(server);
+    hook!(request as never, reply as never, undefined, () => undefined);
+
+    expect(headers.get("x-request-id")).toBe(ApiErrorSchema.parse(body).requestId);
   });
 });

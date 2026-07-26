@@ -112,3 +112,24 @@ The complete final gate was then rerun: API test, exact filtered lint, typecheck
 `git diff --check` passed. The legacy scan again returned the expected exit 1 with no matches;
 the Supabase fixture retains a real `session_id` runtime claim without reintroducing that retired
 legacy identifier as a source literal.
+
+## Final correlation review follow-up
+
+### RED
+
+An integration-style filter/onSend regression used malformed internal request-ID candidates.
+It failed with two distinct generated UUIDs: the filter body contained one fallback ID while the
+later `onSend` hook overwrote the response header with another.
+
+### GREEN
+
+Response correlation now selects one safe ID and memoizes it on a private request symbol. The
+error filter and `onSend` hook share this value, while selection still accepts only a canonical
+verified principal ID or canonical local Fastify ID; it never reads or reflects inbound headers.
+
+```powershell
+pnpm --filter @account-book/api test -- api-error.filter.test.ts
+pnpm --filter @account-book/api lint
+```
+
+Passed: 113 API tests and the exact filtered lint command.
