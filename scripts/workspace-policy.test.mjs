@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const packagePath = join(rootDir, "package.json");
 const webPackagePath = join(rootDir, "apps", "web", "package.json");
+const e2ePackagePath = join(rootDir, "tests", "e2e", "package.json");
 const tsconfigPath = join(rootDir, "tsconfig.base.json");
 const workspacePath = join(rootDir, "pnpm-workspace.yaml");
 const lockfilePath = join(rootDir, "pnpm-lock.yaml");
@@ -30,7 +31,8 @@ const expectedDevDependencies = {
 
 const expectedScripts = {
   "test:workspace": "pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api test",
-  test: "pnpm test:legacy && pnpm test:workspace",
+  "test:e2e-preflight": "pnpm --filter @account-book/e2e test:preflight",
+  test: "pnpm test:legacy && pnpm test:workspace && pnpm test:e2e-preflight",
   "test:db": "pnpm --filter @account-book/database-tests test",
   lint: "eslint . --max-warnings=0",
   "build:packages": "pnpm --filter @account-book/contracts build && pnpm --filter @account-book/database build",
@@ -121,12 +123,18 @@ function assertPatchedProductionResolutions(lockfile) {
 test("workspace pins strict TypeScript, boundaries, and verification policy", () => {
   const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
   const webPackage = JSON.parse(readFileSync(webPackagePath, "utf8"));
+  const e2ePackage = JSON.parse(readFileSync(e2ePackagePath, "utf8"));
   const tsconfig = JSON.parse(readFileSync(tsconfigPath, "utf8"));
   const workspace = readFileSync(workspacePath, "utf8");
   const npmrc = readFileSync(npmrcPath, "utf8");
 
   assert.deepEqual(pkg.devDependencies, expectedDevDependencies);
   assert.equal(webPackage.dependencies.next, "16.2.11");
+  assert.equal(
+    e2ePackage.scripts["test:preflight"],
+    "tsx --test production-fake-startup.test.ts playwright-environment.test.ts",
+  );
+  assert.equal(e2ePackage.scripts.test, "pnpm test:preflight && playwright test --config playwright.config.ts");
   assert.equal(
     pkg.scripts["test:legacy"],
     "node --test scripts/verify-structure.test.mjs scripts/workspace-policy.test.mjs scripts/security/*.test.mjs scripts/security-gate.test.mjs scripts/setup-hooks.test.mjs",

@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "tsx --test production-fake-startup.test.ts && playwright test --config playwright.config.ts",
+    "test:preflight": "tsx --test production-fake-startup.test.ts playwright-environment.test.ts",
+    "test": "pnpm test:preflight && playwright test --config playwright.config.ts",
     "typecheck": "tsc --noEmit --project tsconfig.json"
   },
   "devDependencies": {
