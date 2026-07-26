@@ -1,55 +1,55 @@
-import { describe, expect, it } from "vitest";
+import { createPublicKey } from "node:crypto";
+import { exportJWK, generateKeyPair } from "jose";
+import { beforeAll, describe, expect, it } from "vitest";
 import { parseApiEnvironment } from "./environment.js";
 
-const required = {
-  AUTH_JWKS_URL: "https://id.example.test/.well-known/jwks.json",
-  AUTH_JWT_ISSUER: "https://id.example.test/auth/v1",
-  AUTH_JWT_AUDIENCE: "authenticated",
-  AUTH_JWT_ALGORITHM: "ES256",
-};
+let publicKey: string;
+
+beforeAll(async () => {
+  const pair = await generateKeyPair("ES256", { extractable: true });
+  publicKey = Buffer.from(createPublicKey({ key: await exportJWK(pair.publicKey), format: "jwk" }).export({ format: "der", type: "spki" })).toString("base64url");
+});
+
+function validEnvironment(overrides: Readonly<Record<string, string>> = {}): Record<string, string> {
+  return {
+    API_DATABASE_URL: "postgresql://app_api:local-test-password@127.0.0.1:5432/account_book?sslmode=disable",
+    BFF_AUTH_DISABLED: "false",
+    BFF_JWT_ACCEPTED_KIDS: '["local-test"]',
+    BFF_JWT_PUBLIC_KEYS: JSON.stringify({ "local-test": publicKey }),
+    ...overrides,
+  };
+}
 
 describe("parseApiEnvironment", () => {
-  it("applies internal listener defaults and freezes validated values", () => {
-    const result = parseApiEnvironment(required);
+  it("creates an immutable local static-keyring configuration", () => {
+    const result = parseApiEnvironment(validEnvironment());
 
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       apiHost: "127.0.0.1",
       apiPort: 3001,
-      authJwksUrl: required.AUTH_JWKS_URL,
-      authJwtIssuer: required.AUTH_JWT_ISSUER,
-      authJwtAudience: required.AUTH_JWT_AUDIENCE,
-      authJwtAlgorithm: "ES256",
+      apiDatabaseUrl: "postgresql://app_api:local-test-password@127.0.0.1:5432/account_book?sslmode=disable",
+      bffAuthDisabled: false,
+      bffJwtAcceptedKids: ["local-test"],
     });
     expect(Object.isFrozen(result)).toBe(true);
-  });
-
-  it("allows exact loopback HTTP URLs and the private-container host", () => {
-    expect(parseApiEnvironment({
-      ...required,
-      API_HOST: "0.0.0.0",
-      API_PORT: "65535",
-      AUTH_JWKS_URL: "http://127.0.0.1:54321/.well-known/jwks.json",
-      AUTH_JWT_ISSUER: "http://localhost:54321/auth/v1",
-      AUTH_JWT_ALGORITHM: "RS256",
-    })).toMatchObject({ apiHost: "0.0.0.0", apiPort: 65535, authJwtAlgorithm: "RS256" });
+    expect(Object.isFrozen(result.bffJwtAcceptedKids)).toBe(true);
+    expect(Object.isFrozen(result.bffJwtPublicKeys)).toBe(true);
+    expect(result.bffJwtPublicKeys["local-test"]?.asymmetricKeyType).toBe("ec");
   });
 
   it.each([
-    ["public HTTP JWKS", { AUTH_JWKS_URL: "http://id.example.test/jwks" }],
-    ["public HTTP issuer", { AUTH_JWT_ISSUER: "http://id.example.test/auth/v1" }],
-    ["abbreviated loopback host", { AUTH_JWKS_URL: "http://127.1/jwks" }],
-    ["integer loopback host", { AUTH_JWKS_URL: "http://2130706433/jwks" }],
-    ["URL credentials", { AUTH_JWKS_URL: "https://user:pass@id.example.test/jwks" }],
-    ["URL fragment", { AUTH_JWT_ISSUER: "https://id.example.test/auth/v1#secret" }],
-    ["unsupported protocol", { AUTH_JWKS_URL: "file:///tmp/jwks.json" }],
-    ["unsafe host", { API_HOST: "example.test" }],
-    ["invalid port", { API_PORT: "65536" }],
-    ["padded port", { API_PORT: " 3001" }],
-    ["scientific port", { API_PORT: "3e3" }],
-    ["padded audience", { AUTH_JWT_AUDIENCE: " authenticated" }],
-    ["control character", { AUTH_JWT_AUDIENCE: "authenticated\nsecret" }],
-    ["unsupported algorithm", { AUTH_JWT_ALGORITHM: "HS256" }],
-  ])("rejects %s", (_name, override) => {
-    expect(() => parseApiEnvironment({ ...required, ...override })).toThrow("API_CONFIGURATION_INVALID");
+    ["missing runtime database role", { API_DATABASE_URL: "postgresql://other:password@127.0.0.1/db?sslmode=disable" }],
+    ["missing database credential", { API_DATABASE_URL: "postgresql://app_api@127.0.0.1/db?sslmode=disable" }],
+    ["unencrypted public database URL", { API_DATABASE_URL: "postgresql://app_api:password@db.example.test/db" }],
+    ["database fragment", { API_DATABASE_URL: "postgresql://app_api:password@127.0.0.1/db?sslmode=disable#fragment" }],
+    ["disabled value outside exact boolean spelling", { BFF_AUTH_DISABLED: "FALSE" }],
+    ["duplicate accepted key IDs", { BFF_JWT_ACCEPTED_KIDS: '["local-test","local-test"]' }],
+    ["unknown accepted key ID", { BFF_JWT_ACCEPTED_KIDS: '["unknown"]' }],
+    ["unsafe key ID", { BFF_JWT_ACCEPTED_KIDS: '["unsafe key"]' }],
+    ["noncanonical key encoding", { BFF_JWT_PUBLIC_KEYS: JSON.stringify({ "local-test": `${publicKey}=` }) }],
+    ["duplicate key object member", { BFF_JWT_PUBLIC_KEYS: `{"local-test":"${publicKey}","local-test":"${publicKey}"}` }],
+  ])("rejects %s without revealing configuration input", (_name, override) => {
+    expect(() => parseApiEnvironment(validEnvironment(override))).toThrow("API_CONFIGURATION_INVALID");
+    expect(() => parseApiEnvironment(validEnvironment(override))).not.toThrow(/password|unsafe key|fragment/u);
   });
 });
