@@ -18,9 +18,9 @@ Task 14의 첫 clean-checkout CI는 공유 package의 `dist`가 만들어지기 
 
 E2E는 오류 feedback의 실제 접근성 role인 `alert`를 검사한다. Next 개발 서버가 자체 `__next_debug_channel:` 항목을 session storage에 둘 수 있으므로, 이 exact framework prefix 외의 session key와 모든 local-storage 항목을 거부하고 전체 key/value에서 provider sentinel, access/refresh token 이름, JWT 형태가 없는지 검사한다. 로그인 성공 직후 `/app` 이동과 응답 본문 읽기의 경합을 피하기 위해 Playwright response event에서 본문을 즉시 복사하되 브라우저 storage에는 저장하지 않는다.
 
-Next.js 16.2.10이 선택적으로 설치하던 `sharp@0.34.5`는 현재 앱에서 `next/image`를 사용하지 않으므로 pnpm override로 제거했다. GHSA-f88m-g3jw-g9cj의 high-severity 경로를 없앤 뒤 웹 프로덕션 빌드와 `pnpm audit --prod --audit-level high`를 다시 통과시켰다. 추후 이미지 최적화를 도입할 때는 패치된 `sharp`와 Next.js의 호환성을 별도 검토해야 한다.
+Next.js 16.2.11이 선택적으로 설치하던 `sharp@0.34.5`는 현재 앱에서 `next/image`를 사용하지 않으므로 pnpm override로 제거했다. GHSA-f88m-g3jw-g9cj의 high-severity 경로를 없앤 뒤 웹 프로덕션 빌드와 `pnpm audit --prod --audit-level high`를 다시 통과시켰다. 추후 이미지 최적화를 도입할 때는 패치된 `sharp`와 Next.js의 호환성을 별도 검토해야 한다.
 
-감사에는 Next.js가 정확히 고정한 `postcss@8.4.31` 경로의 moderate GHSA-qx2v-qp2m-jg93 한 건이 남는다. 이 취약점은 신뢰할 수 없는 CSS를 파싱·문자열화해 HTML `<style>`에 넣을 때 문제가 되며 현재 앱에는 해당 입력 경로가 없다. 다만 Next.js 선언 범위를 벗어난 강제 override는 호환성 검증 없이 적용하지 않고, 패치된 PostCSS를 허용하는 Next.js 릴리스로 갱신하거나 별도 호환성 테스트를 통과할 때까지 출시 위험 검토 항목으로 유지한다.
+GitHub `security-gate` run 30211236719는 PostCSS 파일 읽기·경로 순회 2건과 `find-my-way` HTTP/2 DoS 1건의 high advisory 때문에 실패했다. `next@16.2.11>postcss`는 `8.5.19`, `find-my-way@9.6.0`은 같은 메이저의 공개 패치 버전 `9.7.0`으로 고정했다. 잠금파일 재생성 후 취약 resolution이 제거됐고, 전체 테스트·Next.js 프로덕션 빌드와 `pnpm audit --prod --audit-level high` exit 0으로 호환성과 advisory 제거를 확인했다.
 
 최종 순서:
 
@@ -59,7 +59,7 @@ Run RED, focused GREEN, then the full ordered gate. Database and browser E2E nev
 
 ## Task 7 delegated JWT 로컬 증거
 
-로컬 증거의 code commit은 `80b933c0897784038c534031d2dc413b285920e1`이며, 이 작업 트리에서 BFF route 정책과 E2E key 분리를 검증했다. 모든 browser-facing BFF route는 Node.js runtime, `iad1`, `force-dynamic`, 10초 `maxDuration`을 명시한다. route는 여전히 thin adapter이고 Edge runtime, 직접 환경변수·DB·provider 접근을 포함하지 않는다.
+로컬 증거의 code commit은 `357f8412dcb19b004a0a0e45f08449682fc23f75`이며, 이 작업 트리에서 BFF route 정책, E2E key 분리와 production dependency remediation을 검증했다. 모든 browser-facing BFF route는 Node.js runtime, `iad1`, `force-dynamic`, 10초 `maxDuration`을 명시한다. route는 여전히 thin adapter이고 Edge runtime, 직접 환경변수·DB·provider 접근을 포함하지 않는다.
 
 Playwright config 프로세스는 실행마다 P-256 key pair를 메모리에서 만들고 종료 시 함께 소멸한다. BFF에는 private PKCS8 DER base64url과 key ID만, API에는 static public SPKI DER base64url keyring·accepted key-ID allowlist·독립 `BFF_AUTH_DISABLED=false`만 전달한다. API로 private key를 전달하거나 BFF에 public keyring을 전달하지 않으며, 이전 API-IDP JWT 설정은 이 경로에서 제거했다.
 
@@ -73,7 +73,7 @@ E2E actual IDP/API/BFF environment builder는 inherited OS/toolchain 변수만 �
 pnpm --filter @account-book/web test -- route-wiring.test.ts # RED: 14 route policy failures
 pnpm --filter @account-book/web test -- route-wiring.test.ts # GREEN: 25 files, 479 tests passed
 pnpm --filter @account-book/e2e typecheck                 # exit 0
-pnpm run verify                                            # exit 0; legacy 52, contracts 22, database 12, API 113, web 479 tests passed
+pnpm run verify                                            # exit 0; legacy 53, contracts 22, database 12, API 113, web 479 tests passed
 ```
 
-로컬 PostgreSQL listener가 없어 `pnpm test:db`, guarded `prepare:e2e`, 그리고 Playwright browser journey는 실행하지 않았다. Chromium cache는 있었지만 DB guard를 약화하지 않았다. `pnpm audit --prod --audit-level high`는 npm advisory service 접근이 차단되어 exit 1이었으므로 audit 통과 증거가 아니다. 로컬 Node는 24이고 pinned Node 22.15.1 증거는 아직 없다. 같은 SHA의 GitHub security gate URL, live disposable PostgreSQL migration/catalog/privilege/replay, Supabase `cron.job` cleanup, key rotation overlap/removal, kill-switch drill은 출시 차단 증거로 남아 있다.
+로컬 PostgreSQL listener가 없어 `pnpm test:db`, guarded `prepare:e2e`, 그리고 Playwright browser journey는 실행하지 않았다. Chromium cache는 있었지만 DB guard를 약화하지 않았다. `pnpm audit --prod --audit-level high`는 exit 0이며 알려진 production dependency 취약점이 없었다. 로컬 Node는 24이고 pinned Node 22.15.1 증거는 아직 없다. 패치 후 같은 SHA의 GitHub security gate 성공 URL, live disposable PostgreSQL migration/catalog/privilege/replay, Supabase `cron.job` cleanup, key rotation overlap/removal, kill-switch drill은 출시 차단 증거로 남아 있다.

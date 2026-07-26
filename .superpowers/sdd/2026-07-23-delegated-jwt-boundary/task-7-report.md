@@ -2,7 +2,7 @@
 
 ## Evidence identity
 
-- Code evidence commit: `80b933c0897784038c534031d2dc413b285920e1` (`fix: harden E2E environment isolation`)
+- Code evidence commit: `357f8412dcb19b004a0a0e45f08449682fc23f75` (`test: cover vulnerable lockfile entries`)
 - Evidence scope: Task 7 runtime and E2E boundary implementation at that exact code commit.
 - Local runtime: Node 24.14.0; repository pin is Node 22.15.1. This is a warning, not pinned-runtime evidence.
 
@@ -24,8 +24,8 @@ Result: exit 1. The new route-policy assertions failed for all 14 BFF routes bec
 | `pnpm --filter @account-book/e2e typecheck` | exit 0 |
 | `tsx --test tests/e2e/playwright-environment.test.ts` | exit 0; 1 test passed |
 | obsolete API-IDP setting absence check | exit 0; no obsolete API-IDP JWT setting remains in Playwright config |
-| `pnpm run verify` | exit 0 in 145.2 seconds; legacy 52, contracts 22, database 12, API 113, web 479 tests passed; production build completed |
-| `pnpm audit --prod --audit-level high` | exit 1; npm advisory service access failed in the restricted environment, so no audit pass is claimed |
+| `pnpm run verify` | exit 0 in 103.3 seconds; legacy 53, contracts 22, database 12, API 113, web 479 tests passed; production build completed |
+| `pnpm audit --prod --audit-level high` | exit 0; no known production dependency vulnerabilities found |
 
 `git diff --check` after the report and documentation changes exited 0.
 
@@ -36,6 +36,9 @@ Result: exit 1. The new route-policy assertions failed for all 14 BFF routes bec
 - `tests/e2e/playwright.config.ts`
 - `tests/e2e/playwright-environment.ts`
 - `tests/e2e/playwright-environment.test.ts`
+- `pnpm-workspace.yaml`
+- `pnpm-lock.yaml`
+- `scripts/workspace-policy.test.mjs`
 - `docs/guides/security-auth-testing.md`
 - `docs/guides/backend-auth-operations.ko.md`
 - `docs/architecture/backend-authentication.ko.md`
@@ -53,8 +56,9 @@ The unrelated legacy `.superpowers/sdd/progress.md` was not modified or staged b
 - The actual IDP/API/BFF environment builder retains non-security OS/toolchain variables but case-insensitively deletes inherited `API_`, `AUTH_`, `BFF_`, `SUPABASE_`, database, test-database, migration-database, and app-origin boundary variables before each child receives its explicit allowlist.
 - Obsolete API-IDP JWT environment settings are absent from the E2E API process.
 - Browser E2E keeps the opaque-cookie `/api/me` contract and does not extract an internal delegated JWT.
+- The failed GitHub `security-gate` run 30211236719 exposed three high production advisories. Next.js PostCSS is overridden to `8.5.19` and Fastify's `find-my-way@9.6.0` resolution to `9.7.0`; the policy test pins both remediations and the regenerated lockfile contains neither vulnerable resolution.
 - No key material, JWT, selector, request-binding hash, or database connection value is included in this report.
 
 ## Unexecuted and release-blocking evidence
 
-Prerequisite detection found Chromium installed but no PostgreSQL listener on the guarded local disposable endpoint. The destructive disposable database commands, `pnpm test:db`, database preparation, and browser E2E were therefore not run; guards were not weakened. Required remaining evidence is live disposable PostgreSQL migration/catalog/privilege/replay behavior, Supabase `cron.job` cleanup presence, key rotation overlap/removal, kill-switch drill, same-SHA GitHub security gate, and pinned Node 22 runtime verification. The production dependency audit must also be rerun where npm advisory access is permitted.
+Prerequisite detection found Chromium installed but no PostgreSQL listener on the guarded local disposable endpoint. The destructive disposable database commands, `pnpm test:db`, database preparation, and browser E2E were therefore not run; guards were not weakened. Required remaining evidence is live disposable PostgreSQL migration/catalog/privilege/replay behavior, Supabase `cron.job` cleanup presence, key rotation overlap/removal, kill-switch drill, a successful same-SHA GitHub security gate after the advisory remediation, and pinned Node 22 runtime verification.
