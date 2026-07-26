@@ -1,28 +1,28 @@
 # API Application
 
-NestJS와 Fastify로 구성한 내부 API다. 현재 공개 `GET /health`와 JWT로 보호된 `GET /v1/me`를 제공하며, 향후 소유권·입력 스키마·버전·멱등성·금융 데이터 변경의 최종 권한 경계가 된다.
+이 NestJS/Fastify API는 공개 `GET /health`와 delegated-JWT로 보호되는 `GET /v1/me`를 제공한다. API는 resource authorization, input schema, version, idempotency, 금융 데이터 변경의 최종 권한 경계다.
 
 ## 인증 경계
 
-- 브라우저가 아니라 same-origin BFF만 API에 Bearer access JWT를 전달한다.
-- production verifier는 remote JWKS와 정확한 issuer, scalar audience, `ES256 | RS256` 중 설정된 단일 알고리즘을 사용한다. 지원하지 않는 protected `crit` 확장은 key resolver 호출 전에 invalid credential로 거부한다.
-- 서명·등록 claim 검증 뒤 canonical `sub`와 `session_id` UUID만 `AuthPrincipal`로 보존한다. 이메일이나 역할 같은 임의 claim은 복사하지 않는다.
-- `Authorization`은 canonical `Bearer <JWT>` 한 개만 허용한다. 중복·병합·제어 문자·공백·빈 token·8192바이트 초과 입력은 암호 검증 전에 거부한다.
-- 요청 ID는 서버가 UUID로 생성하고 inbound ID를 무시한다. 인증/사용자 응답과 오류는 `private, no-store`이며 오류 본문에는 token, 공급자 메시지, 환경값을 포함하지 않는다.
-- Helmet을 사용하고 browser CORS는 등록하지 않는다.
+- 브라우저는 API에 직접 연결하지 않고 same-origin BFF만 사용한다.
+- API는 static P-256 SPKI DER public-key keyring과 accepted `kid` allowlist만 신뢰한다. BFF signing private key와 remote key resolver는 API에 배포하지 않는다.
+- delegated JWT는 exact issuer/audience, ES256, 30초 TTL, route scope, request binding, `jti`를 요구한다. PostgreSQL replay store가 `jti`를 원자적으로 한 번만 consume한다.
+- `BFF_AUTH_DISABLED=true`는 key lookup과 replay consume보다 먼저 API를 fail-closed 한다. 이 kill switch와 accepted-key allowlist는 BFF에서 수정할 수 없는 API 운영 경계다.
+- `Authorization`은 canonical `Bearer <JWT>` 한 개만 허용한다. malformed input, unsupported protected `crit`, 허용되지 않은 `kid`, keyring 불일치는 credential detail 없이 거부한다.
+- API는 browser CORS를 등록하지 않으며 response와 diagnostic에 token, key material, cookie, selector, DB connection value를 포함하지 않는다.
 
-## 서버 환경 변수
+## API 환경 변수
 
-| 이름 | 의미 |
+| 변수 | 형식과 경계 |
 | --- | --- |
 | `API_HOST` | 기본 `127.0.0.1`; private container에서만 `0.0.0.0` 허용 |
 | `API_PORT` | 기본 `3001`; canonical 정수 `1..65535` |
-| `AUTH_JWKS_URL` | remote JWKS URL |
-| `AUTH_JWT_ISSUER` | 허용할 정확한 JWT issuer URL |
-| `AUTH_JWT_AUDIENCE` | 허용할 정확한 scalar audience |
-| `AUTH_JWT_ALGORITHM` | `ES256` 또는 `RS256` |
+| `API_DATABASE_URL` | API 전용 `app_api` role의 server-only PostgreSQL connection |
+| `BFF_AUTH_DISABLED` | 정확한 `true` 또는 `false`; API 독립 kill switch |
+| `BFF_JWT_ACCEPTED_KIDS` | static keyring에서 허용할 safe key ID JSON 배열 |
+| `BFF_JWT_PUBLIC_KEYS` | `kid`별 P-256 SPKI DER base64url public key JSON object |
 
-JWKS와 issuer는 HTTPS를 사용한다. Task 13 로컬 IDP를 위해 정확한 `localhost`, `127.0.0.1`, `[::1]`만 HTTP 예외로 허용하며 credentials, fragment와 우회 loopback 표기는 거부한다.
+`app_api` database credential은 BFF session credential과 migration credential에서 분리한다. API는 BFF private key, BFF session DB role, cookie/CSRF secret을 받지 않는다. BFF는 API database URL, public-keyring, accepted key ID, kill switch를 받지 않는다. Key rotation은 public key overlap과 제거 drill로 검증하고 private signing key는 BFF에만 배포한다.
 
 ## 검증
 
@@ -33,12 +33,6 @@ pnpm --filter @account-book/api typecheck
 pnpm --filter @account-book/api build
 ```
 
-동일 Node 22 계열의 `@types/node`를 TypeScript 6.0.3 호환 선언이 포함된 22.20.1로 갱신해 과거 `skipLibCheck: true` 예외를 제거했다. API와 외부 선언은 모두 `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `skipLibCheck: false` 정책으로 검사된다.
+Task 7 E2E는 API에 process-local delegated ES256 public key와 disposable API database role만 전달한다. `/api/me` 성공에는 static-key signature, exact issuer/audience, scope, request binding, expiry, `jti`, replay consume 검증이 모두 필요하다. 브라우저는 API credential을 보거나 직접 제출하지 않는다. 401/503은 smoke 성공 증거가 아니다.
 
----
-
-This internal NestJS/Fastify API currently exposes public `GET /health` and JWT-protected `GET /v1/me`. It is the final authority for JWT validation and will own resource authorization, input schemas, versions, idempotency, and financial data changes. Production verification uses remote JWKS and fails closed; browser CORS and token storage are intentionally absent.
-
-## End-to-end authentication smoke
-
-Task 13 starts the real API on `127.0.0.1:4511` and points its verifier at a process-local ES256 IDP on `127.0.0.1:4510`. A successful `/api/me` requires remote JWKS signature verification plus exact issuer, audience, algorithm, expiry, `sub`, and `session_id` validation. A 401/503 is never successful smoke evidence. Hosted JWKS and issuer remain HTTPS-only.
+로컬 Node 22.15.1 pin, live disposable PostgreSQL privilege/replay, key rotation removal, kill-switch drill, same-SHA CI는 별도 release evidence가 필요하다.

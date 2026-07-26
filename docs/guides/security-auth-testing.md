@@ -59,9 +59,11 @@ Run RED, focused GREEN, then the full ordered gate. Database and browser E2E nev
 
 ## Task 7 delegated JWT 로컬 증거
 
-로컬 증거의 기준 commit은 `b84ae721bedfe97b37240229a37b2cfa9bca785a`이며, 이 작업 트리에서 BFF route 정책과 E2E key 분리를 검증했다. 모든 browser-facing BFF route는 Node.js runtime, `iad1`, `force-dynamic`, 10초 `maxDuration`을 명시한다. route는 여전히 thin adapter이고 Edge runtime, 직접 환경변수·DB·provider 접근을 포함하지 않는다.
+로컬 증거의 code commit은 `6e8968313385136758bb373af8c570e553da8533`이며, 이 작업 트리에서 BFF route 정책과 E2E key 분리를 검증했다. 모든 browser-facing BFF route는 Node.js runtime, `iad1`, `force-dynamic`, 10초 `maxDuration`을 명시한다. route는 여전히 thin adapter이고 Edge runtime, 직접 환경변수·DB·provider 접근을 포함하지 않는다.
 
 Playwright config 프로세스는 실행마다 P-256 key pair를 메모리에서 만들고 종료 시 함께 소멸한다. BFF에는 private PKCS8 DER base64url과 key ID만, API에는 static public SPKI DER base64url keyring·accepted key-ID allowlist·독립 `BFF_AUTH_DISABLED=false`만 전달한다. API로 private key를 전달하거나 BFF에 public keyring을 전달하지 않으며, 이전 remote-JWKS/IDP JWT 설정은 이 경로에서 제거했다.
+
+E2E child process는 inherited OS/toolchain 변수만 유지하고, API/BFF/legacy JWT trust-boundary 변수는 먼저 삭제한 뒤 각 process의 explicit allowlist만 추가한다. 따라서 API는 BFF private/key-ID나 session·cookie·CSRF secret을, BFF는 API database/public-keyring/accepted-key/kill-switch 값을 상속하지 않는다.
 
 브라우저 E2E의 계약은 opaque `__Host-ab_session` cookie 하나, browser Authorization header 부재, BFF를 통한 `/api/me` 200, logout 뒤 selector replay 401, local/session storage credential 부재다. 내부 delegated JWT, `jti`, request-binding hash, selector, key material, DB 연결 문자열은 assertion 출력·trace·report에 남기지 않는다. delegated JWT의 one-time replay는 browser가 token을 추출하지 않고 API 통합 및 DB test에서 별도로 증명한다.
 

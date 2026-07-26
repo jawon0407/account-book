@@ -447,8 +447,10 @@ Firebase Cloud Messaging, Crashlytics 등 모바일 운영 기능은 향후 네�
 
 ## 12.1 Task 7 로컬 구현 증거
 
-기준 commit `b84ae721bedfe97b37240229a37b2cfa9bca785a` 위 작업 트리에서 모든 BFF route에 Node.js/`iad1`/`force-dynamic`/10초 `maxDuration` export를 추가했고, thin-adapter·명시 method allowlist·cache/security semantics는 유지했다. route-wiring RED는 누락된 정책 export 때문에 14개 route가 실패했고, GREEN은 25 files/479 tests passed였다.
+code commit `6e8968313385136758bb373af8c570e553da8533`에서 모든 BFF route에 Node.js/`iad1`/`force-dynamic`/10초 `maxDuration` export를 추가했고, thin-adapter·명시 method allowlist·cache/security semantics는 유지했다. route-wiring RED는 누락된 정책 export 때문에 14개 route가 실패했고, GREEN은 25 files/479 tests passed였다.
 
 Playwright config는 매 실행 P-256 pair를 생성해 private PKCS8 key를 BFF에만, public SPKI key와 static accepted-key allowlist를 Heroku API에만 준다. API trust boundary는 30초 TTL, exact issuer/audience, scope, request binding, `jti`, atomic PostgreSQL replay consume와 독립 `BFF_AUTH_DISABLED`를 계속 요구한다. opaque browser cookie journey는 Authorization header 없이 `/api/me`을 통과하고 logout 뒤 이전 selector를 401로 거부하도록 설계되며, 내부 JWT나 secret-derived 값은 browser evidence에 노출하지 않는다.
+
+각 E2E child environment는 security-boundary variable을 inherited environment에서 제거한 뒤 자기 explicit allowlist만 받는다. 따라서 API에는 BFF private signing material·key ID·session/cookie/CSRF secret이, BFF에는 API database·public keyring·accepted keys·kill switch가 전달되지 않는다.
 
 `pnpm --filter @account-book/e2e typecheck`와 `pnpm run verify`는 exit 0이었다. 로컬 PostgreSQL listener 부재 때문에 guarded disposable migration과 browser E2E는 실행하지 않았고, Chromium 설치만으로 이를 대체하지 않았다. npm advisory 접근 차단으로 `pnpm audit --prod --audit-level high`는 exit 1이었다. 따라서 same-SHA GitHub security gate URL, live disposable PostgreSQL migration/catalog/privilege/replay, Supabase `cron.job` cleanup, key rotation overlap/removal, kill-switch drill, pinned Node 22 evidence는 아직 충족되지 않은 production blocker다.

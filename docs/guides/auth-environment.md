@@ -33,10 +33,12 @@ Hosted DB login은 owner, superuser, `BYPASSRLS`, migration principal이 아니�
 |---|---|
 | `API_HOST` | `127.0.0.1` 또는 private-container `0.0.0.0` |
 | `API_PORT` | decimal `1..65535`; 기본 `3001` |
-| `AUTH_JWKS_URL` | safe HTTP(S); HTTP는 exact loopback만 |
-| `AUTH_JWT_ISSUER` | token의 exact safe issuer URL |
-| `AUTH_JWT_AUDIENCE` | 공백/control 없는 exact scalar audience |
-| `AUTH_JWT_ALGORITHM` | `ES256` 또는 `RS256` 하나 |
+| `API_DATABASE_URL` | API 전용 `app_api` role의 server-only PostgreSQL URL |
+| `BFF_AUTH_DISABLED` | 정확히 `true` 또는 `false`; API 운영자가 독립적으로 fail-closed 하는 kill switch |
+| `BFF_JWT_ACCEPTED_KIDS` | static public keyring의 허용 key ID JSON 배열; 1..3개의 safe ID |
+| `BFF_JWT_PUBLIC_KEYS` | static P-256 SPKI DER base64url public key JSON object; private key 금지 |
+
+API는 BFF signing private key, BFF session database role, cookie/CSRF secret을 받지 않는다. BFF는 API database URL, accepted-key allowlist, public-keyring, kill switch를 받지 않는다. Heroku API의 `app_api` role과 Vercel BFF의 `app_session_bff` role은 별도 credential·최소 권한으로 운영하며, signing private key는 BFF에만 둔다.
 
 필수 값이 없거나 unsafe하면 API는 `API_CONFIGURATION_INVALID`, BFF는 `AUTH_CONFIGURATION_INVALID`로 fail closed한다. Production fake mode는 authentication traffic을 제공하지 않는다.
 
@@ -50,4 +52,4 @@ Hosted DB login은 owner, superuser, `BYPASSRLS`, migration principal이 아니�
 
 ## English summary
 
-All authentication configuration is server-only. Encryption and CSRF keys are independent 32-byte canonical base64url values. Production rejects the fake adapter and requires HTTPS, remote-JWKS policy, provider credentials, and a dedicated database login granted only `app_session_bff`. The loopback bridge exists solely for disposable E2E.
+All authentication configuration is server-only. Encryption and CSRF keys are independent 32-byte canonical base64url values. Production rejects the fake adapter and uses a static P-256 delegated-JWT public-key allowlist, an API-owned database role, and an independent API kill switch. The loopback bridge exists solely for disposable E2E.
