@@ -147,3 +147,11 @@ Supabase-format browser access token. The controller test reads that test-only a
 contains no computed legacy-claim construction.
 
 The focused controller test and the production-source legacy scan passed.
+
+## Nest replay-shutdown review follow-up
+
+The module lifecycle assertion now uses `moduleRef.close()` as its sole shutdown trigger and
+asserts the process pool closes exactly once afterward. This tightened test passed immediately,
+confirming the existing Nest lifecycle wiring rather than manually exercising the replay store.
+`postgres-replay-store.test.ts` already independently covers concurrent and repeated direct
+`onApplicationShutdown()` calls, so that idempotence coverage was not duplicated.

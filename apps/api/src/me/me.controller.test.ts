@@ -176,7 +176,6 @@ describe("delegated API authentication boundary", () => {
     });
 
     const moduleRef = await Test.createTestingModule({ imports: [MeModule] }).compile();
-    const replayStore = moduleRef.get(REPLAY_STORE) as { onApplicationShutdown(): Promise<void> };
     expect(poolConstructor).toHaveBeenCalledOnce();
     expect(poolConstructor).toHaveBeenCalledWith({
       connectionString: process.env.API_DATABASE_URL,
@@ -188,7 +187,6 @@ describe("delegated API authentication boundary", () => {
     expect(moduleRef.get(API_DATABASE_POOL)).toBeDefined();
     expect(moduleRef.get(ACCESS_TOKEN_VERIFIER)).toBeInstanceOf(DelegatedJwtVerifier);
 
-    await Promise.all([replayStore.onApplicationShutdown(), replayStore.onApplicationShutdown()]);
     await moduleRef.close();
     expect(end).toHaveBeenCalledOnce();
   });
