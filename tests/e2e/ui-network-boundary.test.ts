@@ -47,9 +47,8 @@ test("mutation: only exact approved UI imports and static local modules are perm
         import { test, expect, type Page } from "@playwright/test";
         import { AxeBuilder } from "@axe-core/playwright";
         export { helper } from "./helper.js";
-        void [test, expect, AxeBuilder];
-        type CurrentPage = Page;
-        void (null as unknown as CurrentPage);
+        void [expect, AxeBuilder];
+        void (null as unknown as Page);
       `,
       "helper.ts": "export const helper = true;",
     }),
@@ -62,6 +61,27 @@ test("mutation: only exact approved UI imports and static local modules are perm
   assert.deepEqual(
     inspect({ "root.ts": 'import { request } from "@playwright/test";' }),
     [{ category: "import", capability: "unapproved-playwright-import" }],
+  );
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        import { test, request as expect } from "@playwright/test";
+        expect.newContext();
+      `,
+    }),
+    [{ category: "import", capability: "unapproved-playwright-import" }],
+  );
+  assert.deepEqual(
+    inspect({ "root.ts": 'import { AxeBuilder as Builder } from "@axe-core/playwright"; void Builder;' }),
+    [{ category: "import", capability: "unapproved-external-import" }],
+  );
+  assert.deepEqual(
+    inspect({ "root.ts": 'import type { Page } from "@playwright/test"; void (null as unknown as Page);' }),
+    [{ category: "import", capability: "unapproved-playwright-import" }],
+  );
+  assert.deepEqual(
+    inspect({ "root.ts": 'import type { AxeBuilder } from "@axe-core/playwright"; void (null as unknown as AxeBuilder);' }),
+    [{ category: "import", capability: "unapproved-external-import" }],
   );
   assert.deepEqual(
     inspect({ "root.ts": 'import ky from "ky";' }),
@@ -207,6 +227,214 @@ test("mutation: response observers and dynamic event names are fail-closed", () 
   );
 });
 
+test("mutation: page.waitForRequest is outside the closed Page allowlist", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'await page.waitForRequest("**/api");' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: page.route is outside the closed Page allowlist", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'await page.route("**/api", async (route) => { await route.continue(); });' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: route.fetch is outside the closed Route allowlist", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'await route.fetch();' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: page.waitForResponse cannot be retained as a declaration alias", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'const wait = page.waitForResponse; await wait("**/api");' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: page.request cannot be retained as a declaration alias", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'const client = page.request; await client.get("/api");' }),
+    [{ category: "network", capability: "direct-http-client" }],
+  );
+});
+
+test("mutation: fetch cannot be retained as a declaration alias", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'const f = fetch; await f("/api");' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: global fetch and XMLHttpRequest members cannot be retained as aliases", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'const f = window.fetch; await f("/api");' }),
+    [{ category: "network", capability: "direct-http-client" }],
+  );
+  assert.deepEqual(
+    inspect({ "root.ts": "const Xhr = window.XMLHttpRequest; new Xhr();" }),
+    [{ category: "network", capability: "direct-http-client" }],
+  );
+});
+
+test("mutation: browser Request and Response factories are outside the closed allowlist", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'new Request("/api"); new Response("{}");' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: Page and Context cannot be retained as simple assignment aliases", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'let client; client = page; let browser; browser = context;' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: sensitive capabilities cannot be retained through destructuring", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'const { waitForRequest } = page; const { request: client } = context;' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: sensitive capabilities cannot be returned or passed to untrusted consumers", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'consume(page); function leak() { return context; }' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: exact expect and AxeBuilder consumers cannot be shadowed", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        test("shadow", async ({ page }) => {
+          (function run(expect) { expect(page); })(consume);
+          (function audit(AxeBuilder) { new AxeBuilder({ page }); })(consume);
+        });
+      `,
+    }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: trusted test, expect, and AxeBuilder bindings cannot come from local aliases", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        import { test } from "@playwright/test";
+        import { expect, AxeBuilder } from "./helper.js";
+        test("local consumers", async ({ page }) => {
+          expect(page);
+          new AxeBuilder({ page });
+        });
+      `,
+      "helper.ts": `
+        export function expect(value: unknown): void { void value; }
+        export class AxeBuilder { constructor(value: unknown) { void value; } }
+      `,
+    }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        import { customTest as test } from "./helper.js";
+        test("local test alias", async ({ page }) => { await page.waitForURL("**/app"); });
+      `,
+      "helper.ts": `
+        import { test } from "@playwright/test";
+        export const customTest = test;
+      `,
+    }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: Page methods cannot be invoked through call, apply, or bind", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        await page.goto.call(page, "/");
+        await page.reload.apply(page);
+        const navigate = page.goBack.bind(page);
+        await navigate();
+      `,
+    }),
+    [{ category: "navigation", capability: "navigation-response" }],
+  );
+});
+
+test("mutation: optional and computed Page members fail closed", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        await page?.waitForURL("**/app");
+        await page["waitForRequest"]("**/api");
+        await page[method]("**/api");
+      `,
+    }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: BrowserContext, Request, Route, and APIRequest types fail closed", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        declare const browser: BrowserContext;
+        declare const captured: Request;
+        declare const route: Route;
+        declare const api: APIRequestContext;
+        void [browser, captured, route, api];
+      `,
+    }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: only exact page and context Playwright fixture bindings are allowed", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'test("browser fixture", async ({ browser }) => { await browser.newPage(); });' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+  assert.deepEqual(
+    inspect({ "root.ts": 'test("aliased page fixture", async ({ page: client }) => { await client.waitForRequest("**/api"); });' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+  assert.deepEqual(
+    inspect({ "root.ts": 'test("whole fixture object", async (fixtures) => { await fixtures.page.waitForRequest("**/api"); });' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: Page, Context, Request, Route, and APIRequest factories fail closed", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": "declare function getPage(): Page;" }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+  assert.deepEqual(
+    inspect({ "root.ts": "declare function getContext(): BrowserContext;" }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+  assert.deepEqual(
+    inspect({ "root.ts": "declare function getRequest(): Request;" }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+  assert.deepEqual(
+    inspect({ "root.ts": "declare function getRoute(): Route;" }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+  assert.deepEqual(
+    inspect({ "root.ts": "declare function getApiRequest(): APIRequestContext;" }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
 test("mutation: evaluation and script or HTML injection forms are rejected", () => {
   assert.deepEqual(
     inspect({
@@ -240,6 +468,39 @@ test("mutation: function evaluation receives the full UI network policy visitor"
 test("mutation: only Page itself may evaluate a function", () => {
   assert.deepEqual(
     inspect({ "root.ts": 'page.locator("main").evaluate(() => document.body.clientWidth);' }),
+    [{ category: "execution", capability: "dynamic-code" }],
+  );
+});
+
+test("mutation: Locator network, route, and request members are outside the closed allowlist", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        const item = page.locator("main");
+        item.request();
+        item.route();
+        page.locator("main").request();
+      `,
+    }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: Locator values cannot be passed, returned, or dynamically invoked", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'consume(page.locator("main"));' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+  assert.deepEqual(
+    inspect({ "root.ts": 'function leak() { return page.locator("main"); }' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+  assert.deepEqual(
+    inspect({ "root.ts": 'page.locator("main")[method]();' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+  assert.deepEqual(
+    inspect({ "root.ts": 'page.locator("main").evaluateAll(() => []);' }),
     [{ category: "execution", capability: "dynamic-code" }],
   );
 });
@@ -283,9 +544,6 @@ test("guard: exact authorization recorder and DOM-only function evaluation remai
   assert.deepEqual(
     inspect({
       "root.ts": `
-        page.on("request", function authorizationRecorder(request) {
-          return request.headerValue("authorization") === "Bearer test";
-        });
         const authorizationPresence: Array<Promise<boolean>> = [];
         page.on("request", function authorizationRecorder(request) {
           authorizationPresence.push(request.headerValue("authorization").then((value) => value !== null));
@@ -304,6 +562,111 @@ test("guard: exact authorization recorder and DOM-only function evaluation remai
   assert.deepEqual(
     inspect({
       "root.ts": 'context.on("request", function authorizationRecorder(request) { return request.headerValue("authorization") === null; });',
+    }),
+    [{ category: "event", capability: "unapproved-request-observer" }],
+  );
+});
+
+test("mutation: authorization recorder rejects direct raw header comparisons", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": 'page.on("request", function authorizationRecorder(request) { return request.headerValue("authorization") === "Bearer test"; });',
+    }),
+    [{ category: "event", capability: "unapproved-request-observer" }],
+  );
+});
+
+test("mutation: authorization recorder rejects a raw promise callback return", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        const authorizationPresence: Array<Promise<boolean>> = [];
+        page.on("request", function authorizationRecorder(request) {
+          authorizationPresence.push(request.headerValue("authorization").then((value) => value));
+        });
+      `,
+    }),
+    [{ category: "event", capability: "unapproved-request-observer" }],
+  );
+});
+
+test('mutation: authorization recorder rejects value + "" retention', () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        const authorizationPresence: Array<Promise<boolean>> = [];
+        page.on("request", function authorizationRecorder(request) {
+          authorizationPresence.push(request.headerValue("authorization").then((value) => value + ""));
+        });
+      `,
+    }),
+    [{ category: "event", capability: "unapproved-request-observer" }],
+  );
+});
+
+test("mutation: authorization recorder rejects object wrapping", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        const authorizationPresence: Array<Promise<boolean>> = [];
+        page.on("request", function authorizationRecorder(request) {
+          authorizationPresence.push(request.headerValue("authorization").then((value) => ({ value })));
+        });
+      `,
+    }),
+    [{ category: "event", capability: "unapproved-request-observer" }],
+  );
+});
+
+test("mutation: authorization recorder rejects storing the raw value", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        let retained;
+        const authorizationPresence: Array<Promise<boolean>> = [];
+        page.on("request", function authorizationRecorder(request) {
+          authorizationPresence.push(request.headerValue("authorization").then((value) => retained = value));
+        });
+      `,
+    }),
+    [{ category: "event", capability: "unapproved-request-observer" }],
+  );
+});
+
+test("mutation: authorization promise callback accepts only strict null comparisons", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        const authorizationPresence: Array<Promise<boolean>> = [];
+        page.on("request", function authorizationRecorder(request) {
+          authorizationPresence.push(request.headerValue("authorization").then((value) => null === value));
+        });
+      `,
+    }),
+    [],
+  );
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        const authorizationPresence: Array<Promise<boolean>> = [];
+        page.on("request", function authorizationRecorder(request) {
+          authorizationPresence.push(request.headerValue("authorization").then((value) => value != null));
+        });
+      `,
+    }),
+    [{ category: "event", capability: "unapproved-request-observer" }],
+  );
+});
+
+test("mutation: authorization recorder rejects async and annotated callback variants", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        const authorizationPresence: Array<Promise<boolean>> = [];
+        page.on("request", async function authorizationRecorder(request: unknown): Promise<void> {
+          authorizationPresence.push(request.headerValue("authorization").then(async (value: unknown) => value !== null));
+        });
+      `,
     }),
     [{ category: "event", capability: "unapproved-request-observer" }],
   );

@@ -1,5 +1,5 @@
 import { AxeBuilder } from "@axe-core/playwright";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
 const email = "verified@example.test";
 const password = "correct horse battery staple";
@@ -18,13 +18,11 @@ function containsCredentialMaterial(serialized: string): boolean {
 
 /**
  * Verifies that the browser persists no application credential state.
- * @param page - Active authenticated or unauthenticated browser page.
+ * @param storage - DOM storage entries already projected out of the Page capability.
  */
-async function expectTokenFreeStorage(page: Page): Promise<void> {
-  const storage = await page.evaluate(() => ({
-    local: Object.entries(localStorage),
-    session: Object.entries(sessionStorage),
-  }));
+function expectTokenFreeStorage(
+  storage: Readonly<{ local: readonly (readonly [string, string])[]; session: readonly (readonly [string, string])[] }>,
+): void {
   expect(storage.local.map(([key]) => key)).toEqual([]);
   for (const [key] of storage.session) {
     expect(key).toMatch(/^__next_debug_channel:[A-Za-z0-9_-]+$/u);
@@ -56,7 +54,10 @@ test("failed login stays fixed and never creates browser token state", async ({ 
   await expect(page.locator('.auth-status[role="alert"]')).toBeVisible();
   await expect(page).toHaveURL(/\/login$/u);
   expect((await context.cookies()).some((cookie) => cookie.name === "__Host-ab_session")).toBe(false);
-  await expectTokenFreeStorage(page);
+  expectTokenFreeStorage(await page.evaluate(() => ({
+    local: Object.entries(localStorage),
+    session: Object.entries(sessionStorage),
+  })));
 });
 
 test("successful login creates only an opaque cookie and reaches the application route", async ({ page, context }) => {
@@ -84,7 +85,10 @@ test("successful login creates only an opaque cookie and reaches the application
     },
   ]);
   expect(/^[A-Za-z0-9_-]{43}$/u.test(cookies[0]?.value ?? ""), "session selector must use the opaque fixed-length format").toBe(true);
-  await expectTokenFreeStorage(page);
+  expectTokenFreeStorage(await page.evaluate(() => ({
+    local: Object.entries(localStorage),
+    session: Object.entries(sessionStorage),
+  })));
   expect(
     (await Promise.all(authorizationPresence)).every((present) => !present),
     "browser requests must not carry an Authorization header",
