@@ -235,7 +235,7 @@ function inspectSyntax(
   const responseNames = new Set<string>();
   const navigationAliases = new Set<string>();
   const typeAliases = new Set<string>();
-  const visit = (node: ts.Node): void => {
+  const inspectNode = (node: ts.Node): void => {
     if (ts.isTypeAliasDeclaration(node) && typeMentionsResponse(node.type, typeAliases)) typeAliases.add(node.name.text);
     if (ts.isVariableDeclaration(node) && node.type !== undefined && typeMentionsResponse(node.type, typeAliases)) {
       bindNames(node.name, responseNames);
@@ -246,21 +246,20 @@ function inspectSyntax(
       add("response", "response-type");
     }
     if (ts.isTypeReferenceNode(node) && typeMentionsResponse(node, typeAliases)) add("response", "response-type");
-    if (ts.isVariableDeclaration(node) && node.initializer !== undefined && ts.isPropertyAccessExpression(node.initializer)
-      && navigationMethods.has(node.initializer.name.text)) {
-      bindNames(node.name, navigationAliases);
+    if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
+      trackNavigationAlias(node.name, node.initializer, navigationAliases);
     }
     if ((ts.isVariableDeclaration(node) || ts.isBinaryExpression(node)) && objectBindingFromResponse(node, responseNames)) {
       add("response", "response-consumption");
     }
-    if (ts.isCallExpression(node)) inspectCall(node, responseNames, navigationAliases, add);
+    if (ts.isCallExpression(node)) inspectCall(node, responseNames, navigationAliases, inspectNode, add);
     if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "XMLHttpRequest") {
       add("network", "direct-http-client");
     }
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) inspectResponseMember(node, responseNames, add);
-    ts.forEachChild(node, visit);
+    ts.forEachChild(node, inspectNode);
   };
-  visit(sourceFile);
+  inspectNode(sourceFile);
 }
 
 /**
@@ -296,6 +295,38 @@ function bindNames(name: ts.BindingName, names: Set<string>): void {
 }
 
 /**
+ * Tracks every local alias derived from a Page navigation method so aliases cannot retain a response.
+ * @param name - Binding receiving a direct, destructured, or transitive navigation method alias.
+ * @param initializer - Expression that supplies the navigation method.
+ * @param aliases - Navigation method aliases accumulated for this local source file.
+ * @returns Nothing.
+ */
+function trackNavigationAlias(
+  name: ts.BindingName,
+  initializer: ts.Expression,
+  aliases: Set<string>,
+): void {
+  const source = stripExpression(initializer);
+  if (ts.isIdentifier(name) && ts.isIdentifier(source) && aliases.has(source.text)) {
+    aliases.add(name.text);
+    return;
+  }
+  if (ts.isIdentifier(name) && ts.isPropertyAccessExpression(source)
+    && navigationMethods.has(source.name.text)) {
+    const receiver = stripExpression(source.expression);
+    if (!ts.isIdentifier(receiver) || receiver.text !== "page") return;
+    aliases.add(name.text);
+    return;
+  }
+  if (!ts.isObjectBindingPattern(name) || !ts.isIdentifier(source) || source.text !== "page") return;
+  for (const element of name.elements) {
+    if (element.dotDotDotToken !== undefined) continue;
+    const property = element.propertyName ?? element.name;
+    if (ts.isIdentifier(property) && navigationMethods.has(property.text)) bindNames(element.name, aliases);
+  }
+}
+
+/**
  * Recognizes object destructuring from a tracked response value, including assignment patterns.
  * @param node - Candidate variable declaration or assignment expression.
  * @param responseNames - Tracked response identifiers.
@@ -327,6 +358,7 @@ function stripExpression(expression: ts.Expression): ts.Expression {
  * @param call - Call expression to classify.
  * @param responseNames - Tracked response identifiers.
  * @param navigationAliases - Names bound from navigation methods.
+ * @param inspectNode - Full local policy visitor used for function evaluation bodies.
  * @param add - Safe fixed finding recorder.
  * @returns Nothing.
  */
@@ -334,6 +366,7 @@ function inspectCall(
   call: ts.CallExpression,
   responseNames: ReadonlySet<string>,
   navigationAliases: ReadonlySet<string>,
+  inspectNode: (node: ts.Node) => void,
   add: (category: UiNetworkBoundaryViolation["category"], capability: UiNetworkCapability) => void,
 ): void {
   const expression = stripExpression(call.expression);
@@ -347,6 +380,9 @@ function inspectCall(
   if (ts.isNewExpression(call.parent) && ts.isIdentifier(call.parent.expression) && call.parent.expression.text === "XMLHttpRequest") {
     add("network", "direct-http-client");
   }
+  if (staticMemberName(expression) === "evaluate" && !isDirectPageMember(expression, "evaluate")) {
+    add("execution", "dynamic-code");
+  }
   const chain = memberChain(expression);
   if (chain === undefined) return;
   const member = chain.at(-1);
@@ -355,8 +391,11 @@ function inspectCall(
   if (chain.includes("request") && chain[0] === "page") add("network", "direct-http-client");
   if (chain.includes("request") && chain[0] === "context") add("network", "request-context");
   if (member === "waitForResponse" || member === "waitForEvent") add("response", "response-event");
-  if (member !== undefined && eventMethods.has(member)) inspectEventCall(call, member, add);
-  if (member === "evaluate") inspectEvaluate(call, add);
+  if (member !== undefined && eventMethods.has(member)) inspectEventCall(call, member, chain[0] === "page", add);
+  if (member === "evaluate") {
+    if (chain.length !== 2 || chain[0] !== "page") add("execution", "dynamic-code");
+    else inspectEvaluate(call, inspectNode, add);
+  }
   if (member !== undefined && ["evaluateHandle", "waitForFunction"].includes(member)) add("execution", "dynamic-code");
   if (member !== undefined && ["addInitScript", "addScriptTag", "setContent"].includes(member)) add("execution", "script-injection");
   if (member !== undefined && navigationMethods.has(member) && !isDiscardedAwait(call)) add("navigation", "navigation-response");
@@ -381,6 +420,31 @@ function memberChain(expression: ts.Expression): readonly string[] | undefined {
     return receiver === undefined ? undefined : [...receiver, expression.argumentExpression.text];
   }
   return undefined;
+}
+
+/**
+ * Reads the final static member name even when its receiver is a call chain.
+ * @param expression - Candidate call target.
+ * @returns The final property name, or undefined for computed/dynamic targets.
+ */
+function staticMemberName(expression: ts.Expression): string | undefined {
+  expression = stripExpression(expression);
+  return ts.isPropertyAccessExpression(expression) ? expression.name.text
+    : ts.isElementAccessExpression(expression) && ts.isStringLiteral(expression.argumentExpression) ? expression.argumentExpression.text
+      : undefined;
+}
+
+/**
+ * Checks that a sensitive browser execution API is called directly on Page.
+ * @param expression - Candidate call target.
+ * @param name - Required API member name.
+ * @returns True only for the direct `page.<name>` form.
+ */
+function isDirectPageMember(expression: ts.Expression, name: string): boolean {
+  expression = stripExpression(expression);
+  if (!ts.isPropertyAccessExpression(expression) || expression.name.text !== name) return false;
+  const receiver = stripExpression(expression.expression);
+  return ts.isIdentifier(receiver) && receiver.text === "page";
 }
 
 /**
@@ -414,6 +478,7 @@ function inspectResponseMember(
 function inspectEventCall(
   call: ts.CallExpression,
   method: string,
+  isPageReceiver: boolean,
   add: (category: UiNetworkBoundaryViolation["category"], capability: UiNetworkCapability) => void,
 ): void {
   const event = call.arguments[0];
@@ -425,7 +490,7 @@ function inspectEventCall(
     add("event", "response-event");
     return;
   }
-  if (event.text !== "request" || method !== "on" || !isAuthorizationRecorder(call.arguments[1])) {
+  if (!isPageReceiver || event.text !== "request" || method !== "on" || !isAuthorizationRecorder(call.arguments[1])) {
     add("event", "unapproved-request-observer");
   }
 }
@@ -493,11 +558,13 @@ function isAuthorizationHeaderValue(expression: ts.Expression, requestName: stri
 /**
  * Inspects function evaluation bodies with the same AST visitor as local UI source.
  * @param call - Page evaluation call.
+ * @param inspectNode - Full local policy visitor supplied by the enclosing source inspection.
  * @param add - Safe fixed finding recorder.
  * @returns Nothing.
  */
 function inspectEvaluate(
   call: ts.CallExpression,
+  inspectNode: (node: ts.Node) => void,
   add: (category: UiNetworkBoundaryViolation["category"], capability: UiNetworkCapability) => void,
 ): void {
   const callback = call.arguments[0];
@@ -509,17 +576,7 @@ function inspectEvaluate(
     add("execution", "dynamic-code");
     return;
   }
-  const visit = (node: ts.Node): void => {
-    if (ts.isCallExpression(node)) {
-      const expression = stripExpression(node.expression);
-      if (ts.isIdentifier(expression) && expression.text === "fetch") add("network", "direct-http-client");
-      if (ts.isIdentifier(expression) && ["eval", "Function"].includes(expression.text)) {
-        add("execution", "dynamic-code");
-      }
-    }
-    ts.forEachChild(node, visit);
-  };
-  visit(callback.body);
+  inspectNode(callback.body);
 }
 
 /**

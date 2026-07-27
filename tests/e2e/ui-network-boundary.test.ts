@@ -230,6 +230,20 @@ test("mutation: evaluation and script or HTML injection forms are rejected", () 
   );
 });
 
+test("mutation: function evaluation receives the full UI network policy visitor", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": "page.evaluate(() => new XMLHttpRequest());" }),
+    [{ category: "network", capability: "direct-http-client" }],
+  );
+});
+
+test("mutation: only Page itself may evaluate a function", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'page.locator("main").evaluate(() => document.body.clientWidth);' }),
+    [{ category: "execution", capability: "dynamic-code" }],
+  );
+});
+
 test("mutation: only directly awaited discarded navigation results are permitted", () => {
   assert.deepEqual(
     inspect({
@@ -242,6 +256,14 @@ test("mutation: only directly awaited discarded navigation results are permitted
         await navigate("/");
       `,
     }),
+    [{ category: "navigation", capability: "navigation-response" }],
+  );
+  assert.deepEqual(
+    inspect({ "root.ts": 'const { goto } = page; const response = await goto("/"); response.status();' }),
+    [{ category: "navigation", capability: "navigation-response" }],
+  );
+  assert.deepEqual(
+    inspect({ "root.ts": 'const first = page.goto; const second = first; await second("/");' }),
     [{ category: "navigation", capability: "navigation-response" }],
   );
   assert.deepEqual(
@@ -269,6 +291,12 @@ test("guard: exact authorization recorder and DOM-only function evaluation remai
   assert.deepEqual(
     inspect({
       "root.ts": 'page.on("request", function authorizationRecorder(request) { return request.headerValue("authorization"); });',
+    }),
+    [{ category: "event", capability: "unapproved-request-observer" }],
+  );
+  assert.deepEqual(
+    inspect({
+      "root.ts": 'context.on("request", function authorizationRecorder(request) { return request.headerValue("authorization") === null; });',
     }),
     [{ category: "event", capability: "unapproved-request-observer" }],
   );
