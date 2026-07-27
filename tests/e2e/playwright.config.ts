@@ -51,12 +51,12 @@ export default defineConfig({
   projects: [
     {
       name: "ui-mobile-390x844",
-      testMatch: "auth-ui.spec.ts",
+      testMatch: "ui/auth-ui.spec.ts",
       use: { viewport: { width: 390, height: 844 } },
     },
     {
       name: "ui-desktop-1440x900",
-      testMatch: "auth-ui.spec.ts",
+      testMatch: "ui/auth-ui.spec.ts",
       use: { viewport: { width: 1440, height: 900 } },
     },
     {

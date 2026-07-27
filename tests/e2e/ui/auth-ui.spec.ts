@@ -52,22 +52,26 @@ test("failed login stays fixed and never creates browser token state", async ({ 
   await page.goto("/login");
   await page.locator("#sign-in-email").fill(email);
   await page.locator("#sign-in-password").fill(`${password}!wrong`);
-  const responsePromise = page.waitForResponse((response) => response.url().endsWith("/api/auth/sign-in"));
   await page.locator('button[type="submit"]').first().click();
-  expect((await responsePromise).status()).toBe(401);
-  await expect(page.locator(".auth-status[role=\"alert\"]")).toBeVisible();
+  await expect(page.locator('.auth-status[role="alert"]')).toBeVisible();
+  await expect(page).toHaveURL(/\/login$/u);
   expect((await context.cookies()).some((cookie) => cookie.name === "__Host-ab_session")).toBe(false);
   await expectTokenFreeStorage(page);
 });
 
-test("successful login creates only an opaque cookie and reaches the real API", async ({ page, context }) => {
-  const browserAuthorizationHeaders: Array<string | undefined> = [];
-  page.on("request", (request) => browserAuthorizationHeaders.push(request.headers().authorization));
+test("successful login creates only an opaque cookie and reaches the application route", async ({ page, context }) => {
+  const authorizationPresence: Array<Promise<boolean>> = [];
+  page.on("request", function authorizationRecorder(request) {
+    authorizationPresence.push(
+      request.headerValue("authorization").then((value) => value !== null),
+    );
+  });
   await page.goto("/login");
   await page.locator("#sign-in-email").fill(email);
   await page.locator("#sign-in-password").fill(password);
   await page.locator('button[type="submit"]').first().click();
   await page.waitForURL("**/app");
+  await expect(page).toHaveURL(/\/app$/u);
 
   const cookies = await context.cookies();
   expect(cookies.map(({ httpOnly, name, path, sameSite, secure }) => ({ httpOnly, name, path, sameSite, secure }))).toEqual([
@@ -81,8 +85,8 @@ test("successful login creates only an opaque cookie and reaches the real API", 
   ]);
   expect(/^[A-Za-z0-9_-]{43}$/u.test(cookies[0]?.value ?? ""), "session selector must use the opaque fixed-length format").toBe(true);
   await expectTokenFreeStorage(page);
-
-  const meStatus = await page.evaluate(async () => (await fetch("/api/me", { headers: { accept: "application/json" } })).status);
-  expect(meStatus).toBe(200);
-  expect(browserAuthorizationHeaders.every((header) => header === undefined)).toBe(true);
+  expect(
+    (await Promise.all(authorizationPresence)).every((present) => !present),
+    "browser requests must not carry an Authorization header",
+  ).toBe(true);
 });

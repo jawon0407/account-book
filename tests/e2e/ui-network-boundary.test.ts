@@ -309,14 +309,10 @@ test("guard: exact authorization recorder and DOM-only function evaluation remai
   );
 });
 
-test("mutation: the current UI spec reports only the accepted legacy boundary findings", () => {
-  const rootDirectory = fileURLToPath(new URL(".", import.meta.url));
+test("guard: the dedicated UI root has no response-observation boundary violations", () => {
+  const rootDirectory = fileURLToPath(new URL("./ui", import.meta.url));
   assert.deepEqual(
-    findUiNetworkBoundaryViolations({ rootDirectory, rootFile: fileURLToPath(new URL("./auth-ui.spec.ts", import.meta.url)) }),
-    [
-      { category: "event", capability: "unapproved-request-observer" },
-      { category: "network", capability: "direct-http-client" },
-      { category: "response", capability: "response-event" },
-    ],
+    findUiNetworkBoundaryViolations({ rootDirectory, rootFile: fileURLToPath(new URL("./ui/auth-ui.spec.ts", import.meta.url)) }),
+    [],
   );
 });
