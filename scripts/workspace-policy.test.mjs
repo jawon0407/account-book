@@ -134,7 +134,10 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
     e2ePackage.scripts["test:preflight"],
     "tsx --test production-fake-startup.test.ts playwright-environment.test.ts",
   );
-  assert.equal(e2ePackage.scripts.test, "pnpm test:preflight && playwright test --config playwright.config.ts");
+  assert.equal(
+    e2ePackage.scripts.test,
+    "tsx --test production-fake-startup.test.ts playwright-config.test.ts && playwright test --config playwright.config.ts",
+  );
   assert.equal(
     pkg.scripts["test:legacy"],
     "node --test scripts/verify-structure.test.mjs scripts/workspace-policy.test.mjs scripts/security/*.test.mjs scripts/security-gate.test.mjs scripts/setup-hooks.test.mjs",

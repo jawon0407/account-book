@@ -42,7 +42,6 @@ const { api: apiEnvironment, idp: idpEnvironment, web: webEnvironment } = buildP
 
 export default defineConfig({
   testDir: ".",
-  testMatch: "auth.spec.ts",
   fullyParallel: false,
   workers: 1,
   forbidOnly: Boolean(process.env.CI),
@@ -50,8 +49,20 @@ export default defineConfig({
   reporter: "list",
   use: { baseURL, browserName: "chromium", ignoreHTTPSErrors: true, trace: "retain-on-failure" },
   projects: [
-    { name: "mobile-390x844", use: { viewport: { width: 390, height: 844 } } },
-    { name: "desktop-1440x900", use: { viewport: { width: 1440, height: 900 } } },
+    {
+      name: "ui-mobile-390x844",
+      testMatch: "auth-ui.spec.ts",
+      use: { viewport: { width: 390, height: 844 } },
+    },
+    {
+      name: "ui-desktop-1440x900",
+      testMatch: "auth-ui.spec.ts",
+      use: { viewport: { width: 1440, height: 900 } },
+    },
+    {
+      name: "http-contract",
+      testMatch: "auth-response.spec.ts",
+    },
   ],
   webServer: [
     {
