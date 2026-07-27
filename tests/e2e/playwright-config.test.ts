@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { findResponseBodyUses } from "./response-body-ownership.js";
 
 test("routes browser journeys and HTTP contracts to separate Playwright projects", async () => {
   process.env.TEST_DATABASE_URL = "postgresql://postgres:postgres@127.0.0.1:5432/account_book_test";
@@ -19,11 +20,17 @@ test("routes browser journeys and HTTP contracts to separate Playwright projects
   assert.equal(config.use?.trace, "off");
 });
 
-test("keeps response bodies and logout handling in the HTTP contract spec", () => {
-  // UI and HTTP specs run in separate projects, so source ownership is the closest executable boundary.
-  const uiSpec = readFileSync(new URL("./auth-ui.spec.ts", import.meta.url), "utf8");
+test("keeps Response body consumption in the HTTP contract spec", () => {
+  const fixture = (expression: string): string => `declare const response: Response;\n${expression};`;
+  const forbiddenMethods = ["json", "text", "arrayBuffer", "blob", "formData"] as const;
 
-  assert.equal(uiSpec.includes("/api/auth/csrf"), false, "UI spec must not fetch CSRF response bodies");
-  assert.equal(uiSpec.includes("/api/auth/sign-out"), false, "UI spec must not own logout requests");
-  assert.equal(uiSpec.includes(".json()"), false, "UI spec must not parse response bodies");
+  for (const method of forbiddenMethods) {
+    assert.deepEqual(findResponseBodyUses(fixture(`response.${method}()`)), [{ category: "consumption", method }]);
+  }
+  assert.deepEqual(findResponseBodyUses(fixture("response.body?.getReader()")), [{ category: "stream", method: "body" }]);
+  assert.deepEqual(findResponseBodyUses(fixture('response["body"]?.getReader()')), [{ category: "stream", method: "body" }]);
+  assert.deepEqual(findResponseBodyUses(fixture("response.status")), []);
+
+  const uiSpec = readFileSync(new URL("./auth-ui.spec.ts", import.meta.url), "utf8");
+  assert.deepEqual(findResponseBodyUses(uiSpec), []);
 });

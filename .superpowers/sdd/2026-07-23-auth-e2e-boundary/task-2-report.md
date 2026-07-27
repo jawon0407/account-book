@@ -74,3 +74,21 @@
 ### Remaining verification boundary
 
 - No local PostgreSQL service is available. Database-backed Playwright projects were not run and are not represented as a local success; the same-SHA CI controller must supply that disposable-database coverage.
+
+## Fix round 3: semantic UI Response ownership policy
+
+### Changes
+
+- Replaced the weak route/string topology check with a TypeScript AST and type-checker policy. It recognizes only DOM `Response` receivers and reports safe category/method names for body consumption; it never returns source text or transport values.
+- The policy rejects `json`, `text`, `arrayBuffer`, `blob`, `formData`, and direct body-stream property or bracket access. It permits status-only access.
+- The policy runs against the real UI spec. Existing Playwright project routing and the HTTP contract suite remain the separation and runtime ownership boundaries; this policy does not infer ownership from route text.
+
+### TDD and covering verification
+
+1. RED: added synthetic fixtures before the analyzer module existed; focused execution failed with a missing analyzer module. After implementing the core analyzer, a second RED fixture proved bracket-form body access was not yet detected (expected stream finding, actual empty list).
+2. GREEN: added semantic bracket-access handling. The focused policy/config test passed (`2/2`), covering all five body APIs, dot and bracket stream access, a status-only fixture, and the real UI spec. `pnpm --filter @account-book/e2e typecheck` exited `0`.
+3. Covering suite: `pnpm test` passed: legacy policy/security `53/53`, contracts `22`, database `12`, API `113`, web `479`, and E2E preflight `2/2`.
+
+### Remaining verification boundary
+
+- No local PostgreSQL service is available. Database-backed Playwright projects, including the HTTP response contract runtime suite, remain CI-owned same-SHA coverage and are not claimed as local success.
