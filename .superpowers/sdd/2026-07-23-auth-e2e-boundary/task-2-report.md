@@ -39,3 +39,21 @@
 ## Concerns
 
 - The environment uses Node 24 while the workspace pins Node 22. The completed checks emitted the package-manager engine warning but passed. Run the two Playwright projects in a Node 22 environment with disposable PostgreSQL before release.
+
+## Fix round 1: stricter security separation
+
+### Changes
+
+- Set Playwright trace collection to `off` for every authentication E2E project. This prevents failed authentication traces from retaining request headers, response bodies, or cookie values.
+- Restricted `auth-ui.spec.ts` to browser journeys: accessibility, browser storage and cookie metadata, no browser Authorization header, and status-only checks for `/api/me`, sign-out, and post-logout access. It no longer parses those response bodies or replays a session selector.
+- Kept response-body assertions and selector replay solely in `auth-response.spec.ts`.
+
+### TDD and covering verification
+
+1. RED: appended `config.use.trace === "off"` to `playwright-config.test.ts` and ran the local `tsx` launcher. It failed as expected with actual `retain-on-failure` and expected `off`.
+2. GREEN: set `trace: "off"`; the config-policy test then passed (`1/1`) and `pnpm --filter @account-book/e2e typecheck` exited `0`.
+3. Covering suite: `pnpm test` passed: legacy policy/security `53/53`, contracts `22`, database `12`, API `113`, web `479`, and E2E preflight `2/2`.
+
+### Remaining verification boundary
+
+- There is no local PostgreSQL service, so database-backed HTTP/UI Playwright projects remain unrun locally and are not reported as successful. The same-SHA CI controller must run those disposable-database projects; the local covering tests above protect the static route, type, and workspace-policy boundaries.

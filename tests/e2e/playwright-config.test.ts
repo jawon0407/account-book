@@ -15,4 +15,5 @@ test("routes browser journeys and HTTP contracts to separate Playwright projects
   assert.equal(config.fullyParallel, false);
   assert.equal(config.workers, 1);
   assert.equal(config.retries, 0);
+  assert.equal(config.use?.trace, "off");
 });
