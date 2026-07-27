@@ -249,6 +249,9 @@ function inspectSyntax(
     if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
       trackNavigationAlias(node.name, node.initializer, navigationAliases);
     }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      trackNavigationAssignmentAlias(node.left, node.right, navigationAliases);
+    }
     if ((ts.isVariableDeclaration(node) || ts.isBinaryExpression(node)) && objectBindingFromResponse(node, responseNames)) {
       add("response", "response-consumption");
     }
@@ -323,6 +326,30 @@ function trackNavigationAlias(
     if (element.dotDotDotToken !== undefined) continue;
     const property = element.propertyName ?? element.name;
     if (ts.isIdentifier(property) && navigationMethods.has(property.text)) bindNames(element.name, aliases);
+  }
+}
+
+/**
+ * Tracks navigation methods acquired through an object-destructuring assignment from Page.
+ * @param left - Assignment target, including an optional parenthesized object pattern.
+ * @param right - Assignment source expression.
+ * @param aliases - Navigation method aliases accumulated for this local source file.
+ * @returns Nothing.
+ */
+function trackNavigationAssignmentAlias(
+  left: ts.Expression,
+  right: ts.Expression,
+  aliases: Set<string>,
+): void {
+  const target = stripExpression(left);
+  const source = stripExpression(right);
+  if (!ts.isObjectLiteralExpression(target) || !ts.isIdentifier(source) || source.text !== "page") return;
+  for (const property of target.properties) {
+    if (ts.isShorthandPropertyAssignment(property) && navigationMethods.has(property.name.text)) aliases.add(property.name.text);
+    if (ts.isPropertyAssignment(property) && ts.isIdentifier(property.name) && navigationMethods.has(property.name.text)) {
+      const alias = stripExpression(property.initializer);
+      if (ts.isIdentifier(alias)) aliases.add(alias.text);
+    }
   }
 }
 

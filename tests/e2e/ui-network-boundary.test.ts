@@ -272,6 +272,13 @@ test("mutation: only directly awaited discarded navigation results are permitted
   );
 });
 
+test("mutation: assignment-destructured navigation aliases cannot retain navigation results", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'let goto; ({ goto } = page); const relay = goto; const response = await relay("/"); response.status();' }),
+    [{ category: "navigation", capability: "navigation-response" }],
+  );
+});
+
 test("guard: exact authorization recorder and DOM-only function evaluation remain permitted", () => {
   assert.deepEqual(
     inspect({
