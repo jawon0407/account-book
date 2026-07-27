@@ -1,6 +1,6 @@
 # How to: 인증 백엔드와 DB 경계를 검증하는 방법
 
-> **English Summary:** Validate the implemented 14-route Next.js authentication BFF with the pinned runtime, strict server configuration, web tests, production build, and security gates. Live Supabase and disposable PostgreSQL integration remain unexecuted release blockers, and optional branch coverage is currently 91.78%.
+> **English Summary:** Validate the implemented 14-route Next.js authentication BFF and delegated-JWT API with the pinned runtime, strict server configuration, tests, production builds, and security gates. Same-SHA disposable PostgreSQL and Chromium CI evidence exists; hosted Supabase, provider OAuth, and production operations remain release blockers. Optional branch coverage is currently 91.78%.
 
 이 가이드는 현재 구현된 server auth domain, persistence adapter, Next.js same-origin BFF와 browser client를 재현 가능하게 검증하는 절차다. 실제 credential이나 production data를 사용하는 live smoke 절차는 제공하지 않는다.
 
@@ -122,7 +122,7 @@ database package test는 최종 6개 table의 Drizzle metadata와 002·003 migra
 pnpm test
 ```
 
-root `test`는 repository/security policy test 뒤 contracts, database, web workspace test를 실행한다. 현재 존재하지 않는 `@account-book/api` filter는 pnpm에서 informational message를 낼 수 있다.
+root `test`는 repository/security policy test 뒤 contracts, database, web, API workspace test와 E2E preflight를 실행한다.
 
 테스트 개수는 코드와 함께 변하므로 성공 기준을 고정 숫자로 두지 않는다. 종료 코드 `0`과 실행한 commit SHA를 기록한다.
 
@@ -133,7 +133,7 @@ pnpm typecheck
 pnpm lint
 ```
 
-두 명령 모두 종료 코드 `0`이어야 한다. `typecheck`는 contracts, database, web의 TypeScript 검사를 실행한다. `lint`는 repository 전체를 warning 0 기준으로 검사한다.
+두 명령 모두 종료 코드 `0`이어야 한다. `typecheck`는 contracts, database, web, API, database-tests, E2E의 TypeScript 검사를 실행한다. `lint`는 repository 전체를 warning 0 기준으로 검사한다.
 
 Next.js production route generation까지 확인한다.
 
@@ -149,7 +149,7 @@ pnpm --filter @account-book/web build
 pnpm --filter @account-book/web test:coverage
 ```
 
-Task 10의 마지막 full web 검증은 22개 파일, 401개 test가 통과했다. 별도 coverage 명령의 최신 기록은 기존 Task 5~9 instrumentation 범위에서 branch `91.78%`(`670/730`)이며 global 100% threshold 때문에 종료 코드 `1`이다. Task 10의 controller/container/route/client 파일은 아직 coverage include 밖이다. 이를 “test 실패”나 “100% 통과”로 기록하지 말고 coverage gate 미충족으로 분리한다.
+최종 full web 검증은 25개 파일, 479개 test가 통과했다. 별도 coverage 명령의 최신 기록은 기존 Task 5~9 instrumentation 범위에서 branch `91.78%`(`670/730`)이며 global 100% threshold 때문에 종료 코드 `1`이다. 이후 controller/container/route/client와 delegated-JWT 파일 일부는 아직 coverage include 밖이다. 이를 “test 실패”나 “100% 통과”로 기록하지 말고 coverage gate 미충족으로 분리한다.
 
 ## 5. security gate 실행
 
@@ -232,7 +232,7 @@ Next.js BFF와 callback route는 구현됐지만 live Supabase smoke script와 t
 
 공급자별로 정상 로그인, 사용자 취소, 잘못된 state, callback replay, email 누락을 확인해야 한다. provider token, PKCE verifier, recovery credential, code, selector 원문이 browser storage·response body·history·로그에 남지 않아야 한다.
 
-현재 결과는 **미실행**이며 운영 출시와 인증 기능 완료의 증거로 사용할 수 없다.
+Provider별 hosted smoke 결과는 **미실행**이며 운영 출시와 인증 기능 완료의 증거로 사용할 수 없다. 단, 최종 SHA `93737d3c8278f92242670b403c30cb3beb05b0e2`의 GitHub `security-gate` [run 15](https://github.com/jawon0407/account-book/actions/runs/30214338261)는 disposable PostgreSQL과 Chromium 인증 E2E를 통과했다. 이 CI 증거는 hosted provider·production role·pooler 검증을 대체하지 않는다.
 
 ## 8. migration 적용 전 운영 체크리스트
 

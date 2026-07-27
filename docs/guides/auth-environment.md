@@ -11,6 +11,8 @@
 | `AUTH_ADAPTER_MODE` | 기본 `supabase`; `fake`는 non-production exact loopback만 |
 | `DATABASE_URL` | server-only `postgres:`/`postgresql:` URL |
 | `API_INTERNAL_URL` | root-only HTTP(S) origin |
+| `BFF_JWT_KEY_ID` | API의 accepted `kid`와 일치하는 safe key ID |
+| `BFF_JWT_PRIVATE_KEY` | P-256 PKCS8 DER의 canonical base64url private key; BFF에만 배포 |
 | `AUTH_TOKEN_KEY_ID` | `[A-Za-z0-9._-]`, 1..128자 |
 | `AUTH_TOKEN_KEY` | 32 bytes canonical base64url, padding 없는 43자 |
 | `AUTH_TOKEN_PREVIOUS_KEYS` | JSON object: key ID → 43자/32-byte key; 현재 ID 중복 금지 |
@@ -25,7 +27,7 @@ Key는 각각 다음 명령으로 생성한다.
 node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
 ```
 
-Hosted DB login은 owner, superuser, `BYPASSRLS`, migration principal이 아니어야 하며 `app_session_bff` role만 부여받는다. CI owner URL은 동일 job에서 폐기하는 schema에만 허용한다. Secret rotation은 새 값 배포 → smoke → 이전 값 폐기 순서로 하고 담당자와 rollback window를 기록한다.
+Hosted DB login은 owner, superuser, `BYPASSRLS`, migration principal이 아니어야 하며 `app_session_bff` role만 부여받는다. 현재 구현은 변수 이름으로 `DATABASE_URL`을 사용하지만 배포 설계의 역할명은 `BFF_DATABASE_URL`이다. 프로덕션 배포 전 코드와 플랫폼 설정을 `BFF_DATABASE_URL`로 맞추거나, 승인된 임시 매핑을 문서화해 API·migration URL과 혼동되지 않음을 검증해야 한다. CI owner URL은 동일 job에서 폐기하는 schema에만 허용한다. Secret rotation은 새 값 배포 → smoke → 이전 값 폐기 순서로 하고 담당자와 rollback window를 기록한다.
 
 ## API variables
 
@@ -38,7 +40,7 @@ Hosted DB login은 owner, superuser, `BYPASSRLS`, migration principal이 아니�
 | `BFF_JWT_ACCEPTED_KIDS` | static public keyring의 허용 key ID JSON 배열; 1..3개의 safe ID |
 | `BFF_JWT_PUBLIC_KEYS` | static P-256 SPKI DER base64url public key JSON object; private key 금지 |
 
-API는 BFF signing private key, BFF session database role, cookie/CSRF secret을 받지 않는다. BFF는 API database URL, accepted-key allowlist, public-keyring, kill switch를 받지 않는다. Heroku API의 `app_api` role과 Vercel BFF의 `app_session_bff` role은 별도 credential·최소 권한으로 운영하며, signing private key는 BFF에만 둔다.
+API는 BFF signing private key, BFF session database role, cookie/CSRF secret을 받지 않는다. BFF는 API database URL, accepted-key allowlist, public-keyring, kill switch를 받지 않는다. Heroku API의 `app_api` role과 Vercel BFF의 `app_session_bff` role은 별도 credential·최소 권한으로 운영하며, signing private key는 BFF에만 둔다. `BFF_JWT_PRIVATE_KEY`의 public counterpart만 `BFF_JWT_PUBLIC_KEYS`에 넣고, `BFF_JWT_KEY_ID`는 `BFF_JWT_ACCEPTED_KIDS`에 포함한다.
 
 필수 값이 없거나 unsafe하면 API는 `API_CONFIGURATION_INVALID`, BFF는 `AUTH_CONFIGURATION_INVALID`로 fail closed한다. Production fake mode는 authentication traffic을 제공하지 않는다.
 
@@ -49,6 +51,10 @@ API는 BFF signing private key, BFF session database role, cookie/CSRF secret을
 - OAuth: `${APP_ORIGIN}/api/auth/callback`
 - Local E2E: IDP `127.0.0.1:4510`, API `:4511`, HTTPS web `:4512`, disposable DB 필수
 - Hosted: `supabase` mode, HTTPS, dedicated DB login, provider console의 exact callback/secret 필수
+
+## Git 저장소 경계
+
+루트 [`.gitignore`](../../.gitignore)는 `.env`와 `.env.*`를 모든 하위 디렉터리에서 제외하고 `.env.example`만 의도적으로 허용한다. 실제 값이 든 env 파일은 이름이 달라도 commit하지 않는다. 플랫폼 대시보드나 승인된 로컬 secret manager에서 값을 주입하고, 예시 파일에는 변수 이름과 설명만 둔다.
 
 ## English summary
 

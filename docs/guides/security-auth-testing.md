@@ -1,6 +1,8 @@
 # 인증 보안 테스트 가이드
 
-Task 13 base SHA는 `10a8493`이다. 최종 evidence와 CI check는 `git rev-parse HEAD`의 동일 SHA여야 한다.
+최종 인증·delegated-JWT 구현 SHA는 `93737d3c8278f92242670b403c30cb3beb05b0e2`다. 최종 evidence와 CI check는 `git rev-parse HEAD`의 동일 SHA여야 한다.
+
+GitHub `security-gate` [run 15](https://github.com/jawon0407/account-book/actions/runs/30214338261)는 이 SHA에서 disposable PostgreSQL migration·privilege·replay 검증, Chromium 인증 E2E, pinned Node 22, 전체 verify와 production audit를 통과했다. 같은 tree의 로컬 `pnpm test`도 legacy 53, contracts 22, database 12, API 113, web 479, E2E preflight 2 tests로 종료 코드 `0`이었다.
 
 ## RED/GREEN
 
@@ -79,4 +81,4 @@ pnpm --filter @account-book/e2e typecheck                 # exit 0
 pnpm run verify                                            # exit 0; legacy 53, contracts 22, database 12, API 113, web 479 tests passed
 ```
 
-로컬 PostgreSQL listener가 없어 `pnpm test:db`, guarded `prepare:e2e`, 그리고 Playwright browser journey는 실행하지 않았다. Chromium cache는 있었지만 DB guard를 약화하지 않았다. `pnpm audit --prod --audit-level high`는 exit 0이며 알려진 production dependency 취약점이 없었다. 로컬 Node는 24이고 pinned Node 22.15.1 증거는 아직 없다. 패치 후 같은 SHA의 GitHub security gate 성공 URL, live disposable PostgreSQL migration/catalog/privilege/replay, Supabase `cron.job` cleanup, key rotation overlap/removal, kill-switch drill은 출시 차단 증거로 남아 있다.
+로컬 PostgreSQL listener가 없어 개발 PC에서는 `pnpm test:db`, guarded `prepare:e2e`, Playwright browser journey를 실행하지 않았다. Chromium cache가 있어도 DB guard를 약화하지 않았다. 이 로컬 공백은 같은 SHA의 GitHub run 15가 disposable PostgreSQL과 Chromium으로 대체했다. `pnpm audit --prod --audit-level high`는 exit 0이며 알려진 production dependency 취약점이 없었다. Hosted Supabase의 실제 role·pooler·`cron.job`, Google·Kakao·Naver provider, key rotation overlap/removal, kill-switch, backup·restore는 disposable CI가 대신할 수 없는 출시 차단 증거로 남아 있다.

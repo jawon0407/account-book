@@ -84,7 +84,7 @@ Heroku Common Runtime의 web dyno는 Heroku Router가 전달하는 공인 HTTPS 
 
 Vercel BFF가 로컬 app session을 DB에서 확인한 직후 API 요청별 ES256 JWT를 발급한다. 서명 private key는 `BFF_JWT_PRIVATE_KEY`로 Vercel production runtime에만 두고, Heroku는 별도로 배포된 public-key keyring과 accepted `kid` allowlist만 가진다. Heroku는 Vercel 또는 BFF가 제공하는 JWKS URL을 런타임에 조회하지 않는다. 따라서 침해된 BFF가 API의 신뢰 keyring까지 바꿀 수 없다.
 
-현재 코드는 Supabase 사용자 access JWT를 `/v1/me`에 그대로 전달하고 API가 Supabase JWKS로 검증한다. 이 구현은 승인된 최종 구조가 아니며, 아래 delegated JWT 발급·검증으로 교체되기 전에는 프로덕션 release gate를 통과하지 못한다.
+현재 코드는 승인된 구조대로 BFF가 `/v1/me` 요청마다 delegated JWT를 발급하고 API가 static public-key keyring으로 검증한다. Supabase 사용자 access JWT를 Heroku에 전달하거나 Supabase JWKS를 원격 조회하는 legacy 경로는 제거됐다. Hosted 배포에서는 아래 key 분리·회전·kill-switch와 production secret 경계를 다시 검증해야 한다.
 
 #### JOSE header와 claim
 
@@ -453,4 +453,6 @@ Playwright config는 매 실행 P-256 pair를 생성해 private PKCS8 key를 BFF
 
 각 E2E child environment는 security-boundary variable을 Windows case-insensitive predicate로 inherited environment에서 제거한 뒤 자기 explicit allowlist만 받는다. `API_`, `AUTH_`, `BFF_`, `SUPABASE_`, 모든 database URL, test/migration database, app origin이 대상이다. 따라서 API에는 BFF private signing material·key ID·session/cookie/CSRF secret이, BFF에는 API database·public keyring·accepted keys·kill switch가 전달되지 않는다.
 
-`pnpm --filter @account-book/e2e typecheck`와 `pnpm run verify`는 exit 0이었다. 로컬 PostgreSQL listener 부재 때문에 guarded disposable migration과 browser E2E는 실행하지 않았고, Chromium 설치만으로 이를 대체하지 않았다. GitHub security-gate run 30211236719에서 발견된 PostCSS 파일 읽기·경로 순회와 `find-my-way` HTTP/2 DoS high advisory는 `postcss@8.5.19`, `find-my-way@9.7.0` override 및 잠금파일 재생성으로 제거했으며 `pnpm audit --prod --audit-level high`는 exit 0이었다. 따라서 패치 후 same-SHA GitHub security gate 성공 URL, live disposable PostgreSQL migration/catalog/privilege/replay, Supabase `cron.job` cleanup, key rotation overlap/removal, kill-switch drill, pinned Node 22 evidence는 아직 충족되지 않은 production blocker다.
+`pnpm --filter @account-book/e2e typecheck`와 `pnpm run verify`는 exit 0이었다. 개발 PC의 PostgreSQL listener 부재 때문에 guarded disposable migration과 browser E2E는 로컬에서 실행하지 않았고, Chromium 설치만으로 이를 대체하지 않았다. GitHub security-gate run 30211236719에서 발견된 PostCSS 파일 읽기·경로 순회와 `find-my-way` HTTP/2 DoS high advisory는 `postcss@8.5.19`, `find-my-way@9.7.0` override 및 잠금파일 재생성으로 제거했으며 `pnpm audit --prod --audit-level high`는 exit 0이었다.
+
+최종 SHA `93737d3c8278f92242670b403c30cb3beb05b0e2`의 GitHub `security-gate` [run 15](https://github.com/jawon0407/account-book/actions/runs/30214338261)는 pinned Node 22, disposable PostgreSQL migration·catalog·privilege·replay, Chromium browser E2E, 전체 verify와 production audit를 통과했다. 같은 tree의 로컬 `pnpm test`도 legacy 53, contracts 22, database 12, API 113, web 479, E2E preflight 2 tests로 exit 0이었다. Hosted Supabase의 실제 pooler·role·`cron.job`, provider별 live OAuth, production key rotation overlap/removal, kill-switch, backup·restore와 한국망 p95는 여전히 production blocker다.
