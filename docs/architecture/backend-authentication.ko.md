@@ -315,6 +315,14 @@ Task 7 code-fix commit은 `357f8412dcb19b004a0a0e45f08449682fc23f75`, 최종 검
 
 ## TASK 14 인증 E2E 증거 경계
 
+### M1.1 현재 책임 경계 (기존 TASK 14 문구 대체)
+
+아래 TASK 14의 SHA와 run 기록은 당시 결정을 설명하는 역사적 증거이며 M1.1이 대체한다. UI는 `tests/e2e/ui/`의 canonical root 안에서 화면 가시 상태, 접근성, keyboard, URL, cookie metadata/opaque boolean, token-free storage와 `Authorization` 존재 여부 boolean만 검증한다. UI는 status, response body, `Response` provenance를 보유하거나 검사하지 않으며 trace도 켜지 않는다.
+
+HTTP 계약 프로젝트는 status/body, CSRF, logout, selector replay와 raw/nested credential scan을 독점한다. UI 정책은 정적 import graph를 canonical realpath로 가두고 고정 capability 진단만 내며, URL·header·cookie·body·source 표현을 진단에 포함하지 않는다. 따라서 기존의 “UI가 status를 소유하고 DOM `Response` provenance AST가 body를 보호한다”는 설명은 현재 설계가 아니다.
+
+M1.1 코드 SHA `da0b0f1c2712d56dca8ce231b48a16637e1ac809`는 same-SHA [push security-gate run 30278565453](https://github.com/jawon0407/account-book/actions/runs/30278565453)와 [PR security-gate run 30278569950](https://github.com/jawon0407/account-book/actions/runs/30278569950)에서 Node 22, disposable PostgreSQL, Chromium, production audit를 통과했다. D2 hosted provider/TLS와 beta-before penetration test는 이 CI와 별개인 출시 차단 조건으로 남는다.
+
 commit `835dbc9`의 [RED run](https://github.com/jawon0407/account-book/actions/runs/29970158952)은 navigation 응답 본문 경합과 broad alert selector 충돌을 드러냈다. 이후 UI는 trace 없이 visible browser state와 status만, HTTP contract는 공개 응답·CSRF·logout·selector replay만 소유하도록 책임을 분리했다. DOM Response body 접근은 AST 정책으로 제한한다. 이 설계는 인증 정보의 원문을 증거·trace·문서에 남기지 않는다.
 
 동일 SHA `0d996fe726debaa8a2eec10865f63418635d06d8`의 성공한 Node 22 CI는 로컬의 PostgreSQL-backed Playwright 미실행을 보완하지만, D2 hosted staging/live Google·Kakao·Naver 및 실제 TLS 증거를 대체하지 않는다. D2는 미실행 상태이며 운영 출시 차단 조건으로 유지한다.

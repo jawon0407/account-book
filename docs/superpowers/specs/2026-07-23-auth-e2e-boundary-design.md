@@ -248,3 +248,7 @@ D2 완료는 정상 로그인만 의미하지 않는다. 공급자별 사용자 
 5. 한국어 RED/GREEN 증거 문서 갱신
 6. TASK 14 완료 후 TASK 15로 전환
 7. 배포 준비 시 D2 전용 설계·위협 검토·구현 계획 수립
+
+### M1.1 대체 기록
+
+이 문서의 기존 UI-status 소유 및 DOM `Response` provenance 결정은 역사적 RED/GREEN SHA와 run 기록을 보존하되, M1.1 UI response non-observation boundary로 대체되었다. 현재 UI는 화면·접근성·keyboard·URL·cookie metadata/opaque boolean·token-free storage·Authorization 존재 boolean만 소유하고, HTTP 계약은 status/body·CSRF·logout/replay·raw/nested credential scan을 소유한다. M1.1 code SHA `da0b0f1c2712d56dca8ce231b48a16637e1ac809`의 same-SHA [push run 30278565453](https://github.com/jawon0407/account-book/actions/runs/30278565453)와 [PR run 30278569950](https://github.com/jawon0407/account-book/actions/runs/30278569950)은 성공했다. D2 hosted provider/TLS와 beta-before penetration test는 계속 독립 release blocker다.

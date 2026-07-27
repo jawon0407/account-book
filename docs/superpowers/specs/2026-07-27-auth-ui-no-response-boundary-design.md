@@ -237,3 +237,9 @@ M1.1은 다음 조건이 모두 충족될 때 완료된다.
 이 자동 정책과 AI 기반 코드 리뷰는 전문 보안감사를 대체하지 않는다. 실제
 금융정보를 저장하는 지인 베타를 열기 전에 별도 침투 테스트와 운영환경 보안
 검증을 완료 조건으로 추가한다.
+
+## 9. 구현 상태와 same-SHA CI
+
+구현은 완료되었다. code SHA `da0b0f1c2712d56dca8ce231b48a16637e1ac809`의 Node 22/PostgreSQL/Chromium `security-gate`는 [push run 30278565453](https://github.com/jawon0407/account-book/actions/runs/30278565453)와 [pull_request run 30278569950](https://github.com/jawon0407/account-book/actions/runs/30278569950)에서 모두 성공했다. 관측된 CI 범위는 security/verification 53, workspace 22/12/113/479, preflight 19, disposable DB 22, one-worker Playwright 8이며 production audit도 통과했다.
+
+이는 D2 hosted Google·Kakao·Naver, 실제 TLS 및 redirect/cookie/log 비노출 증거나 beta-before penetration test를 대체하지 않는다. 두 항목은 계속 독립 production release blocker다.

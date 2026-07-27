@@ -73,6 +73,15 @@ Run RED, focused GREEN, then the full ordered gate. Database and browser E2E nev
 
 The final code SHA is `0d996fe726debaa8a2eec10865f63418635d06d8`; both same-SHA push and PR Node 22 CI runs passed. Local Node 24 covered the unit and preflight suites, while same-SHA CI covered disposable PostgreSQL and one-worker Playwright. Hosted staging/live provider and TLS evidence remains an unreleased D2 blocker.
 
+## M1.1 UI response non-observation evidence
+
+- 최종 리뷰는 `1586ee5`가 `Pick<Response, "text">`와 매개변수·대입 구조 분해를 막지 못한 것을 확인했다. 승인된 대체 설계는 `3047b08`, 계획 commit은 `0a25ecf`, Task 1 commit은 `bc93404`, `64dd01c`, `8145645`다.
+- 검토된 M1.1 code SHA는 `da0b0f1c2712d56dca8ce231b48a16637e1ac809`다. 같은 SHA의 Node 22/PostgreSQL/Chromium `security-gate` [push run 30278565453](https://github.com/jawon0407/account-book/actions/runs/30278565453)와 [PR run 30278569950](https://github.com/jawon0407/account-book/actions/runs/30278569950)은 모두 성공했다.
+- 관측된 CI 수는 repository security/verification 53, contracts 22, database package 12, API 113, web 479, E2E preflight 19, disposable PostgreSQL schema 22, 단일 worker Playwright HTTP/UI 8이며 CI audit도 통과했다.
+- Local Node 24.14.0의 `pnpm run verify`는 같은 53/22/12/113/479/19 수로 성공했지만 repository Node 22.15.1 범위 밖이다. Local `test:db`는 DB migration 전에 fail-closed 했다(8 passed, 14 skipped, 1 suite가 `127.0.0.1:5432`를 거부). `prepare:e2e`도 fail-closed 했고, E2E preflight 19개가 성공한 뒤 browser 명령은 local `mkcert` permission failure 뒤 120초 timeout이 났다. npm advisory 요청이 `EACCES`로 실패해 local production audit도 미검증이며, 어느 것도 성공으로 간주하지 않는다.
+- 현재 책임: UI는 visible screen, 접근성, keyboard, URL, cookie metadata/opaque boolean, token-free storage, Authorization-presence boolean만 검사한다. HTTP는 status/body, CSRF, logout/replay, raw/nested credential scan만 검사한다. 정책은 canonical UI root, fixed capability diagnostics, trace off를 사용한다.
+- Hosted D2 provider/TLS 증거와 beta-before penetration test는 계속 독립 release blocker다.
+
 ## Task 7 delegated JWT 로컬 증거
 
 로컬 증거의 code commit은 `357f8412dcb19b004a0a0e45f08449682fc23f75`이며, 이 작업 트리에서 BFF route 정책, E2E key 분리와 production dependency remediation을 검증했다. 모든 browser-facing BFF route는 Node.js runtime, `iad1`, `force-dynamic`, 10초 `maxDuration`을 명시한다. route는 여전히 thin adapter이고 Edge runtime, 직접 환경변수·DB·provider 접근을 포함하지 않는다.
