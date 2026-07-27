@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 test("routes browser journeys and HTTP contracts to separate Playwright projects", async () => {
@@ -16,4 +17,13 @@ test("routes browser journeys and HTTP contracts to separate Playwright projects
   assert.equal(config.workers, 1);
   assert.equal(config.retries, 0);
   assert.equal(config.use?.trace, "off");
+});
+
+test("keeps response bodies and logout handling in the HTTP contract spec", () => {
+  // UI and HTTP specs run in separate projects, so source ownership is the closest executable boundary.
+  const uiSpec = readFileSync(new URL("./auth-ui.spec.ts", import.meta.url), "utf8");
+
+  assert.equal(uiSpec.includes("/api/auth/csrf"), false, "UI spec must not fetch CSRF response bodies");
+  assert.equal(uiSpec.includes("/api/auth/sign-out"), false, "UI spec must not own logout requests");
+  assert.equal(uiSpec.includes(".json()"), false, "UI spec must not parse response bodies");
 });

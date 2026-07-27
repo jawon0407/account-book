@@ -57,3 +57,20 @@
 ### Remaining verification boundary
 
 - There is no local PostgreSQL service, so database-backed HTTP/UI Playwright projects remain unrun locally and are not reported as successful. The same-SHA CI controller must run those disposable-database projects; the local covering tests above protect the static route, type, and workspace-policy boundaries.
+
+## Fix round 2: UI response-body ownership
+
+### Changes
+
+- Removed the UI spec's CSRF fetch, logout request, post-logout request, and related response parsing. The authenticated browser journey now ends after cookie public metadata and opaque-format checks, token-free storage, `/api/me` status, and absent browser Authorization headers.
+- Added an executable source-topology boundary in `playwright-config.test.ts`. UI and HTTP specs execute in separate projects, so a runtime response alone cannot identify its owning spec; this is the closest executable enforcement that prevents UI ownership of CSRF, logout, and response-body parsing. Boolean assertions intentionally avoid echoing source text when the policy fails.
+
+### TDD and covering verification
+
+1. RED: the new ownership test failed with `UI spec must not fetch CSRF response bodies` and boolean result `true !== false` while the UI spec still read CSRF JSON.
+2. GREEN: after removing the logout path from the UI spec, the config-and-ownership test passed (`2/2`), and `pnpm --filter @account-book/e2e typecheck` exited `0`.
+3. Covering suite: `pnpm test` passed: legacy policy/security `53/53`, contracts `22`, database `12`, API `113`, web `479`, and E2E preflight `2/2`.
+
+### Remaining verification boundary
+
+- No local PostgreSQL service is available. Database-backed Playwright projects were not run and are not represented as a local success; the same-SHA CI controller must supply that disposable-database coverage.

@@ -60,7 +60,7 @@ test("failed login stays fixed and never creates browser token state", async ({ 
   await expectTokenFreeStorage(page);
 });
 
-test("successful login creates only an opaque cookie, reaches the real API, and logout invalidates it", async ({ page, context }) => {
+test("successful login creates only an opaque cookie and reaches the real API", async ({ page, context }) => {
   const browserAuthorizationHeaders: Array<string | undefined> = [];
   page.on("request", (request) => browserAuthorizationHeaders.push(request.headers().authorization));
   await page.goto("/login");
@@ -79,25 +79,10 @@ test("successful login creates only an opaque cookie, reaches the real API, and 
       secure: true,
     },
   ]);
+  expect(/^[A-Za-z0-9_-]{43}$/u.test(cookies[0]?.value ?? ""), "session selector must use the opaque fixed-length format").toBe(true);
   await expectTokenFreeStorage(page);
 
   const meStatus = await page.evaluate(async () => (await fetch("/api/me", { headers: { accept: "application/json" } })).status);
   expect(meStatus).toBe(200);
   expect(browserAuthorizationHeaders.every((header) => header === undefined)).toBe(true);
-
-  const signOutStatus = await page.evaluate(async () => {
-    const csrfResponse = await fetch("/api/auth/csrf?context=session", { headers: { accept: "application/json" } });
-    const csrf = await csrfResponse.json() as { csrfToken: string };
-    const response = await fetch("/api/auth/sign-out", {
-      body: "{}",
-      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrf.csrfToken },
-      method: "POST",
-    });
-    return response.status;
-  });
-  expect(signOutStatus).toBe(200);
-  expect((await context.cookies()).some((cookie) => cookie.name.startsWith("__Host-ab_"))).toBe(false);
-  const afterLogout = await page.evaluate(async () => (await fetch("/api/me")).status);
-  expect(afterLogout).toBe(401);
-  await expectTokenFreeStorage(page);
 });
