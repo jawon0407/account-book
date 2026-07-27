@@ -18,7 +18,7 @@ Focused GREEN: workflow policy exit 0 (15/15), web exit 0 (24 files, 435/435), E
 
 Task 14의 첫 clean-checkout CI는 공유 package의 `dist`가 만들어지기 전에 API typecheck가 실행되는 로컬 산출물 의존성을 발견했다. 루트 `typecheck`가 contracts/database를 먼저 빌드하도록 정책 테스트와 script 순서를 함께 고정했다. 다음 CI는 실제 Chromium `fetch()`가 보내는 표준 `Sec-Fetch-Dest: empty`를 CSRF 경계가 거부하는 문제를 발견했다. [W3C Fetch Metadata](https://www.w3.org/TR/fetch-metadata/#sec-fetch-dest-header)는 빈 Fetch destination을 `empty` token으로 전송하도록 정의하므로, exact Origin·`same-origin` Site·허용 Mode·CSRF token 검사를 유지하면서 destination `empty`만 추가로 허용하고 회귀 테스트를 남겼다.
 
-E2E는 오류 feedback의 실제 접근성 role인 `alert`를 검사한다. Next 개발 서버가 자체 `__next_debug_channel:` 항목을 session storage에 둘 수 있으므로, 이 exact framework prefix 외의 session key와 모든 local-storage 항목을 거부하고 전체 key/value에서 provider sentinel, access/refresh token 이름, JWT 형태가 없는지 검사한다. 로그인 성공 직후 `/app` 이동과 응답 본문 읽기의 경합을 피하기 위해 Playwright response event에서 본문을 즉시 복사하되 브라우저 storage에는 저장하지 않는다.
+E2E는 오류 feedback의 실제 접근성 role인 `alert`를 검사한다. Next 개발 서버가 자체 `__next_debug_channel:` 항목을 session storage에 둘 수 있으므로, 이 exact framework prefix 외의 session key와 모든 local-storage 항목을 거부하고 전체 key/value에서 provider sentinel, access/refresh token 이름, JWT 형태가 없는지 검사한다. Task 14 RED 당시에는 로그인 성공 직후 `/app` 이동과 응답 본문 읽기의 경합을 피하려고 Playwright response event에서 본문을 즉시 복사했지만, 이는 역사적 실패 맥락이며 현재 UI 계약이 아니다. [현재 Task 14 경계](#task-14-인증-e2e-경계-검증-근거)는 UI에서 status·visible/browser state만, HTTP 프로젝트에서 body·logout·selector replay만 검증하고 executable config/type policy가 이 분리를 고정한다.
 
 Next.js 16.2.11이 선택적으로 설치하던 `sharp@0.34.5`는 현재 앱에서 `next/image`를 사용하지 않으므로 pnpm override로 제거했다. GHSA-f88m-g3jw-g9cj의 high-severity 경로를 없앤 뒤 웹 프로덕션 빌드와 `pnpm audit --prod --audit-level high`를 다시 통과시켰다. 추후 이미지 최적화를 도입할 때는 패치된 `sharp`와 Next.js의 호환성을 별도 검토해야 한다.
 
@@ -29,7 +29,6 @@ GitHub `security-gate` run 30211236719는 PostCSS 파일 읽기·경로 순회 2
 ```powershell
 pnpm setup:hooks
 $env:CI='true'; pnpm run verify
-pnpm test:e2e-preflight
 $env:TEST_DATABASE_URL='postgresql://postgres:postgres@127.0.0.1:5432/account_book_test'
 $env:TEST_DATABASE_DISPOSABLE='true'
 pnpm test:db
@@ -42,9 +41,9 @@ git status --short --branch
 
 DB/E2E는 환경 변수가 없으면 skip하지 않고 실패한다. `prepare:e2e`는 위의 정확한 disposable flag와 `127.0.0.1/account_book_test` 관리자 URL만 허용하고, `current_user=postgres`와 DB 이름을 확인한 뒤 인증 schema/role을 정리하고 migration 001→002→003을 적용한다. Local DB/browser 부재의 대체 evidence는 같은 commit SHA의 GitHub `security-gate` 성공뿐이다. Dependency audit exit 0이 필수이며 registry/network 실패는 출시 승인으로 바꾸지 않는다. Log에는 token, cookie, credential, connection string을 출력하지 않는다.
 
-`test:e2e-preflight`는 DB나 브라우저 없이 production fake-adapter 시작 차단과 Playwright child-process 환경의 case-insensitive secret sanitization을 함께 검사한다. 루트 `pnpm run verify`가 이 preflight를 실행하고, `@account-book/e2e`의 전체 `test`도 Playwright보다 먼저 같은 preflight를 실행한다. workspace policy test는 두 script 연결을 고정하므로 로컬 검증 또는 GitHub security gate에서 sanitization 회귀 테스트가 조용히 빠질 수 없다.
+현재 `test:e2e-preflight`는 DB나 브라우저 없이 production fake-adapter 시작 차단, Playwright child-process 환경의 case-insensitive secret sanitization, 세 프로젝트 config/trace 정책, UI import graph의 response-body ownership, HTTP body 계약의 boolean-safe leak/shape 정책을 함께 검사한다. 루트 `pnpm run verify`가 이 preflight를 실행하고, `@account-book/e2e`의 전체 `test`도 Playwright보다 먼저 같은 preflight를 실행한다. workspace policy test는 두 script 연결을 고정하므로 로컬 검증 또는 GitHub security gate에서 config·sanitization·response-policy 회귀 테스트가 조용히 빠질 수 없다.
 
-브라우저 성공 테스트는 test IDP의 고정 refresh-token sentinel이 응답·storage·모든 cookie에 없음을 확인하고, cookie는 `__Host-ab_session` 하나만 허용한다. 로그아웃 전 selector를 별도 HTTP context에서 재전송해 401을 확인하므로 브라우저 cookie 삭제만이 아니라 서버의 DB session 폐기도 검증한다. Production fake adapter는 `pnpm start`의 사전 guard와 Next config의 이중 방어로 readiness 전에 고정 오류와 함께 종료되며, 별도 process test가 이를 확인한다.
+Task 14 이전의 단일 브라우저 성공 테스트는 응답·storage·cookie leak 검사와 selector replay를 한 흐름에서 수행했다. 현재 UI 프로젝트는 `__Host-ab_session`의 공개 metadata·opaque 형식, token-free storage, browser Authorization 부재와 `/api/me` status만 확인한다. HTTP 프로젝트가 response body·CSRF·logout과 이전 selector 재전송 401을 소유하므로 브라우저 cookie 삭제뿐 아니라 서버의 DB session 폐기도 검증한다. Production fake adapter는 `pnpm start`의 사전 guard와 Next config의 이중 방어로 readiness 전에 고정 오류와 함께 종료되며, 별도 process test가 이를 확인한다.
 
 ## Hosted OAuth checklist
 
@@ -67,7 +66,7 @@ Run RED, focused GREEN, then the full ordered gate. Database and browser E2E nev
 - RED: commit `835dbc9`, GitHub Actions [run 29970158952](https://github.com/jawon0407/account-book/actions/runs/29970158952)에서 확인했다. 로그인 뒤 navigation과 응답 본문 읽기 사이의 경합, 그리고 너무 넓은 alert 선택자의 충돌이 원인이었다. 민감한 응답 원문은 기록하지 않는다.
 - GREEN: 최종 검증 코드 SHA는 `0d996fe726debaa8a2eec10865f63418635d06d8`이다. 같은 SHA의 [push run](https://github.com/jawon0407/account-book/actions/runs/30252139895)과 [PR run](https://github.com/jawon0407/account-book/actions/runs/30252146533)은 모두 성공했다.
 - 로컬(Node 24)에서는 `pnpm test`가 legacy/security 53개, contracts 22개, database package 12개, API 113개, web 479개, E2E preflight 2개를 통과했다. 이 로컬 실행에서는 PostgreSQL-backed Playwright를 실행하지 않았으며, 같은 SHA의 Node 22 CI가 disposable PostgreSQL DB 22개, browser-stage Node 정책·preflight 7개, Playwright HTTP·UI 8개 통과(단일 worker)로 그 공백을 보완했다.
-- 책임 분리: UI 프로젝트는 trace를 끄고 실제 화면에서 보이는 browser state와 상태 표시만 확인한다. HTTP 프로젝트는 공개 응답 계약, CSRF, 로그아웃과 selector 재사용 차단을 단독으로 확인한다. AST 정책은 DOM에서 Response body에 접근하는 것을 제한한다.
+- 책임 분리: UI 프로젝트는 trace를 끄고 실제 화면에서 보이는 browser state와 상태 표시만 확인한다. HTTP 프로젝트는 공개 응답 계약, CSRF, 로그아웃과 selector 재사용 차단을 단독으로 확인한다. executable config 정책은 세 프로젝트·trace·preflight 연결을 고정하고, TypeScript Program 정책은 UI의 reachable local import graph에서 DOM `Body`/`Response`와 Playwright `Response`/`APIResponse` body 접근을 제한한다.
 - D2: hosted staging 또는 live Google·Kakao·Naver, 실제 TLS에 대한 증거는 아직 미실행이다. 이는 자동 테스트 성공과 별개의 운영 출시 차단 조건이며, 운영용 fake adapter는 계속 금지한다.
 
 ### Short English counterpart
