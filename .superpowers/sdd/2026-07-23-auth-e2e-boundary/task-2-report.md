@@ -92,3 +92,34 @@
 ### Remaining verification boundary
 
 - No local PostgreSQL service is available. Database-backed Playwright projects, including the HTTP response contract runtime suite, remain CI-owned same-SHA coverage and are not claimed as local success.
+
+## Fix round 4: computed members and DOM declaration provenance
+
+### Changes
+
+- Extended the semantic policy to cover all five forbidden methods through dot access, literal bracket access, statically resolvable computed keys, and fail-closed unbounded computed keys. Direct `body` access is covered in property, bracket, computed, and call-target forms.
+- Replaced the symbol-name-only `Response` check with declaration provenance against the exact `lib.dom.d.ts` shipped by the active TypeScript installation. Union, intersection, alias-symbol, and generic-constraint resolution preserve the DOM boundary without rejecting a module-scoped custom `Response`.
+- Kept findings limited to fixed categories and method labels, including the fixed `computed` label. The analyzer never returns source snippets or response values, and the real `auth-ui.spec.ts` assertion remains executable.
+
+### TDD evidence
+
+1. RED: `.\node_modules\.bin\tsx.cmd --test tests\e2e\playwright-config.test.ts` reported `3/6` passing. Safe assertion output showed the literal `json` bracket call and DOM alias/intersection produced no finding, while the custom non-DOM `Response` produced fixed method/category findings instead of the expected empty list.
+2. Self-review RED: after the first GREEN, the same command reported `5/6` passing for a literal `body` call-target fixture; expected fixed `stream/body`, actual empty list.
+3. GREEN: the same focused command passed `6/6`, covering dot and bracket calls for `json`, `text`, `arrayBuffer`, `blob`, and `formData`; literal and dynamic body access; a status-only allow case; custom non-DOM `Response`; DOM alias/intersection; and the real UI spec.
+
+### Verification
+
+- `pnpm --filter @account-book/e2e typecheck`: PASS.
+- `pnpm test`: PASS on the final code state: legacy policy/security `53/53`, contracts `22`, database `12`, API `113`, web `479`, and E2E preflight `2/2`.
+- `git diff --check`: PASS before report staging.
+- The focused command used the root workspace launcher because filtered `pnpm exec tsx` does not resolve `tsx` from this worktree package.
+
+### Files and self-review
+
+- Changed `tests/e2e/response-body-ownership.ts`, `tests/e2e/playwright-config.test.ts`, and this report.
+- Confirmed only exact TypeScript standard-library provenance activates DOM `Response` enforcement; a same-named user type remains allowed, while aliases, intersections, unions, and constraints cannot hide the DOM type.
+- Confirmed bounded computed keys use their literal type set, broad computed string keys fail closed, fixed diagnostics cannot echo credentials or transport content, and no runtime authentication behavior changed.
+
+### Remaining verification boundary
+
+- Local PostgreSQL absence is not represented as success. Database-backed Playwright E2E remains the same-SHA controller CI responsibility.
