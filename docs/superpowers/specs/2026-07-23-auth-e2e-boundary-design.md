@@ -2,7 +2,7 @@
 
 작성일: 2026-07-23
 
-상태: 사용자 설계 승인 완료, 문서 검토 대기
+상태: 구현 완료, 동일 SHA CI 검증 완료
 
 대상 브랜치: `feature/security-auth-foundation`
 
@@ -199,6 +199,14 @@ APIRequestContext -> CSRF 발급 -> same-origin sign-in POST
 - GitHub Actions의 같은 commit SHA `security-gate`가 성공한다.
 - RED/GREEN 명령, 실패 원인, 최종 test 수와 commit SHA를 한국어 테스트 문서에 기록한다.
 - 실제 OAuth credential이 없으면 D2는 `미실행—출시 차단`으로 남기며 TASK 14 자동 테스트 성공과 혼동하지 않는다.
+
+## 10.1 TASK 14 실제 검증 기록
+
+- RED는 commit `835dbc9`의 GitHub Actions [run 29970158952](https://github.com/jawon0407/account-book/actions/runs/29970158952)에서 확인했다. 원인은 navigation과 응답 본문 처리의 경합 및 broad alert selector 충돌이며, 민감한 응답 원문은 이 문서에 기록하지 않는다.
+- GREEN 최종 검증 코드 SHA는 `0d996fe726debaa8a2eec10865f63418635d06d8`이다. 같은 SHA의 [push run](https://github.com/jawon0407/account-book/actions/runs/30252139895)과 [PR run](https://github.com/jawon0407/account-book/actions/runs/30252146533)은 성공했다.
+- 로컬 Node 24의 `pnpm test`는 legacy/security 53개, contracts 22개, database package 12개, API 113개, web 479개, E2E preflight 2개를 통과했다. PostgreSQL-backed Playwright는 로컬에서 실행하지 않았고, 동일 SHA Node 22 CI가 disposable PostgreSQL DB 22개, browser-stage Node 정책·preflight 7개, Playwright HTTP·UI 8개 통과(단일 worker)로 보완했다.
+- UI 프로젝트는 trace를 끄고 visible/browser state와 status만 검증한다. HTTP 프로젝트는 response body·CSRF·logout·selector replay를 단독 소유하며, AST 정책은 DOM Response body 접근을 제한한다.
+- D2 hosted staging/live Google·Kakao·Naver 및 TLS 증거는 미실행이다. 이 항목은 자동 테스트 성공과 별개인 운영 출시 차단 조건이다.
 
 ## 11. D2 도입 조건과 완료 기준
 

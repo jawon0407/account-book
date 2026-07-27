@@ -8,11 +8,12 @@
 
 | 상태 | 범위 |
 | --- | --- |
-| 구현됨 | 인증 계약과 도메인 서비스, Supabase server-only adapter, opaque session·PostgreSQL 저장소, Next.js BFF 14개 route, request-scoped controller/container, same-origin CSRF, server-owned OAuth redirect handoff, always-Secure cookie, no-store 응답, ky 2 browser client와 TanStack Query binding, Task 11 반응형 인증 UI, Task 12 NestJS/Fastify JWT guard와 `/health`·`/v1/me`, Task 13 disposable DB·ES256 IDP·Playwright 인증 체인과 CI gate |
+| 구현됨 | 인증 계약과 도메인 서비스, Supabase server-only adapter, opaque session·PostgreSQL 저장소, Next.js BFF 14개 route, request-scoped controller/container, same-origin CSRF, server-owned OAuth redirect handoff, always-Secure cookie, no-store 응답, ky 2 browser client와 TanStack Query binding, Task 11 반응형 인증 UI, Task 12 NestJS/Fastify JWT guard와 `/health`·`/v1/me`, Task 13 disposable DB·ES256 IDP·Playwright 인증 체인과 CI gate, Task 14 browser UI·HTTP response contract 분리, exact app alert 선택자, token-free storage, opaque cookie·logout selector replay의 동일 SHA CI 증거 |
 | 스키마만 구현됨 | `auth_rate_limits` 테이블. 이를 사용하는 rate-limit use case는 없다. |
 | 아직 없음 | 관리자 페이지, rate-limit use case, revocation retry worker |
 | 이 작업 공간에서 미검증 | 실제 hosted Supabase Auth·role·pooler와 Google·Kakao·Naver live 통합 검증 |
 | 품질 후속 | 최종 SHA `93737d3`에서 Security/legacy 53개, contracts 22개, database 12개, API 113개, web 479개, E2E preflight 2개가 로컬에서 통과했다. 같은 SHA의 GitHub security-gate run 15는 disposable PostgreSQL과 Chromium E2E까지 통과했다. 기존 optional branch coverage `91.78%`의 100% threshold 충족은 별도 품질 후속이다. Hosted DB 최소 권한·pooler, persistent rate limit과 Google·Kakao·Naver live OAuth는 여전히 운영 출시 차단 항목이다. |
+| Task 14 동일 SHA 검증 | 최종 검증 코드 SHA `0d996fe726debaa8a2eec10865f63418635d06d8`에서 [push CI](https://github.com/jawon0407/account-book/actions/runs/30252139895)와 [PR CI](https://github.com/jawon0407/account-book/actions/runs/30252146533)가 성공했다. Node 22 CI는 disposable PostgreSQL DB 22개, browser-stage 정책·preflight 7개, 단일 worker Playwright HTTP·UI 8개를 통과했다. 로컬 Node 24는 `pnpm test`의 legacy/security 53개, contracts 22개, database package 12개, API 113개, web 479개, E2E preflight 2개를 통과했으며 PostgreSQL-backed Playwright는 로컬에서 실행하지 않았다. |
 
 ## 문제와 선택
 
@@ -311,3 +312,9 @@ provider boundary가 허용하는 오류 코드는 다음 다섯 개다.
 모든 BFF route는 Node.js, `iad1`, dynamic, 10초 maxDuration 정책을 명시한다. E2E는 프로세스 수명의 ephemeral P-256 key pair로 private BFF signing key와 public API verification key를 분리한다. secret, key material, JWT, selector, request-binding hash, DB 연결 문자열은 문서·로그·trace·snapshot에 기록하지 않는다.
 
 Task 7 code-fix commit은 `357f8412dcb19b004a0a0e45f08449682fc23f75`, 최종 검증 SHA는 `93737d3c8278f92242670b403c30cb3beb05b0e2`다. focused route-wiring GREEN은 25 files/479 tests였고, 최종 로컬 `pnpm test`는 legacy 53, contracts 22, database 12, API 113, web 479, E2E preflight 2 tests로 exit 0이었다. child process는 OS/toolchain 변수만 상속하고 Windows case-insensitive API/BFF/auth/database boundary 변수를 explicit allowlist 전 삭제한다. 개발 PC의 PostgreSQL listener 부재로 guarded DB preparation과 browser E2E는 로컬에서 실행하지 않았지만, 같은 최종 SHA의 GitHub `security-gate` [run 15](https://github.com/jawon0407/account-book/actions/runs/30214338261)가 pinned Node 22, disposable PostgreSQL, Chromium E2E와 production audit를 통과했다. Hosted Supabase role·pooler·cron, provider별 live OAuth, key rotation 제거와 kill-switch evidence는 출시 전 책임자가 별도로 수집해야 하는 차단 조건이다.
+
+## TASK 14 인증 E2E 증거 경계
+
+commit `835dbc9`의 [RED run](https://github.com/jawon0407/account-book/actions/runs/29970158952)은 navigation 응답 본문 경합과 broad alert selector 충돌을 드러냈다. 이후 UI는 trace 없이 visible browser state와 status만, HTTP contract는 공개 응답·CSRF·logout·selector replay만 소유하도록 책임을 분리했다. DOM Response body 접근은 AST 정책으로 제한한다. 이 설계는 인증 정보의 원문을 증거·trace·문서에 남기지 않는다.
+
+동일 SHA `0d996fe726debaa8a2eec10865f63418635d06d8`의 성공한 Node 22 CI는 로컬의 PostgreSQL-backed Playwright 미실행을 보완하지만, D2 hosted staging/live Google·Kakao·Naver 및 실제 TLS 증거를 대체하지 않는다. D2는 미실행 상태이며 운영 출시 차단 조건으로 유지한다.

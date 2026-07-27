@@ -62,6 +62,18 @@ DB/E2E는 환경 변수가 없으면 skip하지 않고 실패한다. `prepare:e2
 
 Run RED, focused GREEN, then the full ordered gate. Database and browser E2E never skip silently. Only same-commit CI can replace unavailable local PostgreSQL evidence. Live Google, Kakao, and custom Naver OAuth remain release blockers until every path is exercised without credential leakage.
 
+## TASK 14 인증 E2E 경계 검증 근거
+
+- RED: commit `835dbc9`, GitHub Actions [run 29970158952](https://github.com/jawon0407/account-book/actions/runs/29970158952)에서 확인했다. 로그인 뒤 navigation과 응답 본문 읽기 사이의 경합, 그리고 너무 넓은 alert 선택자의 충돌이 원인이었다. 민감한 응답 원문은 기록하지 않는다.
+- GREEN: 최종 검증 코드 SHA는 `0d996fe726debaa8a2eec10865f63418635d06d8`이다. 같은 SHA의 [push run](https://github.com/jawon0407/account-book/actions/runs/30252139895)과 [PR run](https://github.com/jawon0407/account-book/actions/runs/30252146533)은 모두 성공했다.
+- 로컬(Node 24)에서는 `pnpm test`가 legacy/security 53개, contracts 22개, database package 12개, API 113개, web 479개, E2E preflight 2개를 통과했다. 이 로컬 실행에서는 PostgreSQL-backed Playwright를 실행하지 않았으며, 같은 SHA의 Node 22 CI가 disposable PostgreSQL DB 22개, browser-stage Node 정책·preflight 7개, Playwright HTTP·UI 8개 통과(단일 worker)로 그 공백을 보완했다.
+- 책임 분리: UI 프로젝트는 trace를 끄고 실제 화면에서 보이는 browser state와 상태 표시만 확인한다. HTTP 프로젝트는 공개 응답 계약, CSRF, 로그아웃과 selector 재사용 차단을 단독으로 확인한다. AST 정책은 DOM에서 Response body에 접근하는 것을 제한한다.
+- D2: hosted staging 또는 live Google·Kakao·Naver, 실제 TLS에 대한 증거는 아직 미실행이다. 이는 자동 테스트 성공과 별개의 운영 출시 차단 조건이며, 운영용 fake adapter는 계속 금지한다.
+
+### Short English counterpart
+
+The final code SHA is `0d996fe726debaa8a2eec10865f63418635d06d8`; both same-SHA push and PR Node 22 CI runs passed. Local Node 24 covered the unit and preflight suites, while same-SHA CI covered disposable PostgreSQL and one-worker Playwright. Hosted staging/live provider and TLS evidence remains an unreleased D2 blocker.
+
 ## Task 7 delegated JWT 로컬 증거
 
 로컬 증거의 code commit은 `357f8412dcb19b004a0a0e45f08449682fc23f75`이며, 이 작업 트리에서 BFF route 정책, E2E key 분리와 production dependency remediation을 검증했다. 모든 browser-facing BFF route는 Node.js runtime, `iad1`, `force-dynamic`, 10초 `maxDuration`을 명시한다. route는 여전히 thin adapter이고 Edge runtime, 직접 환경변수·DB·provider 접근을 포함하지 않는다.
