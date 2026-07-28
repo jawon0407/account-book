@@ -385,6 +385,54 @@ test("mutation: a local-module namespace retains exported global root provenance
   );
 });
 
+test("mutation: destructuring a local-module namespace retains global root provenance", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        import * as transport from "./helper.js";
+        const { root } = transport;
+        const key = "fetch";
+        const response = await root[key]("/api");
+        await response.text();
+      `,
+      "helper.ts": "export const root = globalThis;",
+    }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: renamed destructuring retains local-module global root provenance", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        import * as transport from "./helper.js";
+        const { root: retainedRoot } = transport;
+        const key = "fetch";
+        const response = await retainedRoot[key]("/api");
+        await response.text();
+      `,
+      "helper.ts": "export const root = globalThis;",
+    }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: a local-module namespace re-export retains global root provenance", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        import { transport } from "./barrel.js";
+        const key = "fetch";
+        const response = await transport.root[key]("/api");
+        await response.text();
+      `,
+      "barrel.ts": 'export * as transport from "./helper.js";',
+      "helper.ts": "export const root = globalThis;",
+    }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
 test("mutation: an assigned global root alias cannot select XMLHttpRequest", () => {
   assert.deepEqual(
     inspect({ "root.ts": 'let root; root = window; const key = "XMLHttpRequest"; new root[key]();' }),

@@ -184,9 +184,18 @@ function addImportedGlobalTransportNames(
   for (const element of clause.namedBindings.elements) {
     if (element.isTypeOnly) continue;
     const importedName = element.propertyName?.text ?? element.name.text;
-    if (!targetExports.has(importedName) || names.has(element.name.text)) continue;
-    names.add(element.name.text);
-    changed = true;
+    if (targetExports.has(importedName) && !names.has(element.name.text)) {
+      names.add(element.name.text);
+      changed = true;
+    }
+    const importedPrefix = `${importedName}.`;
+    for (const exportedName of targetExports) {
+      if (!exportedName.startsWith(importedPrefix)) continue;
+      const localPath = `${element.name.text}.${exportedName.slice(importedPrefix.length)}`;
+      if (names.has(localPath)) continue;
+      names.add(localPath);
+      changed = true;
+    }
   }
   return changed;
 }
@@ -240,11 +249,24 @@ function addExportedGlobalTransportNames(
     }
     return changed;
   }
+  if (ts.isNamespaceExport(statement.exportClause)) {
+    if (targetExports !== undefined) {
+      for (const name of targetExports) {
+        addExport(`${statement.exportClause.name.text}.${name}`);
+      }
+    }
+    return changed;
+  }
   if (!ts.isNamedExports(statement.exportClause)) return changed;
   for (const element of statement.exportClause.elements) {
     const sourceName = element.propertyName?.text ?? element.name.text;
-    if (targetExports !== undefined ? targetExports.has(sourceName) : names.has(sourceName)) {
-      addExport(element.name.text);
+    const sourceNames = targetExports ?? names;
+    if (sourceNames.has(sourceName)) addExport(element.name.text);
+    const sourcePrefix = `${sourceName}.`;
+    for (const name of sourceNames) {
+      if (name.startsWith(sourcePrefix)) {
+        addExport(`${element.name.text}.${name.slice(sourcePrefix.length)}`);
+      }
     }
   }
   return changed;
@@ -491,11 +513,25 @@ function collectGlobalTransportRootNames(
   const names = new Set(initialNames);
   const edges: Array<Readonly<{ target: string; source: string }>> = [];
   const collect = (node: ts.Node): void => {
-    if ((ts.isVariableDeclaration(node) || ts.isParameter(node)) && node.initializer !== undefined
-      && ts.isIdentifier(node.name)) {
+    if ((ts.isVariableDeclaration(node) || ts.isParameter(node)) && node.initializer !== undefined) {
       const source = stripExpression(node.initializer);
       const chain = memberChain(source);
-      if (chain !== undefined) edges.push({ target: node.name.text, source: chain.join(".") });
+      if (chain !== undefined && ts.isIdentifier(node.name)) {
+        edges.push({ target: node.name.text, source: chain.join(".") });
+      }
+      if (chain !== undefined && ts.isObjectBindingPattern(node.name)) {
+        for (const element of node.name.elements) {
+          if (!ts.isIdentifier(element.name) || element.dotDotDotToken !== undefined) continue;
+          const propertyName = element.propertyName === undefined
+            ? element.name.text
+            : ts.isIdentifier(element.propertyName) || ts.isStringLiteral(element.propertyName)
+              ? element.propertyName.text
+              : undefined;
+          if (propertyName !== undefined) {
+            edges.push({ target: element.name.text, source: `${chain.join(".")}.${propertyName}` });
+          }
+        }
+      }
     }
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
       const target = stripExpression(node.left);
