@@ -251,4 +251,10 @@ D2 완료는 정상 로그인만 의미하지 않는다. 공급자별 사용자 
 
 ### M1.1 대체 기록
 
-이 문서의 기존 UI-status 소유 및 DOM `Response` provenance 결정은 역사적 RED/GREEN SHA와 run 기록을 보존하되, M1.1 UI response non-observation boundary로 대체되었다. 현재 UI는 화면·접근성·keyboard·URL·cookie metadata/opaque boolean·token-free storage·Authorization 존재 boolean만 소유하고, HTTP 계약은 status/body·CSRF·logout/replay·raw/nested credential scan을 소유한다. M1.1 code SHA `da0b0f1c2712d56dca8ce231b48a16637e1ac809`의 same-SHA [push run 30278565453](https://github.com/jawon0407/account-book/actions/runs/30278565453)와 [PR run 30278569950](https://github.com/jawon0407/account-book/actions/runs/30278569950)은 성공했다. D2 hosted provider/TLS와 beta-before penetration test는 계속 독립 release blocker다.
+이 문서의 기존 UI-status 소유 및 DOM `Response` provenance 결정은 역사적 RED/GREEN SHA와 run 기록을 보존하되, M1.1 UI response non-observation boundary로 대체되었다. 현재 UI는 화면·접근성·keyboard·URL·cookie metadata/opaque boolean·token-free storage·Authorization 존재 boolean만 소유하고, HTTP 계약은 status/body·CSRF·logout/replay·raw/nested credential scan을 소유한다.
+
+M1.1 SHA `da0b0f1c2712d56dca8ce231b48a16637e1ac809`와 same-SHA [push run 30278565453](https://github.com/jawon0407/account-book/actions/runs/30278565453)·[PR run 30278569950](https://github.com/jawon0407/account-book/actions/runs/30278569950)은 당시 성공했지만 최종 리뷰가 import alias, authorization 원문 보존, 일반 Playwright request/route capability 우회를 발견했으므로 중간·대체된 증거다.
+
+최종 code SHA `d1a71a24a5b24d5330d525c77d5eabe97f034a2a`는 external import를 exact no-alias named import로 제한하고 `Page`·`BrowserContext`·`Request`·`Route`·`APIRequestContext`·`Locator`에 폐쇄형 capability allowlist를 적용한다. 별칭·구조 분해·computed/optional member·pass/return·fixture/factory·`.call/.apply/.bind`, `fetch`·XHR·Request/Response factory와 trusted consumer shadow를 거부한다. authorization recorder는 exact callback에서 strict null 비교로 즉시 boolean만 남기며 raw return·연결·wrapper·대입을 허용하지 않는다.
+
+Local Node 24.14.0 GREEN은 focused 44/44, preflight 46/46, typecheck·lint와 전체 53/22/12/113/479였다. 정확히 최종 code SHA의 [push run 30326538341](https://github.com/jawon0407/account-book/actions/runs/30326538341)과 [PR run 30326540058](https://github.com/jawon0407/account-book/actions/runs/30326540058)은 모두 `completed/success`였고 Node 22/disposable PostgreSQL/Chromium/audit의 권위 있는 증거다. D2 hosted provider/TLS와 beta-before penetration test는 계속 독립 release blocker다.

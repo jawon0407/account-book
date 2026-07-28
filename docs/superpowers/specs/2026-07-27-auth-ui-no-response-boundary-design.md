@@ -240,6 +240,10 @@ M1.1은 다음 조건이 모두 충족될 때 완료된다.
 
 ## 9. 구현 상태와 same-SHA CI
 
-구현은 완료되었다. code SHA `da0b0f1c2712d56dca8ce231b48a16637e1ac809`의 Node 22/PostgreSQL/Chromium `security-gate`는 [push run 30278565453](https://github.com/jawon0407/account-book/actions/runs/30278565453)와 [pull_request run 30278569950](https://github.com/jawon0407/account-book/actions/runs/30278569950)에서 모두 성공했다. 관측된 CI 범위는 security/verification 53, workspace 22/12/113/479, preflight 19, disposable DB 22, one-worker Playwright 8이며 production audit도 통과했다.
+`da0b0f1c2712d56dca8ce231b48a16637e1ac809`의 [push run 30278565453](https://github.com/jawon0407/account-book/actions/runs/30278565453)와 [pull_request run 30278569950](https://github.com/jawon0407/account-book/actions/runs/30278569950)은 당시 성공했지만 현재 완료 증거가 아닌 중간 기록이다. 최종 리뷰에서 `request as expect` 같은 external import alias, authorization recorder의 raw header 반환·대입, `waitForRequest`·`page.route`·`route.fetch`와 선언/대입/구조 분해 별칭·computed member 우회가 발견되었다.
 
-이는 D2 hosted Google·Kakao·Naver, 실제 TLS 및 redirect/cookie/log 비노출 증거나 beta-before penetration test를 대체하지 않는다. 두 항목은 계속 독립 production release blocker다.
+최종 구현 SHA는 `d1a71a24a5b24d5330d525c77d5eabe97f034a2a`다. 외부 module은 exported/local name이 같은 exact named import만 허용하고, `Page`·`BrowserContext`·`Request`·`Route`·`APIRequestContext`·`Locator`별 폐쇄형 capability allowlist가 별칭·구조 분해·pass/return·fixture/factory·optional/computed member·`.call/.apply/.bind`, `fetch`·`XMLHttpRequest`·`Request`·`Response` factory와 trusted consumer shadow를 fail-closed 한다. request recorder는 exact `page.on("request", authorizationRecorder)`와 strict null 비교로 즉시 boolean만 남기는 callback만 허용하며 raw return, 문자열 연결, object wrapper, 대입, async·annotation 변형을 거부한다.
+
+TDD RED는 focused 35개 중 17개 실패와 별도 Locator mutation 1/1 실패였고, 기존 raw-return/object-wrapper 차단 fixture는 약화하지 않았다. Local Node 24.14.0 GREEN은 focused 44/44, E2E preflight 46/46, typecheck·lint, 전체 legacy/security 53, contracts 22, database package 12, API 113, web 479였다. 정확히 최종 code SHA의 Node 22/PostgreSQL/Chromium `security-gate` [push run 30326538341](https://github.com/jawon0407/account-book/actions/runs/30326538341)과 [pull_request run 30326540058](https://github.com/jawon0407/account-book/actions/runs/30326540058)은 모두 `completed/success`였다.
+
+이 exact-SHA CI는 D2 hosted Google·Kakao·Naver, 실제 TLS 및 redirect/cookie/log 비노출 증거나 beta-before penetration test를 대체하지 않는다. 두 항목은 계속 독립 production release blocker다.
