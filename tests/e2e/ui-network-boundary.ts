@@ -37,6 +37,7 @@ const eventMethods = new Set(["on", "once", "addListener", "prependListener", "p
 const navigationMethods = new Set(["goto", "reload", "goBack", "goForward"]);
 const locatorMethods = new Set(["click", "fill", "first"]);
 const prohibitedCapabilityTypes = new Set(["BrowserContext", "Request", "Route", "APIRequestContext"]);
+const globalTransportRoots = new Set(["globalThis", "global", "window", "self"]);
 
 /**
  * Walks a UI-only static module graph and returns stable, source-safe policy findings.
@@ -249,6 +250,7 @@ function inspectSyntax(
   ]);
   const capabilityTypeAliases = new Map<string, BrowserCapabilityKind>();
   const locatorNames = new Set<string>();
+  const globalTransportRootNames = new Set(globalTransportRoots);
   const inspectNode = (node: ts.Node): void => {
     if (ts.isTypeAliasDeclaration(node) && typeMentionsResponse(node.type, typeAliases)) typeAliases.add(node.name.text);
     if (ts.isTypeAliasDeclaration(node)) {
@@ -282,9 +284,18 @@ function inspectSyntax(
     if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
       trackNavigationAlias(node.name, node.initializer, navigationAliases);
       if (isLocatorExpression(node.initializer, locatorNames)) bindNames(node.name, locatorNames);
+      const source = stripExpression(node.initializer);
+      if (ts.isIdentifier(node.name) && ts.isIdentifier(source) && globalTransportRootNames.has(source.text)) {
+        globalTransportRootNames.add(node.name.text);
+      }
     }
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
       trackNavigationAssignmentAlias(node.left, node.right, navigationAliases);
+      const target = stripExpression(node.left);
+      const source = stripExpression(node.right);
+      if (ts.isIdentifier(target) && ts.isIdentifier(source) && globalTransportRootNames.has(source.text)) {
+        globalTransportRootNames.add(target.text);
+      }
     }
     if ((ts.isVariableDeclaration(node) || ts.isBinaryExpression(node)) && objectBindingFromResponse(node, responseNames)) {
       add("response", "response-consumption");
@@ -309,7 +320,7 @@ function inspectSyntax(
     }
     if ((ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node))) {
       inspectLocatorAccess(node, locatorNames, add);
-      inspectTransportMember(node, add);
+      inspectTransportMember(node, globalTransportRootNames, add);
     }
     if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) inspectResponseMember(node, responseNames, add);
     if (ts.isElementAccessExpression(node) && !ts.isStringLiteral(node.argumentExpression)
@@ -786,12 +797,20 @@ function inspectLocatorAccess(
 /**
  * Rejects retained global fetch/XHR members, including static bracket access.
  * @param access - Candidate member expression.
+ * @param rootNames - Global transport roots and retained aliases known in this source file.
  * @param add - Safe fixed finding recorder.
  */
 function inspectTransportMember(
   access: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+  rootNames: ReadonlySet<string>,
   add: (category: UiNetworkBoundaryViolation["category"], capability: UiNetworkCapability) => void,
 ): void {
+  const receiver = stripExpression(access.expression);
+  if (ts.isElementAccessExpression(access) && !ts.isStringLiteral(access.argumentExpression)
+    && ts.isIdentifier(receiver) && rootNames.has(receiver.text)) {
+    add("network", "unapproved-browser-capability");
+    return;
+  }
   const member = staticMemberName(access);
   if (member !== "fetch" && member !== "XMLHttpRequest") return;
   const chain = memberChain(access);

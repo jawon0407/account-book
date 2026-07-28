@@ -280,6 +280,99 @@ test("mutation: global fetch and XMLHttpRequest members cannot be retained as al
   );
 });
 
+test("mutation: dynamically computed global transport capability fails closed", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        const key = "fetch";
+        const response = await globalThis[key]("/api");
+        const body = await response.text();
+        void body;
+      `,
+    }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: Node global cannot dynamically select a transport capability", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'const key = "fetch"; await global[key]("/api");' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: window cannot dynamically select a transport capability", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'const key = "fetch"; await window[key]("/api");' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: self cannot dynamically select a transport capability", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'const key = "fetch"; await self[key]("/api");' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: a declared global root alias cannot select fetch", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'const root = globalThis; const key = "fetch"; await root[key]("/api");' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: an assigned global root alias cannot select XMLHttpRequest", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'let root; root = window; const key = "XMLHttpRequest"; new root[key]();' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: an optional computed alias invocation cannot select fetch", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'const root = self; const key = "fetch"; await root?.[key]?.("/api");' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: a computed alias invocation cannot call fetch", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'const root = globalThis; const key = "fetch"; await root[key].call(root, "/api");' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: a computed alias invocation cannot apply fetch", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'let root; root = global; const key = "fetch"; await root[key].apply(root, ["/api"]);' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: a computed alias invocation cannot bind fetch", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": 'const root = window; const key = "fetch"; const client = root[key].bind(root); await client("/api");',
+    }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: a global root alias cannot dynamically select Request", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'const root = globalThis; const key = "Request"; new root[key]("/api");' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: a global root alias cannot dynamically select Response", () => {
+  assert.deepEqual(
+    inspect({ "root.ts": 'const root = self; const key = "Response"; new root[key]("{}");' }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
 test("mutation: browser Request and Response factories are outside the closed allowlist", () => {
   assert.deepEqual(
     inspect({ "root.ts": 'new Request("/api"); new Response("{}");' }),
