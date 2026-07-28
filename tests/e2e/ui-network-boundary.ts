@@ -39,6 +39,11 @@ const locatorMethods = new Set(["click", "fill", "first"]);
 const prohibitedCapabilityTypes = new Set(["BrowserContext", "Request", "Route", "APIRequestContext"]);
 const globalTransportRoots = new Set(["globalThis", "global", "window", "self"]);
 
+type UiSourceGraphNode = Readonly<{
+  sourceFile: ts.SourceFile;
+  localModules: ReadonlyMap<string, string>;
+}>;
+
 /**
  * Walks a UI-only static module graph and returns stable, source-safe policy findings.
  * @param options - Canonical UI root directory and the entry file to inspect.
@@ -63,6 +68,7 @@ export function findUiNetworkBoundaryViolations(
   }
 
   const visited = new Set<string>();
+  const sourceGraph = new Map<string, UiSourceGraphNode>();
   /** Inspects one canonical local source file at most once. */
   const inspectFile = (fileName: string): void => {
     if (visited.has(fileName)) return;
@@ -76,6 +82,7 @@ export function findUiNetworkBoundaryViolations(
     }
     const sourceFile = ts.createSourceFile(fileName, sourceText, ts.ScriptTarget.Latest, true);
     const localModules = new Map<string, string>();
+    sourceGraph.set(fileName, { sourceFile, localModules });
     for (const statement of sourceFile.statements) {
       if (ts.isImportEqualsDeclaration(statement)) {
         add("import", "dynamic-import");
@@ -90,10 +97,157 @@ export function findUiNetworkBoundaryViolations(
         inspectModuleSpecifier(statement, specifier.text, fileName, rootDirectory, localModules, inspectFile, add);
       }
     }
-    inspectSyntax(sourceFile, add);
   };
   inspectFile(rootFile);
+  const globalTransportRootNames = discoverGraphGlobalTransportRootNames(sourceGraph);
+  for (const [fileName, source] of sourceGraph) {
+    inspectSyntax(source.sourceFile, globalTransportRootNames.get(fileName) ?? globalTransportRoots, add);
+  }
   return ordered(findings);
+}
+
+/**
+ * Resolves simple global transport aliases across the complete permitted local
+ * graph before policy enforcement, including named/default imports and
+ * re-exports.
+ * @param sourceGraph - Canonical parsed source files and resolved local edges.
+ * @returns Per-file alias names with global transport provenance.
+ */
+function discoverGraphGlobalTransportRootNames(
+  sourceGraph: ReadonlyMap<string, UiSourceGraphNode>,
+): ReadonlyMap<string, ReadonlySet<string>> {
+  const namesByFile = new Map<string, Set<string>>();
+  const exportsByFile = new Map<string, Set<string>>();
+  for (const fileName of sourceGraph.keys()) {
+    namesByFile.set(fileName, new Set(globalTransportRoots));
+    exportsByFile.set(fileName, new Set());
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const [fileName, source] of sourceGraph) {
+      const names = namesByFile.get(fileName);
+      const exportedNames = exportsByFile.get(fileName);
+      if (names === undefined || exportedNames === undefined) continue;
+      for (const name of collectGlobalTransportRootNames(source.sourceFile, names)) {
+        if (!names.has(name)) {
+          names.add(name);
+          changed = true;
+        }
+      }
+      for (const statement of source.sourceFile.statements) {
+        if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
+          const target = source.localModules.get(statement.moduleSpecifier.text);
+          const targetExports = target === undefined ? undefined : exportsByFile.get(target);
+          if (targetExports !== undefined && addImportedGlobalTransportNames(statement, targetExports, names)) {
+            changed = true;
+          }
+        }
+        if (addExportedGlobalTransportNames(statement, source.localModules, names, exportsByFile, exportedNames)) {
+          changed = true;
+        }
+      }
+    }
+  }
+  return namesByFile;
+}
+
+/**
+ * Adds local bindings imported from one module's exported global roots.
+ * @param declaration - Static local import declaration.
+ * @param targetExports - Capability-bearing exported names from the target.
+ * @param names - Mutable importing-file capability names.
+ * @returns True when at least one new local alias was added.
+ */
+function addImportedGlobalTransportNames(
+  declaration: ts.ImportDeclaration,
+  targetExports: ReadonlySet<string>,
+  names: Set<string>,
+): boolean {
+  const clause = declaration.importClause;
+  if (clause === undefined || clause.isTypeOnly) return false;
+  let changed = false;
+  if (clause.name !== undefined && targetExports.has("default") && !names.has(clause.name.text)) {
+    names.add(clause.name.text);
+    changed = true;
+  }
+  if (clause.namedBindings !== undefined && ts.isNamespaceImport(clause.namedBindings)) {
+    for (const exportedName of targetExports) {
+      const path = `${clause.namedBindings.name.text}.${exportedName}`;
+      if (names.has(path)) continue;
+      names.add(path);
+      changed = true;
+    }
+    return changed;
+  }
+  if (clause.namedBindings === undefined || !ts.isNamedImports(clause.namedBindings)) return changed;
+  for (const element of clause.namedBindings.elements) {
+    if (element.isTypeOnly) continue;
+    const importedName = element.propertyName?.text ?? element.name.text;
+    if (!targetExports.has(importedName) || names.has(element.name.text)) continue;
+    names.add(element.name.text);
+    changed = true;
+  }
+  return changed;
+}
+
+/**
+ * Adds global-root exports declared locally or forwarded from a resolved local
+ * module.
+ * @param statement - Candidate export-bearing top-level statement.
+ * @param localModules - Resolved local module edges for this file.
+ * @param names - Capability-bearing local binding names.
+ * @param exportsByFile - Capability exports accumulated for every graph file.
+ * @param exportedNames - Mutable export names for this file.
+ * @returns True when at least one new exported alias was added.
+ */
+function addExportedGlobalTransportNames(
+  statement: ts.Statement,
+  localModules: ReadonlyMap<string, string>,
+  names: ReadonlySet<string>,
+  exportsByFile: ReadonlyMap<string, ReadonlySet<string>>,
+  exportedNames: Set<string>,
+): boolean {
+  let changed = false;
+  const addExport = (name: string): void => {
+    if (exportedNames.has(name)) return;
+    exportedNames.add(name);
+    changed = true;
+  };
+  if (ts.isVariableStatement(statement)
+    && statement.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)) {
+    for (const declaration of statement.declarationList.declarations) {
+      if (ts.isIdentifier(declaration.name) && names.has(declaration.name.text)) {
+        addExport(declaration.name.text);
+      }
+    }
+  }
+  if (ts.isExportAssignment(statement)) {
+    const expression = stripExpression(statement.expression);
+    if (!statement.isExportEquals && ts.isIdentifier(expression) && names.has(expression.text)) {
+      addExport("default");
+    }
+  }
+  if (!ts.isExportDeclaration(statement)) return changed;
+  const target = statement.moduleSpecifier !== undefined && ts.isStringLiteral(statement.moduleSpecifier)
+    ? localModules.get(statement.moduleSpecifier.text) : undefined;
+  const targetExports = target === undefined ? undefined : exportsByFile.get(target);
+  if (statement.exportClause === undefined) {
+    if (targetExports !== undefined) {
+      for (const name of targetExports) {
+        if (name !== "default") addExport(name);
+      }
+    }
+    return changed;
+  }
+  if (!ts.isNamedExports(statement.exportClause)) return changed;
+  for (const element of statement.exportClause.elements) {
+    const sourceName = element.propertyName?.text ?? element.name.text;
+    if (targetExports !== undefined ? targetExports.has(sourceName) : names.has(sourceName)) {
+      addExport(element.name.text);
+    }
+  }
+  return changed;
 }
 
 /**
@@ -232,11 +386,13 @@ function inspectExternalImport(
 /**
  * Visits source syntax with conservative response, event, execution, and navigation policies.
  * @param sourceFile - Parsed local UI source file.
+ * @param initialGlobalTransportRootNames - Fixed and graph-propagated transport root aliases.
  * @param add - Safe fixed finding recorder.
  * @returns Nothing.
  */
 function inspectSyntax(
   sourceFile: ts.SourceFile,
+  initialGlobalTransportRootNames: ReadonlySet<string>,
   add: (category: UiNetworkBoundaryViolation["category"], capability: UiNetworkCapability) => void,
 ): void {
   const responseNames = new Set<string>();
@@ -250,7 +406,7 @@ function inspectSyntax(
   ]);
   const capabilityTypeAliases = new Map<string, BrowserCapabilityKind>();
   const locatorNames = new Set<string>();
-  const globalTransportRootNames = new Set(globalTransportRoots);
+  const globalTransportRootNames = collectGlobalTransportRootNames(sourceFile, initialGlobalTransportRootNames);
   const inspectNode = (node: ts.Node): void => {
     if (ts.isTypeAliasDeclaration(node) && typeMentionsResponse(node.type, typeAliases)) typeAliases.add(node.name.text);
     if (ts.isTypeAliasDeclaration(node)) {
@@ -284,18 +440,9 @@ function inspectSyntax(
     if (ts.isVariableDeclaration(node) && node.initializer !== undefined) {
       trackNavigationAlias(node.name, node.initializer, navigationAliases);
       if (isLocatorExpression(node.initializer, locatorNames)) bindNames(node.name, locatorNames);
-      const source = stripExpression(node.initializer);
-      if (ts.isIdentifier(node.name) && ts.isIdentifier(source) && globalTransportRootNames.has(source.text)) {
-        globalTransportRootNames.add(node.name.text);
-      }
     }
     if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
       trackNavigationAssignmentAlias(node.left, node.right, navigationAliases);
-      const target = stripExpression(node.left);
-      const source = stripExpression(node.right);
-      if (ts.isIdentifier(target) && ts.isIdentifier(source) && globalTransportRootNames.has(source.text)) {
-        globalTransportRootNames.add(target.text);
-      }
     }
     if ((ts.isVariableDeclaration(node) || ts.isBinaryExpression(node)) && objectBindingFromResponse(node, responseNames)) {
       add("response", "response-consumption");
@@ -328,6 +475,49 @@ function inspectSyntax(
     ts.forEachChild(node, inspectNode);
   };
   inspectNode(sourceFile);
+}
+
+/**
+ * Discovers retained global transport roots before enforcing any access so
+ * declaration order and transitive simple aliases cannot affect policy.
+ * @param sourceFile - Parsed local UI source file.
+ * @param initialNames - Fixed global roots and any graph-propagated imports.
+ * @returns Every simple declaration, assignment, or default-parameter alias.
+ */
+function collectGlobalTransportRootNames(
+  sourceFile: ts.SourceFile,
+  initialNames: ReadonlySet<string>,
+): ReadonlySet<string> {
+  const names = new Set(initialNames);
+  const edges: Array<Readonly<{ target: string; source: string }>> = [];
+  const collect = (node: ts.Node): void => {
+    if ((ts.isVariableDeclaration(node) || ts.isParameter(node)) && node.initializer !== undefined
+      && ts.isIdentifier(node.name)) {
+      const source = stripExpression(node.initializer);
+      const chain = memberChain(source);
+      if (chain !== undefined) edges.push({ target: node.name.text, source: chain.join(".") });
+    }
+    if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      const target = stripExpression(node.left);
+      const source = stripExpression(node.right);
+      const chain = memberChain(source);
+      if (ts.isIdentifier(target) && chain !== undefined) {
+        edges.push({ target: target.text, source: chain.join(".") });
+      }
+    }
+    ts.forEachChild(node, collect);
+  };
+  collect(sourceFile);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const edge of edges) {
+      if (!names.has(edge.source) || names.has(edge.target)) continue;
+      names.add(edge.target);
+      changed = true;
+    }
+  }
+  return names;
 }
 
 type BrowserCapabilityKind = "page" | "context" | "request" | "route" | "api-request";
@@ -806,8 +996,9 @@ function inspectTransportMember(
   add: (category: UiNetworkBoundaryViolation["category"], capability: UiNetworkCapability) => void,
 ): void {
   const receiver = stripExpression(access.expression);
+  const receiverChain = memberChain(receiver);
   if (ts.isElementAccessExpression(access) && !ts.isStringLiteral(access.argumentExpression)
-    && ts.isIdentifier(receiver) && rootNames.has(receiver.text)) {
+    && receiverChain !== undefined && rootNames.has(receiverChain.join("."))) {
     add("network", "unapproved-browser-capability");
     return;
   }

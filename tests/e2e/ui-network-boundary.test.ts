@@ -322,6 +322,69 @@ test("mutation: a declared global root alias cannot select fetch", () => {
   );
 });
 
+test("mutation: global root alias discovery is independent of declaration order", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        const key = "fetch";
+        async function readBody() {
+          const response = await root[key]("/api");
+          return response.text();
+        }
+        const root = globalThis;
+        await readBody();
+      `,
+    }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: a default parameter retains global root provenance", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        async function readBody(root = globalThis) {
+          const key = "fetch";
+          const response = await root[key]("/api");
+          return response.text();
+        }
+        await readBody();
+      `,
+    }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: a local-module import retains exported global root provenance", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        import { root } from "./helper.js";
+        const key = "fetch";
+        const response = await root[key]("/api");
+        await response.text();
+      `,
+      "helper.ts": "export const root = globalThis;",
+    }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
+test("mutation: a local-module namespace retains exported global root provenance", () => {
+  assert.deepEqual(
+    inspect({
+      "root.ts": `
+        import * as transport from "./helper.js";
+        const key = "fetch";
+        const response = await transport.root[key]("/api");
+        await response.text();
+      `,
+      "helper.ts": "export const root = globalThis;",
+    }),
+    [{ category: "network", capability: "unapproved-browser-capability" }],
+  );
+});
+
 test("mutation: an assigned global root alias cannot select XMLHttpRequest", () => {
   assert.deepEqual(
     inspect({ "root.ts": 'let root; root = window; const key = "XMLHttpRequest"; new root[key]();' }),
