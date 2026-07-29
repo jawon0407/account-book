@@ -1,4 +1,4 @@
-import { realpathSync, readFileSync } from "node:fs";
+import { realpathSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import * as ts from "typescript";
 
@@ -70,6 +70,13 @@ function isApprovedImport(statement: ts.ImportDeclaration): boolean {
     && binding.name.text === "authTest";
 }
 
+function hasExportModifier(statement: ts.Statement): boolean {
+  if (!ts.canHaveModifiers(statement)) return false;
+  return ts.getModifiers(statement)?.some((modifier) =>
+    modifier.kind === ts.SyntaxKind.ExportKeyword || modifier.kind === ts.SyntaxKind.DefaultKeyword
+  ) ?? false;
+}
+
 function violation(
   category: UiFacadeBoundaryViolation["category"],
   capability: UiFacadeBoundaryCapability,
@@ -99,6 +106,7 @@ function recordStringConstants(statement: ts.Statement, names: Set<string>): boo
       || declaration.type !== undefined
       || initializer === undefined
       || !ts.isStringLiteral(initializer)
+      || declaration.name.text === "authTest"
       || names.has(declaration.name.text)) {
       return false;
     }
@@ -225,13 +233,26 @@ export function findUiFacadeBoundaryViolations(
   if (rootDirectory === undefined || rootFile === undefined || !isInside(rootDirectory, rootFile)) {
     return [{ category: "boundary", capability: "boundary-escape" }];
   }
-  if (!sourceExtensions.has(path.extname(rootFile).toLowerCase())) {
+  try {
+    if (!statSync(rootDirectory).isDirectory() || !statSync(rootFile).isFile()) {
+      return [{ category: "boundary", capability: "boundary-escape" }];
+    }
+  } catch {
+    return [{ category: "boundary", capability: "boundary-escape" }];
+  }
+  if (!sourceExtensions.has(path.extname(rootFile))) {
     return [{ category: "boundary", capability: "unsupported-extension" }];
   }
 
+  let sourceText: string;
+  try {
+    sourceText = readFileSync(rootFile, "utf8");
+  } catch {
+    return [{ category: "boundary", capability: "boundary-escape" }];
+  }
   const sourceFile = ts.createSourceFile(
     rootFile,
-    readFileSync(rootFile, "utf8"),
+    sourceText,
     ts.ScriptTarget.Latest,
     true,
   );
@@ -253,7 +274,9 @@ export function findUiFacadeBoundaryViolations(
     }
     if (ts.isImportEqualsDeclaration(statement)
       || ts.isExportDeclaration(statement)
-      || ts.isExportAssignment(statement)) {
+      || ts.isExportAssignment(statement)
+      || ts.isNamespaceExportDeclaration(statement)
+      || hasExportModifier(statement)) {
       return [{ category: "import", capability: "unapproved-import" }];
     }
   }
