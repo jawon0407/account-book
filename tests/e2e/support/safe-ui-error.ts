@@ -23,6 +23,9 @@ export class SafeAuthUiError extends Error {
   readonly code: SafeAuthUiErrorCode;
 
   constructor(code: SafeAuthUiErrorCode) {
+    if (new.target !== SafeAuthUiError) {
+      throw new SafeAuthUiError("AUTH_UI_UNEXPECTED_FAILURE");
+    }
     const fixedCode = isSafeAuthUiErrorCode(code)
       ? code
       : "AUTH_UI_UNEXPECTED_FAILURE";

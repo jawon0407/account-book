@@ -250,6 +250,32 @@ test("fails closed on a non-configurable transport before callback execution and
   assert.equal(Reflect.get(target, "fetch"), originals.fetch);
 });
 
+test("rolls back partial installation on a non-extensible ordinary target", async () => {
+  const { target } = makeDescriptorTarget();
+  Reflect.deleteProperty(target, "Response");
+  Reflect.deleteProperty(target, "WebSocket");
+  Reflect.deleteProperty(target, "EventSource");
+  Object.preventExtensions(target);
+  const before = Object.getOwnPropertyDescriptors(target);
+  let callbackRan = false;
+
+  await assert.rejects(
+    withTransportTripwire(async () => {
+      callbackRan = true;
+    }, target),
+    isTransportBlocked,
+  );
+
+  assert.equal(callbackRan, false);
+  assert.deepEqual(Object.getOwnPropertyDescriptors(target), before);
+
+  let freshCallRan = false;
+  await withTransportTripwire(async () => {
+    freshCallRan = true;
+  }, makeDescriptorTarget().target);
+  assert.equal(freshCallRan, true);
+});
+
 test("rejects nested installation on a different target without releasing the outer tripwire", async () => {
   const outerTarget = makeDescriptorTarget().target;
   const innerTarget = makeDescriptorTarget().target;
@@ -277,6 +303,26 @@ test("rejects nested installation on a different target without releasing the ou
     Object.getOwnPropertyDescriptors(outerTarget),
     outerBefore,
   );
+});
+
+test("rejects nested installation on the same target without releasing the outer tripwire", async () => {
+  const target = makeDescriptorTarget().target;
+  const before = Object.getOwnPropertyDescriptors(target);
+  let nestedOperationRan = false;
+
+  await withTransportTripwire(async () => {
+    await assert.rejects(
+      withTransportTripwire(async () => {
+        nestedOperationRan = true;
+      }, target),
+      isTransportBlocked,
+    );
+
+    assert.equal(nestedOperationRan, false);
+    assertAllTransportsBlocked(target);
+  }, target);
+
+  assert.deepEqual(Object.getOwnPropertyDescriptors(target), before);
 });
 
 test("rejects a concurrent different-target installation until restoration completes", async () => {
@@ -319,6 +365,87 @@ test("rejects a concurrent different-target installation until restoration compl
   assert.equal(concurrentOperationRan, true);
 });
 
+test("keeps active during restoration for nested same-target and different-target calls", async () => {
+  const sentinel = "restore-timing-secret-must-not-escape";
+  const target = makeDescriptorTarget().target;
+  const differentTarget = makeDescriptorTarget().target;
+  const before = Object.getOwnPropertyDescriptors(target);
+  const differentBefore = Object.getOwnPropertyDescriptors(differentTarget);
+  const reflectDefinePropertyDescriptor = Object.getOwnPropertyDescriptor(
+    Reflect,
+    "defineProperty",
+  );
+  assert.ok(reflectDefinePropertyDescriptor);
+  const originalReflectDefineProperty = Reflect.defineProperty;
+  let restorationStarted = false;
+  let restoreObservationCount = 0;
+  let nestedOperationRuns = 0;
+  let sameTargetAttempt: Promise<boolean> | undefined;
+  let differentTargetAttempt: Promise<boolean> | undefined;
+
+  Object.defineProperty(Reflect, "defineProperty", {
+    ...reflectDefinePropertyDescriptor,
+    value(
+      instrumentedTarget: object,
+      propertyKey: PropertyKey,
+      attributes: PropertyDescriptor,
+    ): boolean {
+      if (
+        restorationStarted
+        && restoreObservationCount === 0
+        && instrumentedTarget === target
+        && propertyKey === "fetch"
+        && attributes.value === before.fetch?.value
+      ) {
+        restoreObservationCount += 1;
+        sameTargetAttempt = withTransportTripwire(async () => {
+          nestedOperationRuns += 1;
+          throw new Error(sentinel);
+        }, target).then(
+          () => false,
+          isTransportBlocked,
+        );
+        differentTargetAttempt = withTransportTripwire(async () => {
+          nestedOperationRuns += 1;
+          throw new Error(sentinel);
+        }, differentTarget).then(
+          () => false,
+          isTransportBlocked,
+        );
+      }
+      return originalReflectDefineProperty(
+        instrumentedTarget,
+        propertyKey,
+        attributes,
+      );
+    },
+  });
+
+  try {
+    await withTransportTripwire(async () => {
+      restorationStarted = true;
+    }, target);
+  } finally {
+    Object.defineProperty(
+      Reflect,
+      "defineProperty",
+      reflectDefinePropertyDescriptor,
+    );
+  }
+
+  assert.equal(restoreObservationCount, 1);
+  assert.ok(sameTargetAttempt);
+  assert.ok(differentTargetAttempt);
+  assert.equal(await sameTargetAttempt, true);
+  assert.equal(await differentTargetAttempt, true);
+  assert.equal(nestedOperationRuns, 0);
+  assert.deepEqual(Object.getOwnPropertyDescriptors(target), before);
+  assert.deepEqual(
+    Object.getOwnPropertyDescriptors(differentTarget),
+    differentBefore,
+  );
+});
+
 test("blocks each transport as both a function call and a constructor", async () => {
   const { target } = makeDescriptorTarget();
 
@@ -332,6 +459,22 @@ test("blocks each transport as both a function call and a constructor", async ()
       assert.throws(() => new blocker(), isTransportBlocked);
     }
   }, target);
+});
+
+test("blocks and removes absent transports on an ordinary function target", async () => {
+  function target(): void {}
+
+  for (const name of transportGlobalNames) {
+    assert.equal(Object.getOwnPropertyDescriptor(target, name), undefined);
+  }
+
+  await withTransportTripwire(async () => {
+    assertAllTransportsBlocked(target);
+  }, target);
+
+  for (const name of transportGlobalNames) {
+    assert.equal(Object.getOwnPropertyDescriptor(target, name), undefined);
+  }
 });
 
 test("does not execute original accessor getters while installing or restoring", async () => {

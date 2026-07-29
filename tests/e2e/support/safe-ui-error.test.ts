@@ -102,3 +102,62 @@ test("freezes issued errors and removes stack and cause properties", () => {
   assert.equal(error.code, "AUTH_UI_LAYOUT_FAILED");
   assert.equal(normalizeSafeAuthUiError(error), error);
 });
+
+test("rejects subclass construction with inherited disclosure properties", () => {
+  const sentinel = "subclass-inherited-secret-must-not-escape";
+  class DisclosingSafeAuthUiError extends SafeAuthUiError {}
+  Object.defineProperties(DisclosingSafeAuthUiError.prototype, {
+    cause: { value: { sentinel } },
+    path: { value: `C:\\sensitive\\${sentinel}` },
+    toJSON: {
+      value: () => ({ sentinel }),
+    },
+  });
+
+  assert.throws(
+    () => new DisclosingSafeAuthUiError("AUTH_UI_LAYOUT_FAILED"),
+    (error) => {
+      assert.equal(Object.getPrototypeOf(error), SafeAuthUiError.prototype);
+      assert.equal(error instanceof SafeAuthUiError, true);
+      assert.equal((error as SafeAuthUiError).code, "AUTH_UI_UNEXPECTED_FAILURE");
+      assert.equal((error as Error).message, "AUTH_UI_UNEXPECTED_FAILURE");
+      assert.equal("stack" in (error as object), false);
+      assert.equal("cause" in (error as object), false);
+      assert.equal("path" in (error as object), false);
+      assert.equal(JSON.stringify(error).includes(sentinel), false);
+      assert.equal(normalizeSafeAuthUiError(error), error);
+      return true;
+    },
+  );
+});
+
+test("rejects Reflect.construct with a custom newTarget", () => {
+  const sentinel = "custom-new-target-secret-must-not-escape";
+  const customPrototype = {
+    cause: { sentinel },
+    path: `C:\\sensitive\\${sentinel}`,
+    toJSON: () => ({ sentinel }),
+  };
+  function CustomNewTarget(): void {}
+  CustomNewTarget.prototype = customPrototype;
+
+  assert.throws(
+    () => Reflect.construct(
+      SafeAuthUiError,
+      ["AUTH_UI_LAYOUT_FAILED"],
+      CustomNewTarget,
+    ),
+    (error) => {
+      assert.equal(Object.getPrototypeOf(error), SafeAuthUiError.prototype);
+      assert.equal(error instanceof SafeAuthUiError, true);
+      assert.equal((error as SafeAuthUiError).code, "AUTH_UI_UNEXPECTED_FAILURE");
+      assert.equal((error as Error).message, "AUTH_UI_UNEXPECTED_FAILURE");
+      assert.equal("stack" in (error as object), false);
+      assert.equal("cause" in (error as object), false);
+      assert.equal("path" in (error as object), false);
+      assert.equal(JSON.stringify(error).includes(sentinel), false);
+      assert.equal(normalizeSafeAuthUiError(error), error);
+      return true;
+    },
+  );
+});
