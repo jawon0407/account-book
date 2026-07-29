@@ -218,6 +218,24 @@ test("rejects callback fixture, alias, and control-flow mutations", () => {
   }
 });
 
+test("rejects renamed, rest, defaulted, and typed callback bindings", () => {
+  const callbacks = [
+    "async ({ authUi: facade }) => {}",
+    "async ({ ...authUi }) => {}",
+    "async ({ authUi = undefined }) => {}",
+    "async ({ authUi }: { authUi: unknown }) => {}",
+    "async ({ authUi } = { authUi: undefined }) => {}",
+  ];
+
+  for (const callback of callbacks) {
+    assert.deepEqual(
+      inspect(authSource(callback)),
+      [{ category: "syntax", capability: "unapproved-callback" }],
+      callback,
+    );
+  }
+});
+
 test("rejects invalid authTest title, arity, and non-async callbacks", () => {
   const calls = [
     'authTest(email, async ({ authUi }) => {});',
@@ -274,6 +292,50 @@ test("rejects computed and unknown facade methods", () => {
       [{ category: "capability", capability: "unapproved-method" }],
     );
   }
+});
+
+test("rejects non-direct awaited facade call shapes with exact singleton findings", () => {
+  const calls = [
+    {
+      statement: "await (authUi.openLogin)();",
+      want: [{ category: "capability", capability: "unapproved-method" }],
+    },
+    {
+      statement: "await authUi?.openLogin();",
+      want: [{ category: "capability", capability: "unapproved-method" }],
+    },
+    {
+      statement: "await (0, authUi.openLogin)();",
+      want: [{ category: "capability", capability: "unapproved-method" }],
+    },
+    {
+      statement: "await authUi.openLogin.call(authUi);",
+      want: [{ category: "capability", capability: "unapproved-method" }],
+    },
+    {
+      statement: "await authUi.openLogin?.();",
+      want: [{ category: "syntax", capability: "unapproved-callback" }],
+    },
+    {
+      statement: "await authUi.openLogin`x`;",
+      want: [{ category: "syntax", capability: "unapproved-callback" }],
+    },
+  ] as const;
+
+  for (const call of calls) {
+    assert.deepEqual(
+      inspect(authSource(`async ({ authUi }) => { ${call.statement} }`)),
+      call.want,
+      call.statement,
+    );
+  }
+});
+
+test("rejects arguments passed to zero-argument facade methods", () => {
+  assert.deepEqual(
+    inspect(authSource('async ({ authUi }) => { await authUi.openLogin("x"); }')),
+    [{ category: "capability", capability: "unsafe-argument" }],
+  );
 });
 
 test("rejects every reshaped or unresolved submit credential object", () => {
