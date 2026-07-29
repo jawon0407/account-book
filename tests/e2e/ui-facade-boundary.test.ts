@@ -108,7 +108,11 @@ const threatParity = {
     },
     {
       file: "./ui-facade-boundary.test.ts",
-      name: "rejects non-direct awaited facade call shapes with exact singleton findings",
+      name: "rejects facade apply and bind invocation with exact singleton findings",
+    },
+    {
+      file: "./ui-facade-boundary.test.ts",
+      name: "rejects assignment destructuring of the facade with an exact singleton finding",
     },
     {
       file: "./ui-facade-boundary.test.ts",
@@ -122,7 +126,7 @@ const threatParity = {
     },
     {
       file: "./ui-facade-boundary.test.ts",
-      name: "rejects transport and dynamic execution at module scope with one fixed syntax diagnostic",
+      name: "rejects page evaluation and script injection with exact singleton findings",
     },
   ],
   "root escape and unsupported extension": [
@@ -132,7 +136,15 @@ const threatParity = {
     },
     {
       file: "./ui-facade-boundary.test.ts",
-      name: "authoritative preflight fails closed for missing, replaced, or linked safe UI support",
+      name: "authoritative preflight returns fixed findings for import mismatch and missing canonical files",
+    },
+    {
+      file: "./ui-facade-boundary.test.ts",
+      name: "authoritative preflight fails closed for replaced or linked safe UI support",
+    },
+    {
+      file: "./ui-facade-boundary.test.ts",
+      name: "authoritative preflight rejects executable support shadows beside the canonical TypeScript file",
     },
   ],
 } as const satisfies Readonly<Record<string, readonly ThreatTestReference[]>>;
@@ -201,12 +213,25 @@ function hasExactOrdinaryIdentity(
     && realpathSync.native(candidate) === expectedPath;
 }
 
+function hasNoExecutableSupportShadows(supportDirectory: string): boolean {
+  for (const fileName of ["safe-ui-test.js", "safe-ui-test.jsx", "safe-ui-test.tsx"] as const) {
+    try {
+      lstatSync(join(supportDirectory, fileName));
+      return false;
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") return false;
+    }
+  }
+  return true;
+}
+
 function inspectAuthoritativeAuthUiSpec(paths: CanonicalAuthUiPaths) {
   try {
     if (!hasExactOrdinaryIdentity(paths.uiDirectory, paths.uiDirectory, "directory")
       || !hasExactOrdinaryIdentity(paths.rootFile, paths.rootFile, "file")
       || !hasExactOrdinaryIdentity(paths.supportDirectory, paths.supportDirectory, "directory")
-      || !hasExactOrdinaryIdentity(paths.supportFile, paths.supportFile, "file")) {
+      || !hasExactOrdinaryIdentity(paths.supportFile, paths.supportFile, "file")
+      || !hasNoExecutableSupportShadows(paths.supportDirectory)) {
       return [{ category: "boundary", capability: "boundary-escape" }] as const;
     }
     const uiRealPath = realpathSync.native(paths.uiDirectory);
@@ -272,19 +297,61 @@ function collectNamedTests(file: string): ReadonlySet<string> {
   return names;
 }
 
-test("accepts the real auth UI spec with its exact authTest import", () => {
-  assert.equal(readFileSync(actualAuthUiPaths.rootFile, "utf8").split(/\r?\n/u)[0], exactAuthTestImport);
+test("accepts the real auth UI spec through the authoritative identity preflight", () => {
   assert.deepEqual(inspectAuthoritativeAuthUiSpec(actualAuthUiPaths), []);
 });
 
-test("authoritative preflight fails closed for missing, replaced, or linked safe UI support", () => {
-  for (const mutation of ["missing", "replaced", "linked"] as const) {
+test("authoritative preflight returns fixed findings for import mismatch and missing canonical files", () => {
+  const mutations = [
+    {
+      mutate(fixture: ReturnType<typeof createCanonicalAuthUiFixture>) {
+        writeFileSync(
+          fixture.paths.rootFile,
+          'import { authTest } from "../support/not-safe-ui-test.js";',
+        );
+      },
+      name: "import mismatch",
+      want: [{ category: "import", capability: "unapproved-import" }],
+    },
+    {
+      mutate(fixture: ReturnType<typeof createCanonicalAuthUiFixture>) {
+        rmSync(fixture.paths.rootFile, { force: true });
+      },
+      name: "missing spec",
+      want: [{ category: "boundary", capability: "boundary-escape" }],
+    },
+    {
+      mutate(fixture: ReturnType<typeof createCanonicalAuthUiFixture>) {
+        rmSync(fixture.paths.supportFile, { force: true });
+      },
+      name: "missing support",
+      want: [{ category: "boundary", capability: "boundary-escape" }],
+    },
+  ] as const;
+
+  for (const mutation of mutations) {
+    const fixture = createCanonicalAuthUiFixture();
+    try {
+      mutation.mutate(fixture);
+      assert.deepEqual(
+        inspectAuthoritativeAuthUiSpec(fixture.paths),
+        mutation.want,
+        mutation.name,
+      );
+    } finally {
+      rmSync(fixture.parent, { force: true, recursive: true });
+    }
+  }
+});
+
+test("authoritative preflight fails closed for replaced or linked safe UI support", () => {
+  for (const mutation of ["replaced", "linked"] as const) {
     const fixture = createCanonicalAuthUiFixture();
     try {
       rmSync(fixture.paths.supportFile, { force: true });
       if (mutation === "replaced") {
         mkdirSync(fixture.paths.supportFile);
-      } else if (mutation === "linked") {
+      } else {
         const outsideDirectory = join(fixture.parent, "outside-support");
         mkdirSync(outsideDirectory);
         writeFileSync(join(outsideDirectory, "safe-ui-test.ts"), "export const authTest = true;");
@@ -302,7 +369,26 @@ test("authoritative preflight fails closed for missing, replaced, or linked safe
   }
 });
 
-test("maps every retired analyzer threat family to exact surviving Gate, runtime, or support tests", () => {
+test("authoritative preflight rejects executable support shadows beside the canonical TypeScript file", () => {
+  for (const extension of [".js", ".jsx", ".tsx"] as const) {
+    const fixture = createCanonicalAuthUiFixture();
+    try {
+      writeFileSync(
+        join(fixture.paths.supportDirectory, `safe-ui-test${extension}`),
+        "export const authTest = true;",
+      );
+      assert.deepEqual(
+        inspectAuthoritativeAuthUiSpec(fixture.paths),
+        [{ category: "boundary", capability: "boundary-escape" }],
+        extension,
+      );
+    } finally {
+      rmSync(fixture.parent, { force: true, recursive: true });
+    }
+  }
+});
+
+test("validates threat parity reference integrity without replacing semantic mutation tests", () => {
   assert.deepEqual(Object.keys(threatParity), [...exactThreatFamilies]);
   const testsByFile = new Map<string, ReadonlySet<string>>();
   for (const family of exactThreatFamilies) {
@@ -656,6 +742,26 @@ test("rejects non-direct awaited facade call shapes with exact singleton finding
   }
 });
 
+test("rejects facade apply and bind invocation with exact singleton findings", () => {
+  for (const statement of [
+    "await authUi.openLogin.apply(authUi, []);",
+    "await authUi.openLogin.bind(authUi)();",
+  ]) {
+    assert.deepEqual(
+      inspect(authSource(`async ({ authUi }) => { ${statement} }`)),
+      [{ category: "capability", capability: "unapproved-method" }],
+      statement,
+    );
+  }
+});
+
+test("rejects assignment destructuring of the facade with an exact singleton finding", () => {
+  assert.deepEqual(
+    inspect(authSource("async ({ authUi }) => { ({ openLogin } = authUi); }")),
+    [{ category: "syntax", capability: "unapproved-callback" }],
+  );
+});
+
 test("rejects arguments passed to zero-argument facade methods", () => {
   assert.deepEqual(
     inspect(authSource('async ({ authUi }) => { await authUi.openLogin("x"); }')),
@@ -732,6 +838,21 @@ test("rejects transport and dynamic execution at module scope with one fixed syn
     assert.deepEqual(
       inspect(`import { authTest } from "../support/safe-ui-test.js"; ${threat}`),
       [{ category: "syntax", capability: "unapproved-top-level" }],
+    );
+  }
+});
+
+test("rejects page evaluation and script injection with exact singleton findings", () => {
+  for (const statement of [
+    'page.evaluate("fetch(\\"/health\\")");',
+    'page.addInitScript("window.x = 1");',
+    'page.addScriptTag({ content: "window.x = 1" });',
+    'page.setContent("<main />");',
+  ]) {
+    assert.deepEqual(
+      inspect(authSource(`async ({ authUi }) => { ${statement} }`)),
+      [{ category: "syntax", capability: "unapproved-callback" }],
+      statement,
     );
   }
 });

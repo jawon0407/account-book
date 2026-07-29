@@ -7,7 +7,9 @@ Browser-level desktop, tablet, mobile, authentication, authorization, offline sy
 - 인증 UI spec은 canonical `tests/e2e/support/safe-ui-test.ts`가 소유하는
   `import { authTest } from "../support/safe-ui-test.js";`만 exact 형태로 import한다.
   이 support module과 그 directory는 symlink나 대체 경로가 아닌 ordinary
-  canonical file/directory여야 한다.
+  canonical file/directory여야 한다. Preflight는 이 identity를 실행 전에 확인하며,
+  runtime import를 가로챌 수 있는 `safe-ui-test.js`, `safe-ui-test.jsx`와 canonical
+  identity를 모호하게 만드는 `safe-ui-test.tsx` sibling을 금지한다.
 - HTTP 응답, status, body, route, `APIRequestContext` 검증의 소유권은
   `auth-response.spec.ts`에 있다. UI spec이나 `AuthUi`는 이를 가져오지 않는다.
 - 새 `AuthUi` method는 고정된 안전 오류 code, 먼저 실패하는 RED Gate mutation,
