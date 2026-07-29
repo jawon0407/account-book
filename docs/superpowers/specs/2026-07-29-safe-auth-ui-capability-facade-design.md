@@ -353,8 +353,9 @@ M1.1이 완료되기 전에는 M1을 닫거나 M2를 시작하지 않는다.
 - `ui-facade-boundary.ts`는 exact `safe-ui-test` import, callback shape,
   직접 awaited facade call, 고정 credential object만 허용하는 폐쇄형
   grammar와 canonical module identity를 검사한다.
-- `safe-ui-test.ts`는 null-prototype·frozen payload의 `authUi` 한 항목만
-  callback에 전달하고 예외를 고정 `SafeAuthUiError`로 정규화한다.
+- `safe-ui-test.ts`는 frozen callback payload의 `authUi` 한 항목만
+  전달한다. `AuthUi` facade 자체는 null-prototype·frozen 객체이며,
+  callback 예외는 고정 `SafeAuthUiError`로 정규화한다.
 - `transport-tripwire.ts`는 callback 동안 transport descriptor를 차단하고
   성공·실패·부분 설치 실패에서도 exact 복원을 수행한다.
 - `auth-ui-driver.ts`는 raw Playwright/Axe를 유일하게 소유하고 cookie,
@@ -362,7 +363,8 @@ M1.1이 완료되기 전에는 M1을 닫거나 M2를 시작하지 않는다.
 - UI project의 screenshot, video, trace는 모두 정확히 `off`다.
 
 기존 `ui-network-boundary.ts`와 관련 mutation은 threat-parity 및 identity
-검증이 GREEN이 된 뒤 제거됐고 저장소 reference는 0건이다.
+검증이 GREEN이 된 뒤 제거됐고 executable/preflight reference는 0건이다.
+역사 문서의 설계·실패 기록은 의도적으로 보존한다.
 `auth-response.spec.ts`와 backend server/API 경계는 facade 설계 기준
 commit부터 최종 코드 SHA까지 변경되지 않았다. 그러므로 HTTP status/body,
 CSRF, logout, selector replay와 delegated JWT/replay consume의 소유권은
