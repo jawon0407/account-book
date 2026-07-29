@@ -418,7 +418,8 @@ Google·Kakao·Naver/TLS와 지인 베타 전 전문 침투 테스트는 그 이
 
 The facade, closed grammar, fixed safe errors, runtime Transport Tripwire, and
 artifact-off policy are implemented. The retired provenance analyzer has zero
-remaining references, while the unchanged HTTP/backend boundary still owns
+remaining executable/preflight references; historical design and failure
+records remain. The unchanged HTTP/backend boundary still owns
 status, body, CSRF, logout, and replay. Authoritative code SHA
 `61a0ea334761fc48394bae515edfeb440aed052a` passed both exact-SHA
 security-gate runs; M1 remains open until the final documentation SHA and
