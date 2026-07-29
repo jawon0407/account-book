@@ -132,7 +132,7 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
   assert.equal(webPackage.dependencies.next, "16.2.11");
   assert.equal(
     e2ePackage.scripts["test:preflight"],
-    "tsx --test production-fake-startup.test.ts playwright-environment.test.ts playwright-config.test.ts auth-response-policy.test.ts ui-network-boundary.test.ts",
+    "tsx --test production-fake-startup.test.ts playwright-environment.test.ts playwright-config.test.ts auth-response-policy.test.ts ui-facade-boundary.test.ts support/safe-ui-error.test.ts support/transport-tripwire.test.ts support/safe-ui-test.test.ts",
   );
   assert.equal(
     e2ePackage.scripts.test,
