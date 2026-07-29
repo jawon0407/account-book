@@ -333,6 +333,46 @@ TDD는 exact bypass 39/40→40/40, alternate roots 0/3→3/3, alias·adapter·fa
 
 정확히 `5cda5422e114f872ceb031f34180f9f346cb3088`의 [push security-gate run 30330701053](https://github.com/jawon0407/account-book/actions/runs/30330701053)과 [PR security-gate run 30330704817](https://github.com/jawon0407/account-book/actions/runs/30330704817)은 모두 `completed/success`였다. 이 구현 증거는 `57c3776` 차단 finding을 코드 수준에서 대체하지만 M1.1 완료 증거는 아니다. 독립 scoped re-review와 문서/final SHA의 exact push/PR gate가 모두 성공할 때까지 M1.1/M1은 차단 상태이며 M2를 시작하지 않는다.
 
+### Safe Auth UI Facade로의 최종 전환
+
+현재 UI E2E 신뢰 경계는 위의 문자열 provenance/Playwright capability
+allowlist를 더 확장하지 않는다. `tests/e2e/ui/auth-ui.spec.ts`는
+`authTest`와 고정 `AuthUi` 메서드만 사용하고, wrapper가 callback에
+동결된 `authUi` 한 항목만 전달한다. 얇은 정적 Gate는 이 폐쇄형 문법과
+canonical module identity를 검증하고, 런타임 Transport Tripwire는 callback
+동안 Node transport global을 차단한 뒤 descriptor를 정확히 복원한다.
+`auth-ui-driver.ts`만 raw Playwright/Axe를 소유하며 원문 cookie, storage,
+header, DOM, Axe 결과를 spec이나 오류에 넘기지 않는다.
+
+백엔드 책임은 이 전환에서 바뀌지 않았다. 기준 commit `3047b08`부터 최종
+코드 SHA까지 `tests/e2e/auth-response.spec.ts`, `apps/api`,
+`apps/web/src/server`에는 diff가 없다. 따라서 status/body, CSRF,
+logout, selector replay, delegated JWT와 PostgreSQL replay consume은 기존
+HTTP/API 경계가 계속 독점한다. UI project는 화면·접근성·keyboard·URL과
+boolean-safe browser 상태만 확인하며 screenshot, video, trace를 모두 끈다.
+
+`d1a71a2`, `5cda542`, `5729d98`, `ef0d1bc`는 이전 analyzer 계열의
+역사적 중간 SHA다. `24b4dd1`도 targeted 6/6, Gate 29/29, preflight
+85/85를 통과했으나 exact-SHA CI에서 workspace policy 기대값이 오래된
+`ui-network-boundary.test.ts`를 가리켜 실패했다. 정책 테스트
+2/3 RED→3/3 GREEN으로 정합성을 고친 최종 코드 SHA는
+`61a0ea334761fc48394bae515edfeb440aed052a`다.
+
+이 SHA의 [push run
+30460467954](https://github.com/jawon0407/account-book/actions/runs/30460467954)와
+[PR run
+30460473476](https://github.com/jawon0407/account-book/actions/runs/30460473476)은
+모두 `completed/success`다. 두 gate는 repository-pinned Node 22.15.1에서
+legacy 53, contracts 22, database 12, API 113, web 479, preflight 85,
+disposable DB test 2 files, Playwright 8, production audit와 346개 changed
+blob 검사를 통과했다. Task 1~4의 최종 독립 리뷰에는 미해결
+Critical/Important가 없다.
+
+M1.1/M1은 이 문서 변경의 최종 SHA에 대한 push/PR gate와 최종 독립 branch
+review가 끝나기 전까지 열어 둔다. 이 완료 여부와 관계없이 D2 hosted
+Google·Kakao·Naver/TLS 검증 및 지인 베타 전 전문 침투 테스트는 별도
+production release blocker다.
+
 다음은 M1.1 이전 TASK 14의 역사적 기록이다. commit `835dbc9`의 [RED run](https://github.com/jawon0407/account-book/actions/runs/29970158952)은 navigation 응답 본문 경합과 broad alert selector 충돌을 드러냈다. 당시 UI는 trace 없이 visible browser state와 status를, HTTP contract는 공개 응답·CSRF·logout·selector replay를 소유했고 DOM Response body 접근을 AST provenance 정책으로 제한했다. 이 결정은 위 M1.1 폐쇄형 capability 경계로 대체되었다.
 
 동일 SHA `0d996fe726debaa8a2eec10865f63418635d06d8`의 성공한 Node 22 CI는 로컬의 PostgreSQL-backed Playwright 미실행을 보완하지만, D2 hosted staging/live Google·Kakao·Naver 및 실제 TLS 증거를 대체하지 않는다. D2는 미실행 상태이며 운영 출시 차단 조건으로 유지한다.

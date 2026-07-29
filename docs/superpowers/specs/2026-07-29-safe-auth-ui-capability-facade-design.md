@@ -345,3 +345,79 @@ M1.1은 다음을 모두 충족해야 완료할 수 있다.
     release blocker로 유지된다.
 
 M1.1이 완료되기 전에는 M1을 닫거나 M2를 시작하지 않는다.
+
+## 12. 구현 및 정확한 SHA 근거
+
+설계의 세 계층은 모두 구현됐다.
+
+- `ui-facade-boundary.ts`는 exact `safe-ui-test` import, callback shape,
+  직접 awaited facade call, 고정 credential object만 허용하는 폐쇄형
+  grammar와 canonical module identity를 검사한다.
+- `safe-ui-test.ts`는 null-prototype·frozen payload의 `authUi` 한 항목만
+  callback에 전달하고 예외를 고정 `SafeAuthUiError`로 정규화한다.
+- `transport-tripwire.ts`는 callback 동안 transport descriptor를 차단하고
+  성공·실패·부분 설치 실패에서도 exact 복원을 수행한다.
+- `auth-ui-driver.ts`는 raw Playwright/Axe를 유일하게 소유하고 cookie,
+  storage, Authorization header와 Axe 결과를 원문 없이 판정한다.
+- UI project의 screenshot, video, trace는 모두 정확히 `off`다.
+
+기존 `ui-network-boundary.ts`와 관련 mutation은 threat-parity 및 identity
+검증이 GREEN이 된 뒤 제거됐고 저장소 reference는 0건이다.
+`auth-response.spec.ts`와 backend server/API 경계는 facade 설계 기준
+commit부터 최종 코드 SHA까지 변경되지 않았다. 그러므로 HTTP status/body,
+CSRF, logout, selector replay와 delegated JWT/replay consume의 소유권은
+기존 HTTP/backend에 그대로 있다.
+
+### 12.1 RED/GREEN
+
+- Gate: 초기 callback/import/credential mutation RED 뒤 19/19 GREEN
+- Safe error/Tripwire: 6개·10개 보안 RED와 상태기계 mutation을 거쳐
+  combined 36/36 GREEN
+- Facade/driver: module 부재, arbitrary template, callback, driver,
+  artifact-policy RED 및 async race 4종 RED 뒤 focused 35/35 GREEN
+- Cutover: legacy parity 129/129, shadow mutation RED, identity/threat
+  6/6, Gate 29/29, final preflight 85/85 GREEN
+- CI policy correction: stale `ui-network-boundary.test.ts` 기대값으로
+  2/3 RED, facade preflight 목록으로 교정한 뒤 3/3 GREEN
+
+로컬 최종 재검증은 legacy/security 53/53, security Gate 47/47과 Safe Auth
+E2E 84개를 통과했다. Codex Node 24 환경의 `node_modules/.bin` wrapper
+누락으로 production startup process test 1건은 동일 command path로
+완료하지 못했으며 이를 성공으로 추정하지 않았다.
+
+### 12.2 최종 코드 SHA와 CI
+
+`d1a71a2`, `5cda542`, `5729d98`, `ef0d1bc`는 문자열 provenance/allowlist
+계열의 역사적 중간 SHA다. `24b4dd1`은 최종 local Gate 29/29와 preflight
+85/85를 통과했지만 위 workspace policy mismatch로 첫 exact-SHA CI에서
+실패했으므로 완료 증거가 아니다.
+
+권위 있는 code SHA는
+`61a0ea334761fc48394bae515edfeb440aed052a`다. 동일 SHA의 GitHub
+`security-gate` [push run
+30460467954](https://github.com/jawon0407/account-book/actions/runs/30460467954)와
+[pull-request run
+30460473476](https://github.com/jawon0407/account-book/actions/runs/30460473476)은
+모두 `completed/success`다. 두 실행은 repository-pinned Node 22.15.1,
+legacy 53, contracts 22, database 12, API 113, web 479, preflight 85,
+disposable DB test 2 files, 실제 Playwright 8, production audit와 346개
+changed blob scan을 포함한다.
+
+### 12.3 리뷰와 남은 게이트
+
+Task 1~4의 최종 독립 security, frontend/E2E, backend ownership,
+project-lead review는 Critical/Important 0건으로 승인됐다. M1.1과 M1은
+이 documentation 변경의 최종 SHA가 push/PR security-gate를 모두 통과하고
+최종 branch review가 승인되기 전까지 닫지 않는다. D2 hosted
+Google·Kakao·Naver/TLS와 지인 베타 전 전문 침투 테스트는 그 이후에도
+별도의 production release blocker다.
+
+### Short English counterpart
+
+The facade, closed grammar, fixed safe errors, runtime Transport Tripwire, and
+artifact-off policy are implemented. The retired provenance analyzer has zero
+remaining references, while the unchanged HTTP/backend boundary still owns
+status, body, CSRF, logout, and replay. Authoritative code SHA
+`61a0ea334761fc48394bae515edfeb440aed052a` passed both exact-SHA
+security-gate runs; M1 remains open until the final documentation SHA and
+independent branch reviews succeed.

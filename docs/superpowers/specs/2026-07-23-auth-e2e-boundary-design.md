@@ -108,7 +108,8 @@ D2는 TASK 14의 로컬·CI A안을 대체하지 않는다. A안은 모든 변�
 - `http-contract` project는 `auth-response.spec.ts`를 한 번만 실행한다. viewport별로 같은 계약 테스트를 중복하지 않는다.
 - 기존 실제 BFF·API·test IDP·일회용 PostgreSQL 경계를 유지한다.
 - CI에서 기존 서버를 재사용하지 않는다.
-- trace는 실패 시에만 보존하되 민감 request/response가 포함될 수 있으므로 CI artifact로 자동 공개하지 않는다.
+- 인증 UI project의 screenshot, video, trace는 모두 `off`다. HTTP contract
+  project도 trace를 비활성화하며 인증 artifact를 자동 공개하지 않는다.
 
 ## 6. 데이터 흐름
 
@@ -264,3 +265,35 @@ Local Node 24.14.0 GREEN은 focused 44/44, preflight 46/46, typecheck·lint와 �
 RED/GREEN은 exact bypass 39/40→40/40, alternate roots 0/3→3/3, alias·adapter·factory 43/51→51/51이었다. Node 22.15.1 local evidence는 focused 51/51, E2E subset 57/57, typecheck·lint·diff check와 전체 53/22/12/113/479다. full preflight의 package-spawn 1건은 untracked `.modules.yaml` 부재로 fallback `pnpm`이 install retry에 들어간 로컬 환경 concern이었고, startup guard는 직접 실행에서 고정 `AUTH_CONFIGURATION_INVALID`로 즉시 실패했다.
 
 정확히 code SHA `5cda5422e114f872ceb031f34180f9f346cb3088`의 [push run 30330701053](https://github.com/jawon0407/account-book/actions/runs/30330701053)과 [PR run 30330704817](https://github.com/jawon0407/account-book/actions/runs/30330704817)은 모두 `completed/success`였다. 이 evidence는 `57c3776`의 computed-global 차단 verdict를 구현 수준에서 supersede할 뿐 M1.1을 닫지 않는다. 독립 scoped re-review와 documentation/final SHA의 exact push/PR gate가 끝날 때까지 M1.1/M1은 차단 상태이고 M2는 시작하지 않는다.
+
+### M1.1 Safe Auth UI Facade 최종 코드 근거
+
+기존 UI import graph/string provenance analyzer는 제거됐다. 현재 UI spec은
+`authTest`와 고정 `AuthUi` 메서드만 사용하는 폐쇄형 문법이며, raw
+Playwright/Axe는 `auth-ui-driver.ts` 한 곳만 소유한다. 정적 Gate는 module
+identity와 facade 문법을 검사하고 Transport Tripwire는 callback 실행 중
+Node transport를 차단한다. UI는 화면·접근성·keyboard·URL과 boolean-safe
+browser 상태만 검증하고, 변경되지 않은 `auth-response.spec.ts`가
+status/body·CSRF·logout·selector replay를 계속 독점한다.
+
+TDD 최종 증거는 Gate 19/19, SafeError/Tripwire combined 36/36, facade
+focused 35/35, cutover targeted 6/6·Gate 29/29·preflight 85/85다.
+`d1a71a2`, `5cda542`, `5729d98`, `ef0d1bc`와 CI 이전의 `24b4dd1`은
+역사적 중간 근거다. `24b4dd1` exact-SHA CI에서 발견된 오래된 workspace
+policy 기대값은 2/3 RED→3/3 GREEN으로 수정됐다.
+
+권위 있는 최종 코드 SHA는
+`61a0ea334761fc48394bae515edfeb440aed052a`다. 동일 SHA의 [push run
+30460467954](https://github.com/jawon0407/account-book/actions/runs/30460467954)와
+[PR run
+30460473476](https://github.com/jawon0407/account-book/actions/runs/30460473476)은
+모두 `completed/success`이며 Node 22, disposable PostgreSQL, preflight
+85/85, Playwright 8/8, production audit와 commit-range secret scan을
+통과했다. 로컬 Node 24의 `.bin` wrapper 누락으로 startup process test
+1건은 동일 방식으로 완료하지 못했으므로 이 exact-SHA CI가 그 공백을
+대체한다.
+
+Task 1~4 독립 리뷰의 최종 Critical/Important는 0건이다. M1.1/M1은 최종
+documentation SHA의 push/PR gate와 branch review 전까지 열어 두며, D2
+hosted provider/TLS와 beta-before penetration test는 별도 release
+blocker로 유지한다.

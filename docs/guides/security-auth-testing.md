@@ -88,6 +88,72 @@ The final code SHA is `0d996fe726debaa8a2eec10865f63418635d06d8`; both same-SHA 
 - 현재 책임: UI는 visible screen, 접근성, keyboard, URL, cookie metadata/opaque boolean, token-free storage, Authorization-presence boolean만 검사한다. HTTP는 status/body, CSRF, logout/replay, raw/nested credential scan만 검사한다. 정책은 canonical UI root, closed capability allowlist, fixed capability diagnostics, trace off를 사용한다.
 - Hosted D2 provider/TLS 증거와 beta-before penetration test는 계속 독립 release blocker다.
 
+## Safe Auth UI Facade 최종 코드 근거
+
+현재 경계는 문자열 provenance 분석기가 아니라 `authTest`가 전달하는 고정
+`AuthUi` facade, 폐쇄형 UI 문법 Gate, callback 실행 중의 Transport Tripwire로
+구성된다. `auth-ui-driver.ts`만 raw Playwright와 Axe를 소유하며 cookie,
+storage, request header와 접근성 결과를 boolean 또는 고정 판정으로 즉시
+축약한다. UI spec은 응답 객체·status·body·CSRF·logout·selector replay를
+받지 않으며, 이 HTTP 계약은 변경되지 않은 `auth-response.spec.ts`가 계속
+독점한다. UI project의 screenshot, video, trace는 모두 정확히 `off`다.
+
+TDD와 검토 기록은 다음 순서로 누적됐다.
+
+- 정적 Gate는 callback/import/직접 호출 mutation을 RED로 확인한 뒤
+  19/19 GREEN이 됐다.
+- 고정 안전 오류와 Tripwire는 safe-error 6건, Tripwire 10건,
+  subclass/newTarget 2건과 상태기계 guard 4건의 RED를 거쳐 combined
+  36/36 GREEN이 됐다.
+- facade driver와 실제 UI spec은 필수 RED 4종 및 비동기 race RED 4종을
+  거쳐 focused 35/35 GREEN이 됐다. artifact 정책도
+  screenshot/video/trace가 `off`가 아닐 때 RED가 되고 1/1 GREEN이 됐다.
+- legacy analyzer 제거 전 parity 129/129를 확인했고, 최종 shadow/semantic
+  mutation은 targeted 6/6, Gate 29/29, 전체 preflight 85/85로 통과했다.
+
+`d1a71a2`, `5cda542`, `5729d98`, `ef0d1bc`는 문자열 provenance/allowlist
+계열을 강화했던 **역사적 중간 증거**이며 현재 완료 근거가 아니다.
+`24b4dd14576b5901618aa7d22af0e0d4c3e38483`도 로컬 targeted 6/6,
+Gate 29/29, preflight 85/85를 통과한 중간 SHA지만 첫 exact-SHA CI에서
+workspace policy가 제거된 `ui-network-boundary.test.ts`를 계속 기대해
+실패했다. 정책 테스트 RED 2/3→GREEN 3/3으로 해당 정합성을 고친 최종 코드
+SHA는 `61a0ea334761fc48394bae515edfeb440aed052a`다.
+
+이 SHA의 GitHub `security-gate` [push run
+30460467954](https://github.com/jawon0407/account-book/actions/runs/30460467954)와
+[pull request run
+30460473476](https://github.com/jawon0407/account-book/actions/runs/30460473476)은
+모두 `completed/success`다. 두 실행은 legacy/security 53, contracts 22,
+database package 12, API 113, web 479, E2E preflight 85, disposable DB
+test 2 files, 단일 worker Playwright 8을 통과했고 production audit는
+`No known vulnerabilities found`, commit-range 검사는 346 changed blobs
+통과를 기록했다.
+
+로컬에서는 정책 3/3, legacy/security 53/53, security Gate 47/47과
+Safe Auth 관련 E2E 84개가 통과했다. 다만 Codex의 Node 24 런타임에서
+`node_modules/.bin` 실행 wrapper가 누락돼 production startup process
+test 1건은 동일한 방식으로 완료하지 못했다. 이를 성공으로 추정하지 않고,
+repository-pinned Node 22.15.1의 위 두 exact-SHA CI가 preflight 85/85와
+실제 PostgreSQL/Chromium 8/8을 완료한 결과를 권위 있는 근거로 사용한다.
+
+Task 1~4의 독립 보안·프론트엔드·백엔드·프로젝트 리드 리뷰는 최종적으로
+Critical/Important 0건이었다. 다만 M1.1과 M1은 이 문서 변경의 최종 SHA가
+push/PR gate를 모두 통과하고 최종 branch review가 승인되기 전까지 닫지
+않는다. 그 뒤에도 D2 hosted provider/TLS와 지인 베타 전 전문 침투 테스트는
+별도의 production release blocker로 남는다.
+
+### Short English counterpart
+
+The authoritative code SHA is
+`61a0ea334761fc48394bae515edfeb440aed052a`. Its push run
+`30460467954` and pull-request run `30460473476` both completed successfully
+with the full Node 22, disposable PostgreSQL, Chromium, audit, and secret-scan
+gate. The UI now receives only the fixed `AuthUi` facade; the unchanged HTTP
+spec owns status, body, CSRF, logout, and replay. M1 remains open until the
+final documentation SHA and independent branch reviews pass, while hosted
+provider/TLS evidence and a pre-beta penetration test remain separate release
+blockers.
+
 ## Task 7 delegated JWT 로컬 증거
 
 로컬 증거의 code commit은 `357f8412dcb19b004a0a0e45f08449682fc23f75`이며, 이 작업 트리에서 BFF route 정책, E2E key 분리와 production dependency remediation을 검증했다. 모든 browser-facing BFF route는 Node.js runtime, `iad1`, `force-dynamic`, 10초 `maxDuration`을 명시한다. route는 여전히 thin adapter이고 Edge runtime, 직접 환경변수·DB·provider 접근을 포함하지 않는다.

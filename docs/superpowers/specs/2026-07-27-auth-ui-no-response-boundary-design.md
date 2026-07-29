@@ -255,3 +255,50 @@ TDD RED는 focused 35개 중 17개 실패와 별도 Locator mutation 1/1 실패�
 정확히 `5cda5422e114f872ceb031f34180f9f346cb3088`의 Node 22 `security-gate` [push run 30330701053](https://github.com/jawon0407/account-book/actions/runs/30330701053)과 [pull_request run 30330704817](https://github.com/jawon0407/account-book/actions/runs/30330704817)은 모두 `completed/success`였다. 이 구현 evidence는 `57c3776` 차단 finding을 코드 수준에서 대체하지만 M1.1 완료를 의미하지 않는다. 독립 scoped re-review와 이 문서 변경/final SHA의 exact push/PR gate가 모두 성공할 때까지 M1.1/M1은 차단 상태이며 M2를 시작하지 않는다.
 
 이 exact-SHA CI는 D2 hosted Google·Kakao·Naver, 실제 TLS 및 redirect/cookie/log 비노출 증거나 beta-before penetration test를 대체하지 않는다. 두 항목은 계속 독립 production release blocker다.
+
+## 10. Safe Auth UI Facade 전환 결과
+
+이 문서의 폐쇄형 Playwright capability allowlist는 최종 경계가 아니라
+facade 설계로 가기 전의 역사적 중간 단계다. 최종 구현은
+`auth-ui.spec.ts`에 raw `Page`, `Locator`, `BrowserContext`, `Request`,
+`Response`, `APIRequestContext`를 주지 않는다. spec은 `authTest`와 고정
+`AuthUi` 호출만 사용하고, driver가 원문을 고정 오류 또는 boolean-safe
+판정으로 축약한다. 정적 Gate와 런타임 Transport Tripwire가 이 acquisition
+경계를 서로 다른 계층에서 지킨다.
+
+UI/HTTP 책임 분리는 유지됐다. UI는 visible state, 접근성, keyboard, URL,
+cookie 정책의 내부 판정, credential-free storage와 Authorization 존재
+boolean만 다룬다. `auth-response.spec.ts`는 facade 전환 동안 변경되지
+않았고 status/body, CSRF, logout, selector replay, raw/nested credential
+scan을 계속 독점한다. screenshot, video, trace는 모두 `off`다.
+
+TDD는 정적 Gate 19/19, SafeError/Tripwire 36/36, facade/async
+assertion 35/35, 최종 identity/threat 6/6·Gate 29/29·preflight 85/85를
+기록했다. 기존 `d1a71a2`, `5cda542`, `5729d98`, `ef0d1bc`는 모두
+문자열 provenance analyzer 계열의 역사적 중간 근거다. `24b4dd1`도 로컬
+검증은 통과했지만 stale workspace policy 때문에 첫 exact-SHA CI가
+실패했고, 해당 정책 테스트는 2/3 RED→3/3 GREEN으로 교정됐다.
+
+최종 코드 SHA는 `61a0ea334761fc48394bae515edfeb440aed052a`다.
+[push security-gate run
+30460467954](https://github.com/jawon0407/account-book/actions/runs/30460467954)와
+[pull-request security-gate run
+30460473476](https://github.com/jawon0407/account-book/actions/runs/30460473476)은
+동일 SHA에서 `completed/success`다. Node 22.15.1의 full verify는
+53/22/12/113/479와 preflight 85/85를 통과했고, disposable PostgreSQL,
+Playwright 8/8, production audit 및 346개 changed blob 보안 검사도
+통과했다.
+
+Task 1~4 최종 독립 리뷰에는 미해결 Critical/Important가 없다. 현재
+M1.1/M1의 마지막 게이트는 이 문서 변경의 final SHA push/PR CI와 최종
+branch review다. 이와 별도로 D2 hosted provider/TLS 및 지인 베타 전 전문
+침투 테스트는 계속 production release blocker다.
+
+### Short English counterpart
+
+The string-provenance analyzer has been retired. The UI spec now receives only
+the fixed `AuthUi` facade, guarded by a closed static grammar and a runtime
+Transport Tripwire; the unchanged HTTP spec owns status, body, CSRF, logout,
+and replay. Code SHA `61a0ea334761fc48394bae515edfeb440aed052a`
+passed both exact-SHA security-gate runs. M1 remains open until the final
+documentation SHA and branch reviews pass.
