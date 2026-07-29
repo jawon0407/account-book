@@ -236,6 +236,20 @@ test("rejects renamed, rest, defaulted, and typed callback bindings", () => {
   }
 });
 
+test("rejects a callback property rename when the local binding remains authUi", () => {
+  assert.deepEqual(
+    inspect(authSource("async ({ authUi: authUi }) => {}")),
+    [{ category: "syntax", capability: "unapproved-callback" }],
+  );
+});
+
+test("rejects a callback local binding rename without a property mapping", () => {
+  assert.deepEqual(
+    inspect(authSource("async ({ facade }) => {}")),
+    [{ category: "syntax", capability: "unapproved-callback" }],
+  );
+});
+
 test("rejects invalid authTest title, arity, and non-async callbacks", () => {
   const calls = [
     'authTest(email, async ({ authUi }) => {});',
