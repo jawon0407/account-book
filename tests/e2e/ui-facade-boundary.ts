@@ -175,18 +175,40 @@ function inspectFacadeCall(
 
   const properties = argument.properties;
   if (properties.length !== 2) return violation("capability", "unsafe-argument");
-  const expectedNames = ["email", "password"];
-  for (const [index, expectedName] of expectedNames.entries()) {
-    const property = properties[index];
-    if (property === undefined
-      || !ts.isShorthandPropertyAssignment(property)
-      || property.objectAssignmentInitializer !== undefined
-      || property.name.text !== expectedName
-      || !stringConstants.has(expectedName)) {
-      return violation("capability", "unsafe-argument");
-    }
+  const [emailProperty, passwordProperty] = properties;
+  if (emailProperty === undefined
+    || !ts.isShorthandPropertyAssignment(emailProperty)
+    || emailProperty.objectAssignmentInitializer !== undefined
+    || emailProperty.name.text !== "email"
+    || !stringConstants.has("email")
+    || passwordProperty === undefined) {
+    return violation("capability", "unsafe-argument");
   }
-  return undefined;
+  if (ts.isShorthandPropertyAssignment(passwordProperty)) {
+    return passwordProperty.objectAssignmentInitializer === undefined
+        && passwordProperty.name.text === "password"
+        && stringConstants.has("password")
+      ? undefined
+      : violation("capability", "unsafe-argument");
+  }
+  if (!ts.isPropertyAssignment(passwordProperty)
+    || !ts.isIdentifier(passwordProperty.name)
+    || passwordProperty.name.text !== "password"
+    || !stringConstants.has("password")
+    || !ts.isTemplateExpression(passwordProperty.initializer)
+    || (passwordProperty.initializer.head.rawText
+      ?? passwordProperty.initializer.head.text) !== ""
+    || passwordProperty.initializer.templateSpans.length !== 1) {
+    return violation("capability", "unsafe-argument");
+  }
+  const [span] = passwordProperty.initializer.templateSpans;
+  return span !== undefined
+      && ts.isIdentifier(span.expression)
+      && span.expression.text === "password"
+      && ts.isTemplateTail(span.literal)
+      && (span.literal.rawText ?? span.literal.text) === "!wrong"
+    ? undefined
+    : violation("capability", "unsafe-argument");
 }
 
 function inspectAuthTestCall(

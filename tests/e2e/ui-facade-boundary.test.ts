@@ -75,6 +75,34 @@ test("allows every approved zero-argument method and resolves later top-level cr
   assert.deepEqual(inspect(allowed), []);
 });
 
+test("allows only the exact failed-password template from the top-level password constant", () => {
+  assert.deepEqual(
+    inspect(authSource(`
+      async ({ authUi }) => {
+        await authUi.submit({ email, password: \`\${password}!wrong\` });
+      }
+    `)),
+    [],
+  );
+});
+
+test("rejects arbitrary, tagged, and extended failed-password templates", () => {
+  const callbacks = [
+    "async ({ authUi }) => { await authUi.submit({ email, password: `${email}!wrong` }); }",
+    "async ({ authUi }) => { await authUi.submit({ email, password: `${password}!WRONG` }); }",
+    "async ({ authUi }) => { await authUi.submit({ email, password: `${password}!wrong${email}` }); }",
+    "async ({ authUi }) => { await authUi.submit({ email, password: tag`${password}!wrong` }); }",
+  ];
+
+  for (const callback of callbacks) {
+    assert.deepEqual(
+      inspect(authSource(callback)),
+      [{ category: "capability", capability: "unsafe-argument" }],
+      callback,
+    );
+  }
+});
+
 test("rejects raw Playwright and import-shape mutations with a fixed diagnostic", () => {
   const unapprovedImports = [
     'import { test } from "@playwright/test"; void test;',

@@ -47,7 +47,14 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
   reporter: "list",
-  use: { baseURL, browserName: "chromium", ignoreHTTPSErrors: true, trace: "off" },
+  use: {
+    baseURL,
+    browserName: "chromium",
+    ignoreHTTPSErrors: true,
+    screenshot: "off",
+    video: "off",
+    trace: "off",
+  },
   projects: [
     {
       name: "ui-mobile-390x844",

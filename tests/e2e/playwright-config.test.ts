@@ -15,5 +15,7 @@ test("mutation: project routing, serial execution, or trace-off policy cannot dr
   assert.equal(config.fullyParallel, false);
   assert.equal(config.workers, 1);
   assert.equal(config.retries, 0);
+  assert.equal(config.use?.screenshot, "off");
+  assert.equal(config.use?.video, "off");
   assert.equal(config.use?.trace, "off");
 });
