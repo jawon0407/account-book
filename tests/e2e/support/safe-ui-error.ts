@@ -12,17 +12,30 @@ export const safeAuthUiErrorCodes = [
 
 export type SafeAuthUiErrorCode = typeof safeAuthUiErrorCodes[number];
 
+const safeAuthUiErrorCodeSet = new Set<string>(safeAuthUiErrorCodes);
+const issuedSafeAuthUiErrors = new WeakSet<SafeAuthUiError>();
+
+function isSafeAuthUiErrorCode(code: unknown): code is SafeAuthUiErrorCode {
+  return typeof code === "string" && safeAuthUiErrorCodeSet.has(code);
+}
+
 export class SafeAuthUiError extends Error {
   readonly code: SafeAuthUiErrorCode;
 
   constructor(code: SafeAuthUiErrorCode) {
-    super(code);
+    const fixedCode = isSafeAuthUiErrorCode(code)
+      ? code
+      : "AUTH_UI_UNEXPECTED_FAILURE";
+    super(fixedCode);
     this.name = "SafeAuthUiError";
-    this.code = code;
+    this.code = fixedCode;
+    Reflect.deleteProperty(this, "stack");
+    issuedSafeAuthUiErrors.add(this);
+    Object.freeze(this);
   }
 }
 
 export function normalizeSafeAuthUiError(error: unknown): SafeAuthUiError {
-  if (error instanceof SafeAuthUiError) return error;
+  if (issuedSafeAuthUiErrors.has(error as SafeAuthUiError)) return error as SafeAuthUiError;
   return new SafeAuthUiError("AUTH_UI_UNEXPECTED_FAILURE");
 }
