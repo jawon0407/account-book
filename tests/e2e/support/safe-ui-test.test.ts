@@ -13,14 +13,25 @@ import {
 type StorageEntry = readonly [string, string];
 
 type DriverHarnessOptions = Readonly<{
+  alertText?: string;
+  alertWait?: () => Promise<void>;
   alertVisible?: boolean;
   authorization?: string | null;
   cookies?: Awaited<ReturnType<BrowserContext["cookies"]>>;
+  cookiesProvider?: () => Promise<Awaited<ReturnType<BrowserContext["cookies"]>>>;
   emailVisible?: boolean;
   local?: readonly StorageEntry[];
   session?: readonly StorageEntry[];
   url?: string;
 }>;
+
+function deferred<T>() {
+  let resolve: (value: T | PromiseLike<T>) => void = () => undefined;
+  const promise = new Promise<T>((promiseResolve) => {
+    resolve = promiseResolve;
+  });
+  return { promise, resolve };
+}
 
 function createStorage(entries: readonly StorageEntry[]): Storage {
   const values = new Map(entries);
@@ -130,7 +141,14 @@ function createDriverHarness(options: DriverHarnessOptions = {}) {
           return Promise.resolve(true);
         },
         textContent() {
-          return Promise.resolve("Label");
+          return Promise.resolve(
+            selector === '.auth-status[role="alert"]'
+              ? options.alertText ?? "!이메일 또는 비밀번호를 확인해 주세요."
+              : "Label",
+          );
+        },
+        waitFor() {
+          return options.alertWait?.() ?? Promise.resolve();
         },
       };
       return locator;
@@ -151,19 +169,22 @@ function createDriverHarness(options: DriverHarnessOptions = {}) {
   };
   const context = {
     cookies() {
-      return Promise.resolve(cookies);
+      return options.cookiesProvider?.() ?? Promise.resolve(cookies);
     },
   };
 
   return {
     calls,
     context: context as unknown as BrowserContext,
-    emitRequest() {
+    emitRequest(
+      headerValue: () => Promise<string | null> = () =>
+        Promise.resolve(options.authorization ?? null),
+    ) {
       assert.ok(requestListener);
       requestListener({
         headerValue(name: string) {
           assert.equal(name, "authorization");
-          return Promise.resolve(options.authorization ?? null);
+          return headerValue();
         },
       });
     },
@@ -290,6 +311,60 @@ test("verifies rejected and authenticated outcomes with fixed cookie policy", as
   assert.deepEqual(authenticatedHarness.calls, [["waitForURL", "**/app"]]);
 });
 
+test("waits for the fixed alert before taking the rejected cookie snapshot", async () => {
+  const alertReady = deferred<void>();
+  let cookieReads = 0;
+  let cookies: Awaited<ReturnType<BrowserContext["cookies"]>> = [];
+  const harness = createDriverHarness({
+    alertWait: () => alertReady.promise,
+    cookiesProvider() {
+      cookieReads += 1;
+      return Promise.resolve(cookies);
+    },
+  });
+  const authUi = createAuthUi({
+    context: harness.context,
+    page: harness.page,
+  });
+
+  const assertion = authUi.assertRejected();
+  await Promise.resolve();
+  assert.equal(cookieReads, 0);
+
+  cookies = [{
+    domain: "127.0.0.1",
+    expires: -1,
+    httpOnly: true,
+    name: "__Host-ab_session",
+    path: "/",
+    sameSite: "Lax",
+    secure: true,
+    value: "a".repeat(43),
+  }];
+  alertReady.resolve();
+
+  await assert.rejects(
+    assertion,
+    isFixedError("AUTH_UI_REJECTION_FAILED"),
+  );
+  assert.equal(cookieReads, 1);
+});
+
+test("rejects non-fixed failed-login alert content", async () => {
+  const harness = createDriverHarness({
+    alertText: "provider error detail must not be accepted",
+  });
+  const authUi = createAuthUi({
+    context: harness.context,
+    page: harness.page,
+  });
+
+  await assert.rejects(
+    authUi.assertRejected(),
+    isFixedError("AUTH_UI_REJECTION_FAILED"),
+  );
+});
+
 test("projects browser storage to a boolean and rejects credential material", async () => {
   const safeHarness = createDriverHarness({
     session: [["__next_debug_channel:safe-id", "debug"]],
@@ -333,6 +408,53 @@ test("stores request authorization presence only as booleans", async () => {
   await assert.rejects(
     unsafeAuthUi.assertNoAuthorizationHeaders(),
     isFixedError("AUTH_UI_AUTHORIZATION_HEADER_DETECTED", sentinel),
+  );
+});
+
+test("projects a rejected authorization lookup immediately to fail-closed true", async () => {
+  const sentinel = "raw-header-rejection-must-not-escape";
+  const harness = createDriverHarness();
+  const authUi = createAuthUi({
+    context: harness.context,
+    page: harness.page,
+  });
+  const rejectedHeaderLookup = {
+    then<TResult1 = string | null, TResult2 = never>(
+      onfulfilled?: ((value: string | null) => TResult1 | PromiseLike<TResult1>) | null,
+      onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+    ): Promise<TResult1 | TResult2> {
+      void onfulfilled;
+      if (onrejected === undefined || onrejected === null) {
+        return Promise.resolve(false as TResult1);
+      }
+      return Promise.resolve(onrejected(new Error(sentinel)));
+    },
+  } as Promise<string | null>;
+
+  harness.emitRequest(() => rejectedHeaderLookup);
+
+  await assert.rejects(
+    authUi.assertNoAuthorizationHeaders(),
+    isFixedError("AUTH_UI_AUTHORIZATION_HEADER_DETECTED", sentinel),
+  );
+});
+
+test("drains a violating request appended while an earlier header lookup is pending", async () => {
+  const firstHeader = deferred<string | null>();
+  const harness = createDriverHarness();
+  const authUi = createAuthUi({
+    context: harness.context,
+    page: harness.page,
+  });
+  harness.emitRequest(() => firstHeader.promise);
+
+  const assertion = authUi.assertNoAuthorizationHeaders();
+  harness.emitRequest(() => Promise.resolve("Bearer second-request-secret"));
+  firstHeader.resolve(null);
+
+  await assert.rejects(
+    assertion,
+    isFixedError("AUTH_UI_AUTHORIZATION_HEADER_DETECTED"),
   );
 });
 

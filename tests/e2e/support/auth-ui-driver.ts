@@ -39,9 +39,16 @@ export function createAuthUi(input: Readonly<{
   const authorizationPresence: Array<Promise<boolean>> = [];
   try {
     page.on("request", function authorizationRecorder(request) {
-      authorizationPresence.push(
-        request.headerValue("authorization").then((value) => value !== null),
-      );
+      try {
+        authorizationPresence.push(
+          request.headerValue("authorization").then(
+            (value) => value !== null,
+            () => true,
+          ),
+        );
+      } catch {
+        authorizationPresence.push(Promise.resolve(true));
+      }
     });
   } catch {
     throw new SafeAuthUiError("AUTH_UI_UNEXPECTED_FAILURE");
@@ -106,13 +113,15 @@ export function createAuthUi(input: Readonly<{
 
     async assertRejected(): Promise<void> {
       await runStep("AUTH_UI_REJECTION_FAILED", async () => {
-        const [alertVisible, cookies] = await Promise.all([
-          page.locator('.auth-status[role="alert"]').isVisible(),
-          context.cookies(),
-        ]);
-        if (!alertVisible
-          || !/\/login$/u.test(page.url())
-          || cookies.some((cookie) => cookie.name === "__Host-ab_session")) {
+        const alert = page.locator('.auth-status[role="alert"]');
+        await alert.waitFor({ state: "visible" });
+        const alertContent = await alert.textContent();
+        if (alertContent?.trim() !== "!이메일 또는 비밀번호를 확인해 주세요.") {
+          throw new Error();
+        }
+        if (!/\/login$/u.test(page.url())) throw new Error();
+        const cookies = await context.cookies();
+        if (cookies.some((cookie) => cookie.name === "__Host-ab_session")) {
           throw new Error();
         }
       });
@@ -171,10 +180,15 @@ export function createAuthUi(input: Readonly<{
 
     async assertNoAuthorizationHeaders(): Promise<void> {
       await runStep("AUTH_UI_AUTHORIZATION_HEADER_DETECTED", async () => {
-        const authorizationDetected = (
-          await Promise.all(authorizationPresence)
-        ).some((present) => present);
-        if (authorizationDetected) throw new Error();
+        let cursor = 0;
+        while (cursor < authorizationPresence.length) {
+          const batch = authorizationPresence.slice(cursor);
+          cursor += batch.length;
+          const authorizationDetected = (
+            await Promise.all(batch)
+          ).some((present) => present);
+          if (authorizationDetected) throw new Error();
+        }
       });
     },
   });
