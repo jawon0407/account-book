@@ -52,6 +52,8 @@ const expectedWorkspaceOverrides = {
   "next@16.2.11>sharp": "-",
   "next@16.2.11>postcss": "8.5.19",
   "find-my-way@9.6.0": "9.7.0",
+  "fast-uri@3.1.4": "3.1.5",
+  "fast-uri@4.1.1": "4.1.2",
 };
 
 function tsconfigFiles(directory) {
@@ -99,7 +101,7 @@ function workspaceScalarOverrides(workspace) {
  */
 function assertPatchedProductionResolutions(lockfile) {
   const packagesStart = lockfile.indexOf("packages:");
-  const snapshotsStart = lockfile.indexOf("\nsnapshots:");
+  const snapshotsStart = lockfile.search(/\r?\nsnapshots:/u);
   assert.notEqual(packagesStart, -1, "lockfile must contain a packages section");
   assert.notEqual(snapshotsStart, -1, "lockfile must contain a snapshots section");
 
@@ -107,8 +109,18 @@ function assertPatchedProductionResolutions(lockfile) {
     lockfile.slice(packagesStart, snapshotsStart),
     lockfile.slice(snapshotsStart),
   ];
-  const patchedEntries = [/^ {2}postcss@8\.5\.19:\r?$/mu, /^ {2}find-my-way@9\.7\.0:\r?$/mu];
-  const vulnerableEntries = [/^ {2}postcss@8\.5\.10:\r?$/mu, /^ {2}find-my-way@9\.6\.0:\r?$/mu];
+  const patchedEntries = [
+    /^ {2}postcss@8\.5\.19:\r?$/mu,
+    /^ {2}find-my-way@9\.7\.0:\r?$/mu,
+    /^ {2}fast-uri@3\.1\.5:(?: \{\})?\r?$/mu,
+    /^ {2}fast-uri@4\.1\.2:(?: \{\})?\r?$/mu,
+  ];
+  const vulnerableEntries = [
+    /^ {2}postcss@8\.5\.10:\r?$/mu,
+    /^ {2}find-my-way@9\.6\.0:\r?$/mu,
+    /^ {2}fast-uri@3\.1\.4:(?: \{\})?\r?$/mu,
+    /^ {2}fast-uri@4\.1\.1:(?: \{\})?\r?$/mu,
+  ];
 
   for (const section of resolutionSections) {
     for (const patchedEntry of patchedEntries) {
@@ -222,7 +234,7 @@ test("workspace policy detects unapproved local TypeScript config overrides", ()
   }
 });
 
-test("lockfile resolves only the patched PostCSS and Fastify router versions", () => {
+test("lockfile resolves only patched production dependency versions", () => {
   const lockfile = readFileSync(lockfilePath, "utf8");
 
   assertPatchedProductionResolutions(lockfile);
@@ -245,6 +257,28 @@ test("lockfile resolves only the patched PostCSS and Fastify router versions", (
     () =>
       assertPatchedProductionResolutions(
         lockfile.replace("\nsnapshots:", "\nsnapshots:\n  find-my-way@9.6.0:"),
+      ),
+    /vulnerable production dependency resolution/u,
+  );
+  assert.throws(
+    () => assertPatchedProductionResolutions(lockfile.replaceAll("fast-uri@3.1.5", "fast-uri@3.1.4")),
+    /patched production dependency resolution/u,
+  );
+  assert.throws(
+    () => assertPatchedProductionResolutions(lockfile.replaceAll("fast-uri@4.1.2", "fast-uri@4.1.1")),
+    /patched production dependency resolution/u,
+  );
+  assert.throws(
+    () =>
+      assertPatchedProductionResolutions(
+        lockfile.replace("\nsnapshots:", "\nsnapshots:\n  fast-uri@3.1.4:"),
+      ),
+    /vulnerable production dependency resolution/u,
+  );
+  assert.throws(
+    () =>
+      assertPatchedProductionResolutions(
+        lockfile.replace("\nsnapshots:", "\nsnapshots:\n  fast-uri@4.1.1:"),
       ),
     /vulnerable production dependency resolution/u,
   );
