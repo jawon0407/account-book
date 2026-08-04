@@ -8,6 +8,7 @@ import {
   createApiFastifyAdapter,
   registerRequestContext,
 } from "./common/request-context.js";
+import { registerRawJsonBody } from "./auth/raw-json-body.js";
 import { getApiEnvironment } from "./environment.js";
 
 /**
@@ -28,6 +29,8 @@ async function bootstrap(): Promise<void> {
     createApiFastifyAdapter(),
     { logger: false },
   );
+  // This is the Fastify instance owned by Nest, registered before route initialization.
+  registerRawJsonBody(app.getHttpAdapter().getInstance());
   await configureApiApplication(app);
   app.enableShutdownHooks();
   await app.listen(environment.apiPort, environment.apiHost);
