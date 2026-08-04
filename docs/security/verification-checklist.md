@@ -183,3 +183,18 @@ format
 - [ ] 5 MiB 초과 blob이 있으면 수동 승인으로 우회하지 않고 파일 제거·검토된 별도 저장·또는 보안 검토된 검사 코드/한도 변경이 완료될 때까지 push와 merge를 중단했다.
 
 운영 절차와 위험 수용 종료 조건은 [GitHub 무료 플랜 보완 통제](free-plan-compensating-controls.md)를 따른다.
+
+## 10. Task 13 인증 출시 gate
+
+- [ ] 성공 응답에 provider token이 없고 hardened opaque cookie 하나만 생성된다.
+- [ ] Browser storage와 browser Authorization header에 token state가 없다.
+- [ ] `/api/me` 200이 real BFF와 static public-key/accepted-`kid` delegated ES256 API를 통과한다. request binding과 atomic `jti` replay consume을 확인하며 401/503은 성공이 아니다.
+- [ ] API `BFF_AUTH_DISABLED` kill switch, keyring overlap, accepted `kid` 제거 rotation drill이 같은 SHA에서 통과한다.
+- [ ] Logout 뒤 `/api/me`가 401이고 DB session이 revoked다.
+- [ ] 390x844/1440x900 label, keyboard, axe, overflow가 통과한다.
+- [ ] Production fake adapter가 readiness 전에 process startup을 fail closed한다.
+- [ ] Non-production public host의 fake adapter가 첫 request graph 생성 전에 fail closed한다.
+- [ ] Pinned PostgreSQL, frozen install, verify, DB, E2E, audit, final scan 순서와 digest가 일치한다.
+- [ ] Hosted DB login은 owner가 아니고 `app_session_bff` role만 갖는다.
+- [ ] Google/Kakao/`custom:naver` live checklist를 완료했다. 미실행이면 운영 출시를 차단한다.
+- [ ] Evidence commit SHA와 CI head SHA가 같다.

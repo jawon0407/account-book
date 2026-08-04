@@ -10,9 +10,31 @@
   },
   "scripts": {
     "test:structure": "node --test scripts/verify-structure.test.mjs",
-    "test": "node --test scripts/verify-structure.test.mjs scripts/security/*.test.mjs scripts/security-gate.test.mjs scripts/setup-hooks.test.mjs",
+    "test:legacy": "node --test scripts/verify-structure.test.mjs scripts/workspace-policy.test.mjs scripts/security/*.test.mjs scripts/security-gate.test.mjs scripts/setup-hooks.test.mjs",
+    "test:workspace": "pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api test",
+    "test:e2e-preflight": "pnpm --filter @account-book/e2e test:preflight",
+    "test": "pnpm test:legacy && pnpm test:workspace && pnpm test:e2e-preflight",
+    "test:db": "pnpm --filter @account-book/database-tests test",
     "test:security-gate": "node --test scripts/security/*.test.mjs scripts/security-gate.test.mjs scripts/setup-hooks.test.mjs",
     "setup:hooks": "node scripts/setup-hooks.mjs",
-    "verify:structure": "node scripts/verify-structure.mjs"
+    "verify:structure": "node scripts/verify-structure.mjs",
+    "lint": "eslint . --max-warnings=0",
+    "build:packages": "pnpm --filter @account-book/contracts build && pnpm --filter @account-book/database build",
+    "typecheck:workspace": "pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api --filter @account-book/database-tests --filter @account-book/e2e typecheck",
+    "typecheck": "pnpm build:packages && pnpm typecheck:workspace",
+    "build": "pnpm build:packages && pnpm --filter @account-book/api build && pnpm --filter @account-book/web build",
+    "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "22.20.1",
+    "@vitest/coverage-v8": "4.1.10",
+    "eslint": "10.7.0",
+    "globals": "17.7.0",
+    "prettier": "3.9.5",
+    "tsx": "4.23.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.64.0",
+    "vitest": "4.1.10"
   }
 }

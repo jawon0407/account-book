@@ -1,3 +1,12 @@
 packages:
   - apps/*
   - packages/*
+  - tests/*
+allowBuilds:
+  esbuild: true
+overrides:
+  "next@16.2.11>sharp": "-"
+  "next@16.2.11>postcss": "8.5.19"
+  "find-my-way@9.6.0": "9.7.0"
+  "fast-uri@3.1.4": "3.1.5"
+  "fast-uri@4.1.1": "4.1.2"

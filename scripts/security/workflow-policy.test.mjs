@@ -16,7 +16,11 @@ const approvedActions = [
   "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
 ];
 const reviewedWorkflowSha256 =
-  "b7fcc5b67baefb0fb7d699d29cb6db794e05b93ccf29d1da1d14ef87061e3b65";
+  "ab850644c3dcfbed88aeaba3298ddb4accbc4ad548dbf1afd3bad00505914583";
+const disposableDatabaseUrl =
+  "postgresql://postgres:postgres@127.0.0.1:5432/account_book_test";
+const postgresImage =
+  "postgres:17@sha256:cb875afe6d2e8593c28c22d37d0fd7aaf035c43a42e2f7792cd4c09ceb6beac5";
 
 function canonicalWorkflowDigest(source) {
   const normalizedSource = source.replace(/\r\n/gu, "\n");
@@ -84,7 +88,7 @@ function yamlKeyOccurrences(source, key) {
 
 function dangerousPermissionValues(source) {
   const valuePattern =
-    /(?:^|[\s:{,\[])\s*(?:"(?:write|write-all)"|'(?:write|write-all)'|write|write-all)(?=\s*(?:[,}\]]|$))/gu;
+    /(?:^|[\s:{,[])\s*(?:"(?:write|write-all)"|'(?:write|write-all)'|write|write-all)(?=\s*(?:[,}\]]|$))/gu;
   return activeLines(source.split(/\r?\n/u)).flatMap((line) => [
     ...line.matchAll(valuePattern),
   ]);
@@ -251,6 +255,72 @@ test("checkout step disables shallow history and persisted credentials", () => {
     nestedBlockContent(checkoutSteps[0], "with").map((line) => line.trim()),
     ["fetch-depth: 0", "persist-credentials: false"],
   );
+});
+
+test("security workflow uses the reviewed disposable PostgreSQL service", () => {
+  const source = readFileSync(workflowPath, "utf8");
+  const lines = activeLines(source.split(/\r?\n/u)).map((line) => line.trim());
+
+  assert.equal(lines.filter((line) => line === `image: ${postgresImage}`).length, 1);
+  assert.equal(lines.filter((line) => line === "- 5432:5432").length, 1);
+  assert.ok(lines.includes("POSTGRES_DB: account_book_test"));
+  assert.ok(lines.includes("POSTGRES_PASSWORD: postgres"));
+  assert.ok(lines.includes("POSTGRES_USER: postgres"));
+  assert.ok(lines.some((line) => line.includes("--health-cmd") && line.includes("pg_isready")));
+});
+
+test("security workflow runs install and every security gate in reviewed order", () => {
+  const source = readFileSync(workflowPath, "utf8");
+  const steps = stepBlocks(source);
+  const commands = steps.map((block) => {
+    if (block.some((line) => stripYamlComment(line).trim() === "run: >-")) return foldedRunCommand(block);
+    const runLine = activeLines(block).find((line) => /^\s+run:\s+/u.test(line));
+    return runLine?.trim().replace(/^run:\s+/u, "") ?? "";
+  });
+  const required = [
+    "corepack enable",
+    "pnpm install --frozen-lockfile",
+    "pnpm run verify",
+    "pnpm test:db",
+    "pnpm --filter @account-book/database-tests prepare:e2e",
+    "pnpm --filter @account-book/e2e exec playwright install --with-deps chromium",
+    "pnpm --filter @account-book/e2e test",
+    "pnpm audit --prod --audit-level high",
+  ];
+  let previous = -1;
+  for (const command of required) {
+    const index = commands.findIndex((candidate) => candidate === command);
+    assert.ok(index > previous, `${command} must appear once and in order`);
+    assert.equal(commands.filter((candidate) => candidate === command).length, 1);
+    previous = index;
+  }
+  assert.match(commands.at(-1) ?? "", /^node scripts\/security-gate\.mjs --mode ci/u);
+});
+
+test("database preparation and browser gates use only the disposable server-side database boundary", () => {
+  const source = readFileSync(workflowPath, "utf8");
+  const steps = stepBlocks(source);
+  const stepFor = (command) => steps.find((block) => activeLines(block).some((line) => line.trim() === `run: ${command}`));
+  const database = stepFor("pnpm test:db");
+  const preparation = stepFor("pnpm --filter @account-book/database-tests prepare:e2e");
+  const browser = stepFor("pnpm --filter @account-book/e2e test");
+
+  assert.ok(database, "missing database test step");
+  assert.ok(preparation, "missing E2E database preparation step");
+  assert.ok(browser, "missing browser E2E step");
+  assert.deepEqual(nestedBlockContent(database, "env").map((line) => line.trim()), [
+    `TEST_DATABASE_URL: ${disposableDatabaseUrl}`,
+    "TEST_DATABASE_DISPOSABLE: 'true'",
+  ]);
+  assert.deepEqual(nestedBlockContent(preparation, "env").map((line) => line.trim()), [
+    `TEST_DATABASE_URL: ${disposableDatabaseUrl}`,
+    "TEST_DATABASE_DISPOSABLE: 'true'",
+  ]);
+  assert.deepEqual(nestedBlockContent(browser, "env").map((line) => line.trim()), [
+    `DATABASE_URL: ${disposableDatabaseUrl}`,
+    `TEST_DATABASE_URL: ${disposableDatabaseUrl}`,
+    "TEST_DATABASE_DISPOSABLE: 'true'",
+  ]);
 });
 
 test("security workflow wires the authoritative CI backstop", () => {

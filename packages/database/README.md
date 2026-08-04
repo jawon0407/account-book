@@ -1,3 +1,5 @@
 # Database Package
 
-This package will own Drizzle schemas, migrations support, repository interfaces, transaction helpers, and PostgreSQL access policies. Financial queries must preserve user ownership and use a role without `BYPASSRLS`.
+The package exports the typed `app_private` authentication tables and a per-call
+Drizzle node-postgres client factory. The matching SQL migration is the source
+of truth for PostgreSQL privileges and constraints.

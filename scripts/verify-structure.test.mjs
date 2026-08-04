@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { REQUIRED_PATHS, findMissingPaths } from "./required-structure.mjs";
 
 const cliPath = fileURLToPath(
   new URL("./verify-structure.mjs", import.meta.url),
@@ -60,6 +61,17 @@ test("CLI succeeds when every contract path exists", async () => {
     assert.equal(result.status, 0);
     assert.match(result.stdout, /Repository structure verification passed\./);
     assert.equal(result.stderr, "");
+  } finally {
+    await rm(rootDir, { recursive: true, force: true });
+  }
+});
+
+test("structure contract requires the pnpm lockfile", async () => {
+  const rootDir = await mkdtemp(join(tmpdir(), "account-book-structure-"));
+
+  try {
+    assert.equal(REQUIRED_PATHS.includes("pnpm-lock.yaml"), true);
+    assert.deepEqual(await findMissingPaths(rootDir, ["pnpm-lock.yaml"]), ["pnpm-lock.yaml"]);
   } finally {
     await rm(rootDir, { recursive: true, force: true });
   }

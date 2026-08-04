@@ -220,3 +220,9 @@ GitHub 서버는 현재 무료 플랜의 비공개 저장소에서 `main` PR 의
 두 번째 계층은 같은 CLI를 실행하는 `.github/workflows/security-gate.yml`이다. workflow는 `contents: read`, SHA-pinned Action, `fetch-depth: 0`, `persist-credentials: false`를 사용하며 저장소 secret을 참조하지 않는다. 각 push의 concurrency group에는 실행마다 고유한 `github.run_id`가 들어가고 push 실행은 취소되지 않으므로 같은 SHA를 다시 가리키는 ref push도 pending 실행을 대체하지 않고 각각 검사한다. PR 실행만 PR 번호로 그룹화하고 최신 상태만 필요하므로 `cancel-in-progress`를 적용한다. 구조 정책과 canonical 전체 파일 digest 테스트가 workflow의 권한 또는 실행 경로 변경을 감시한다.
 
 로컬 계층은 `--no-verify`로 우회할 수 있고 CI 계층은 원격에 도달한 변경을 사후 탐지할 뿐 되돌리지 못한다. 따라서 PR 작성자는 동일 SHA의 로컬·CI 성공과 [수동 검증 체크리스트](verification-checklist.md)를 함께 증거로 남겨야 한다. 설치 및 사고 절차와 서버 측 통제 전환 조건은 [무료 플랜 보완 통제](free-plan-compensating-controls.md)에 정의한다.
+
+## 17. Opaque authentication session boundary
+
+Browser에는 provider token 대신 hardened `__Host-ab_session` opaque selector만 존재한다. PostgreSQL은 selector SHA-256 digest와 encrypted provider credentials를 보유하며 BFF만 fixed internal `/v1/me` 호출에 사용한다. BFF는 요청마다 request-bound 30초 delegated ES256 JWT를 만들고, API는 static P-256 public-key keyring, accepted `kid`, exact issuer/audience, scope, request binding, expiry, canonical UUID claims와 atomic `jti` replay consume을 검증한다. API kill switch와 key rotation allowlist는 BFF와 분리된 운영 경계다.
+
+Session은 7일 idle/30일 absolute lifetime이고 logout은 local revocation을 먼저 수행한다. Production/public-host fake adapter는 fail closed이다. CI는 digest-pinned disposable PostgreSQL 뒤에 HTTPS browser smoke, production audit, commit-range scan을 순서대로 실행한다. 상세는 [ADR 0001](../architecture/adr/0001-opaque-auth-sessions.md)과 [환경 가이드](../guides/auth-environment.md)를 따른다.
