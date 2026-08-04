@@ -4,6 +4,7 @@ import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fa
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import { DELEGATED_JSON_BODY_MAX_BYTES } from "@account-book/contracts/internal-api";
+import { registerRequestBodyParsers } from "../main.js";
 import { registerRawJsonBody } from "./raw-json-body.js";
 
 const servers: FastifyInstance[] = [];
@@ -34,12 +35,12 @@ describe("registerRawJsonBody", () => {
     const app = await NestFactory.create<NestFastifyApplication>(
       RawJsonBodyLifecycleModule,
       new FastifyAdapter(),
-      { bodyParser: false, logger: false },
+      { logger: false },
     );
-    registerRawJsonBody(app.getHttpAdapter().getInstance());
-    let parsedRequest: import("fastify").FastifyRequest | undefined;
+    registerRequestBodyParsers(app);
+    const parsedRequests: import("fastify").FastifyRequest[] = [];
     app.getHttpAdapter().getInstance().addHook("preHandler", (request, _reply, done) => {
-      parsedRequest = request;
+      parsedRequests.push(request);
       done();
     });
 
@@ -56,8 +57,18 @@ describe("registerRawJsonBody", () => {
 
       expect(response.statusCode).toBe(201);
       expect(response.json()).toEqual({ status: "ok" });
-      expect(parsedRequest?.body).toEqual({ memo: "\uAC00\uACC4\uBD80" });
-      expect(parsedRequest?.rawBody).toEqual(new TextEncoder().encode(payload));
+      expect(parsedRequests[0]?.body).toEqual({ memo: "\uAC00\uACC4\uBD80" });
+      expect(parsedRequests[0]?.rawBody).toEqual(new TextEncoder().encode(payload));
+
+      const formResponse = await app.inject({
+        method: "POST",
+        url: "/lifecycle",
+        headers: { "content-type": "application/x-www-form-urlencoded" },
+        payload: "memo=lunch+note&tag=one&tag=two",
+      });
+
+      expect(formResponse.statusCode).toBe(201);
+      expect(parsedRequests[1]?.body).toEqual({ memo: "lunch note", tag: ["one", "two"] });
     } finally {
       await app.close();
     }

@@ -1,4 +1,5 @@
 import "reflect-metadata";
+import { parse as parseUrlencoded } from "node:querystring";
 import { pathToFileURL } from "node:url";
 import helmet from "@fastify/helmet";
 import { NestFactory } from "@nestjs/core";
@@ -22,15 +23,27 @@ export async function configureApiApplication(app: NestFastifyApplication): Prom
   await app.register(helmet);
 }
 
+/**
+ * Registers the request parsers required before Nest initializes application routes.
+ * @param app - Nest application whose Fastify adapter owns the parsers.
+ */
+export function registerRequestBodyParsers(app: NestFastifyApplication): void {
+  // This is the Fastify instance owned by Nest, registered before route initialization.
+  registerRawJsonBody(app.getHttpAdapter().getInstance());
+  // Preserve Nest Fastify's existing form parser while keeping JSON exclusively custom.
+  app.useBodyParser("application/x-www-form-urlencoded", {}, (_request, body, done) => {
+    done(null, parseUrlencoded(body.toString("utf8")));
+  });
+}
+
 async function bootstrap(): Promise<void> {
   const environment = getApiEnvironment();
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     createApiFastifyAdapter(),
-    { bodyParser: false, logger: false },
+    { logger: false },
   );
-  // This is the Fastify instance owned by Nest, registered before route initialization.
-  registerRawJsonBody(app.getHttpAdapter().getInstance());
+  registerRequestBodyParsers(app);
   await configureApiApplication(app);
   app.enableShutdownHooks();
   await app.listen(environment.apiPort, environment.apiHost);
