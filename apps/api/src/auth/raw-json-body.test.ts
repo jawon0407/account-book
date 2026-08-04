@@ -1,9 +1,21 @@
+import { Controller, Module, Post } from "@nestjs/common";
+import { NestFactory } from "@nestjs/core";
+import { FastifyAdapter, type NestFastifyApplication } from "@nestjs/platform-fastify";
 import Fastify, { type FastifyInstance } from "fastify";
 import { afterEach, describe, expect, it } from "vitest";
 import { DELEGATED_JSON_BODY_MAX_BYTES } from "@account-book/contracts/internal-api";
 import { registerRawJsonBody } from "./raw-json-body.js";
 
 const servers: FastifyInstance[] = [];
+
+class RawJsonBodyLifecycleController {
+  public handle(): Readonly<{ status: "ok" }> { return { status: "ok" }; }
+}
+Controller("lifecycle")(RawJsonBodyLifecycleController);
+Post()(RawJsonBodyLifecycleController.prototype, "handle", Object.getOwnPropertyDescriptor(RawJsonBodyLifecycleController.prototype, "handle")!);
+
+class RawJsonBodyLifecycleModule {}
+Module({ controllers: [RawJsonBodyLifecycleController] })(RawJsonBodyLifecycleModule);
 
 afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()));
@@ -18,6 +30,39 @@ function server(): FastifyInstance {
 }
 
 describe("registerRawJsonBody", () => {
+  it("survives Nest initialization and listen while parsing raw JSON once", async () => {
+    const app = await NestFactory.create<NestFastifyApplication>(
+      RawJsonBodyLifecycleModule,
+      new FastifyAdapter(),
+      { bodyParser: false, logger: false },
+    );
+    registerRawJsonBody(app.getHttpAdapter().getInstance());
+    let parsedRequest: import("fastify").FastifyRequest | undefined;
+    app.getHttpAdapter().getInstance().addHook("preHandler", (request, _reply, done) => {
+      parsedRequest = request;
+      done();
+    });
+
+    try {
+      await app.init();
+      await app.listen(0, "127.0.0.1");
+      const payload = JSON.stringify({ memo: "\uAC00\uACC4\uBD80" });
+      const response = await app.inject({
+        method: "POST",
+        url: "/lifecycle",
+        headers: { "content-type": "application/json" },
+        payload,
+      });
+
+      expect(response.statusCode).toBe(201);
+      expect(response.json()).toEqual({ status: "ok" });
+      expect(parsedRequest?.body).toEqual({ memo: "\uAC00\uACC4\uBD80" });
+      expect(parsedRequest?.rawBody).toEqual(new TextEncoder().encode(payload));
+    } finally {
+      await app.close();
+    }
+  });
+
   it("preserves the exact UTF-8 JSON bytes while parsing the body", async () => {
     const payload = JSON.stringify({ memo: "\uAC00\uACC4\uBD80" });
     const response = await server().inject({

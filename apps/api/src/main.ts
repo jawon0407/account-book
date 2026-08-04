@@ -27,7 +27,7 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
     createApiFastifyAdapter(),
-    { logger: false },
+    { bodyParser: false, logger: false },
   );
   // This is the Fastify instance owned by Nest, registered before route initialization.
   registerRawJsonBody(app.getHttpAdapter().getInstance());
