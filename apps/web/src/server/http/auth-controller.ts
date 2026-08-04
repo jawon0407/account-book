@@ -27,6 +27,7 @@ import { issueCsrfToken } from "../security/csrf.js";
 import { verifyCsrfRequest } from "../security/request-origin.js";
 import { createSessionSelector, hashSessionSelector } from "../security/session-selector.js";
 import { SessionOperationError, type SessionService } from "../session/session-service.js";
+import type { DelegatedApiClient } from "./delegated-api-client.js";
 
 const MAX_BODY_BYTES = 16_384;
 const MAX_UPSTREAM_BYTES = 65_536;
@@ -61,7 +62,6 @@ type SessionBoundary = Pick<SessionService, "refresh" | "revokeCurrent" | "markR
 /** Request-owned services and immutable configuration used by one controller instance. */
 export type AuthControllerDependencies = Readonly<{
   configuredOrigin: URL;
-  apiInternalUrl: URL;
   secureCookies: true;
   csrfKey: Uint8Array;
   now: () => Date;
@@ -71,24 +71,7 @@ export type AuthControllerDependencies = Readonly<{
   recovery: Pick<PasswordRecoveryService, "start" | "exchange" | "update">;
   sessions: SessionBoundary;
   provider: Pick<AuthProviderPort, "signOut">;
-  delegatedSigner: Readonly<{
-    /**
-     * Mints a credential for only the fixed empty-body current-user GET and never accepts browser or provider credentials.
-     * @param input Canonical local user/session IDs plus the exact method, target, content type, body, and allowlisted scope.
-     * @returns The delegated token and its matching request ID for one bounded upstream request.
-     * @throws May reject; the controller collapses every rejection to its fixed no-secret upstream error.
-     */
-    sign(input: Readonly<{
-      body: Uint8Array;
-      contentType: null;
-      method: "GET";
-      scope: "me:read";
-      sessionId: string;
-      target: "/v1/me";
-      userId: string;
-    }>): Promise<Readonly<{ requestId: string; token: string }>>;
-  }>;
-  fetcher?: typeof fetch;
+  delegatedApiClient: Pick<DelegatedApiClient, "request">;
 }>;
 
 class BoundaryError extends Error {
@@ -276,8 +259,6 @@ async function upstreamJson(response: Response): Promise<unknown> {
  */
 export class AuthController {
   private readonly origin: URL;
-  private readonly apiMeUrl: URL;
-  private readonly fetcher: typeof fetch;
   private readonly createInteractionSelector: () => string;
 
   /**
@@ -288,8 +269,6 @@ export class AuthController {
   public constructor(private readonly dependencies: AuthControllerDependencies) {
     if (dependencies.secureCookies !== true) throw new Error("AUTH_CONFIGURATION_INVALID");
     this.origin = new URL(dependencies.configuredOrigin.toString());
-    this.apiMeUrl = new URL("/v1/me", dependencies.apiInternalUrl);
-    this.fetcher = dependencies.fetcher ?? fetch;
     this.createInteractionSelector = dependencies.createInteractionSelector ?? createSessionSelector;
   }
 
@@ -490,7 +469,7 @@ export class AuthController {
       if (resolved.accessTokenExpiresAt.getTime() - now.getTime() <= REFRESH_THRESHOLD_MS) return fail("AUTH_SESSION_REFRESH_REQUIRED", 401);
       let upstream: Response;
       try {
-        const signed = await this.dependencies.delegatedSigner.sign({
+        upstream = await this.dependencies.delegatedApiClient.request({
           body: new Uint8Array(),
           contentType: null,
           method: "GET",
@@ -498,15 +477,6 @@ export class AuthController {
           sessionId: resolved.sessionId,
           target: "/v1/me",
           userId: resolved.userId,
-        });
-        upstream = await this.fetcher(this.apiMeUrl, {
-          method: "GET",
-          headers: {
-            accept: "application/json",
-            authorization: `Bearer ${signed.token}`,
-            "x-request-id": signed.requestId,
-          },
-          signal: AbortSignal.timeout(3_000),
         });
       } catch {
         throw new BoundaryError("AUTH_PROVIDER_UNAVAILABLE", 502);

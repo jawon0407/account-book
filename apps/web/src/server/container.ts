@@ -13,6 +13,7 @@ import { OAuthService } from "./auth/oauth-service.js";
 import { PasswordRecoveryService } from "./auth/password-recovery-service.js";
 import { SupabaseAuthAdapter } from "./auth/supabase-auth-adapter.js";
 import { AuthController } from "./http/auth-controller.js";
+import { DelegatedApiClient } from "./http/delegated-api-client.js";
 import { PostgresAuthRepository } from "./persistence/postgres-auth-repository.js";
 import { SessionService } from "./session/session-service.js";
 import { DelegatedJwtSigner } from "./security/delegated-jwt-signer.js";
@@ -167,6 +168,7 @@ function databaseClient(connectionString: string): ReturnType<typeof createDatab
  */
 export type RequestContainer = Readonly<{
   authController: AuthController;
+  delegatedApiClient: DelegatedApiClient;
   delegatedJwtSigner: DelegatedJwtSigner;
 }>;
 
@@ -200,9 +202,9 @@ export function createRequestContainer(environment: Readonly<Record<string, stri
       privateKey: signingKey.privateKey,
       now: () => new Date(),
     });
+    const delegatedApiClient = new DelegatedApiClient(apiInternalUrl, delegatedJwtSigner);
     const authController = new AuthController({
       configuredOrigin: runtime.origin,
-      apiInternalUrl,
       secureCookies: true,
       csrfKey,
       now: () => new Date(),
@@ -211,10 +213,11 @@ export function createRequestContainer(environment: Readonly<Record<string, stri
       recovery,
       sessions,
       provider,
-      delegatedSigner: delegatedJwtSigner,
+      delegatedApiClient,
     });
     return {
       delegatedJwtSigner,
+      delegatedApiClient,
       authController,
     };
   } catch {
