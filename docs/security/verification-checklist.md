@@ -47,6 +47,18 @@
 - [ ] 오류 응답에 스택, SQL, 내부 경로, 공급자 원문이 없다.
 - [ ] 보안 헤더와 CSP가 테스트된다.
 
+### Delegated BFF 변경 경계
+
+- [ ] BFF delegated request interface가 browser `userId`, `Authorization`, cookie, host, browser request ID를 받지 않는다.
+- [ ] `method`, relative `target`, canonical `contentType`, exact body bytes의 SHA-256, server-generated `requestId`를 하나의 request binding에 넣고, route metadata의 최소 `scope`를 API에서 다시 검증한다.
+- [ ] mutation은 `POST`·`PATCH`·`DELETE`의 non-empty JSON만 허용하고 raw body와 `content-length`의 exact byte count를 검사한다. JSON parser와 guard의 상한은 같은 32 KiB(32,768 bytes)다.
+- [ ] BFF signer와 upstream fetch가 동일 `Uint8Array` body를 사용하며, one-byte body·target/query·scope·duplicate raw header 변경과 replay를 fail closed 테스트로 확인했다.
+- [ ] BFF→API timeout은 3초이며 signer·timeout·network·replay-store 오류가 요청 허용으로 바뀌지 않는다.
+- [ ] `BFF_JWT_PRIVATE_KEY`는 Vercel server-only secret만 사용하고 Heroku API에는 없다. Heroku에는 public-key set과 accepted `kid`만 secret으로 주입한다.
+- [ ] public-key rotation은 current + previous key만 제한적으로 overlap하고, 새 key signing·이전 `kid` 제거/거부 drill을 같은 변경에서 검증한다.
+- [ ] 구조화 로그는 `requestId`, `jti`, principal/route/result를 남기되 JWT, 원문 body, cookie, key material 또는 body 재구성값을 남기지 않는다.
+- [ ] rate limit key는 인증 principal + route이며 신뢰 가능한 platform IP는 보조 signal일 뿐 IP 단독 식별·차단의 근거가 아니다.
+
 ### 오프라인·파일·동기화
 
 - [ ] IndexedDB에 토큰과 불필요한 개인정보가 없다.
@@ -198,3 +210,5 @@ format
 - [ ] Hosted DB login은 owner가 아니고 `app_session_bff` role만 갖는다.
 - [ ] Google/Kakao/`custom:naver` live checklist를 완료했다. 미실행이면 운영 출시를 차단한다.
 - [ ] Evidence commit SHA와 CI head SHA가 같다.
+- [ ] delegated mutation matrix가 exact body 200, one-byte mismatch, query mismatch, read scope, replay, expiry, duplicate raw headers, 32 KiB 초과 413과 verifier 미호출을 확인했다. 로컬 matrix만으로 hosted Vercel/Heroku secret·rotation·rate-limit 운영 증거를 완료로 표시하지 않는다.
+- [ ] Fastify `5.10.0` / Nest `11.1.28` body-too-large 413 allowlist는 API owner가 두 dependency 업그레이드 또는 parser/filter 변경 전에 oversized·forged-413 fail-closed integration regression으로 재검토했다. 이 재검토가 없으면 해당 변경을 배포하지 않는다.

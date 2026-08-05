@@ -70,6 +70,16 @@ flowchart LR
 
 환경 변수는 Zod로 한 번 파싱하고 frozen snapshot으로 재사용한다. API는 `API_DATABASE_URL`, `BFF_AUTH_DISABLED`, static `BFF_JWT_ACCEPTED_KIDS`, static `BFF_JWT_PUBLIC_KEYS`만으로 trust boundary를 구성한다. key rotation은 allowlist overlap과 제거 drill로 증명하고 BFF private signing key는 API에 배포하지 않는다.
 
+### 변경 요청 framing과 운영 규칙
+
+변경은 `POST`·`PATCH`·`DELETE`만 허용하며, raw JSON parser가 보존한 비어 있지 않은 `Uint8Array`가 1..32,768 bytes인지, raw header에 중복·`transfer-encoding`이 없는지, 선택한 `content-length`가 exact byte count와 같은지를 먼저 확인한다. `PUT`, JSON 이외 content type, raw body 부재는 verifier 전에 거부한다. canonical request binding은 `method`, query를 정렬한 relative `target`, 정규화된 `contentType`, **그 exact body bytes의 SHA-256**, server-generated canonical UUID `requestId`를 줄바꿈으로 연결한다. BFF client는 signer와 upstream fetch에 같은 `Uint8Array` 인스턴스를 쓰므로 byte가 한 개라도 달라지면 binding이 달라진다.
+
+`method`·`target`·`contentType`·`body`·`scope`는 BFF server route/use-case와 strict public contract가 결정한다. `scope`는 API controller metadata와 shared allowlist에서 다시 확인한다. browser `userId`, `Authorization`, cookie, host, request ID는 BFF의 delegated request interface에 없고 신뢰하지 않는다. `requestId`는 signer가 생성해 JWT claim과 outbound `X-Request-Id`에 함께 넣는다. BFF→API 호출은 3초 timeout이며 signer·timeout·network failure는 fail closed로 unavailable 오류가 된다.
+
+키 배치는 분리한다. `BFF_JWT_PRIVATE_KEY`는 Vercel server-only secret이며 Heroku API에는 배포하지 않는다. `BFF_JWT_PUBLIC_KEYS`와 accepted-`kid` set은 Heroku secret이다. rotation 때 API는 current public key와 직전 public key만 제한적으로 겹쳐 검증하고, overlap 종료 전에 새 key signing 확인 후 직전 key를 제거·거부하는 drill을 수행한다. 운영 로그는 `requestId`, `jti`, 결과 코드와 route 같은 구조화 필드만 기록하며 JWT, 원문 body, cookie, private/public key material을 기록하지 않는다. replay store 오류는 503으로 fail closed한다.
+
+rate limit의 identity는 인증 principal + route다. 신뢰 가능한 platform-provided IP는 abuse 분석용 보조 signal일 뿐 NAT·proxy 공유 IP를 사용자 식별자로 단독 사용하지 않는다. 현재 `auth_rate_limits` schema만 있고 persistent rate-limit use case는 구현되지 않았으므로, 이 규칙은 출시 전 구현·abuse regression이 필요한 운영 요구사항이다.
+
 과거 `apps/api/tsconfig.json`에 두었던 package-local `skipLibCheck: true` 예외는 제거했다. 동일 Node 22 계열의 `@types/node`를 TypeScript 6.0.3 호환 선언이 포함된 22.20.1로 갱신해 `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`와 외부 선언 검사를 모두 유지한다.
 
 ## 비밀값과 selector의 위치
@@ -296,6 +306,8 @@ provider boundary가 허용하는 오류 코드는 다음 다섯 개다.
 | strict malformed-row rejection | 손상·공격 데이터의 fail-closed 처리 | 자동 복구 대신 인증 재시작 또는 운영 조사 필요 |
 | shared per-user issuance gate | 비밀번호 변경과 늦은 로그인 race 차단 | 같은 초 token까지 거부할 수 있고 사용자별 lock 경합 발생 |
 | local-first logout orchestration | 외부 장애 중에도 local 접근과 browser cookie를 먼저 제거 | pending 외부 revoke retry worker는 아직 없음 |
+| delegated mutation | body·method·target·scope·request ID를 한 JWT에 결속하고 one-time replay를 소비 | BFF가 침해되면 이미 허용된 least-privilege scope로 짧은 요청을 만들 수 있음. key rotation·kill switch·replay fail-closed·principal+route rate limit으로 완화하지만 hosted 침해 대응 훈련이 필요 |
+| 413 parser allowlist | oversized JSON을 verifier 전에 413으로 돌려 body-limit 경계를 보존 | Fastify `5.10.0` body-limit message와 Nest `11.1.28` HttpException wrapper에 버전 결합. API owner는 둘 중 하나를 업그레이드하거나 parser/filter를 변경하기 전에 oversized·forged-413 integration regression과 allowlist를 재검토해야 하며, 확인 전 배포하지 않음 |
 
 ## 관련 문서
 
