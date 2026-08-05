@@ -33,7 +33,9 @@ function unavailable(): never {
 function validatedBaseUrl(input: URL): URL {
   try {
     if (!(input instanceof URL)) return invalidConfiguration();
-    const baseUrl = new URL(input.toString());
+    const serialized = input.toString();
+    if (serialized.includes("?") || serialized.includes("#")) return invalidConfiguration();
+    const baseUrl = new URL(serialized);
     const loopbackHttp = baseUrl.protocol === "http:" && LOOPBACK_HOSTS.has(baseUrl.hostname);
     if (
       !(baseUrl.protocol === "https:" || loopbackHttp) ||
@@ -60,7 +62,8 @@ function validatedTarget(input: DelegatedApiRequest, baseUrl: URL): URL {
       !(input.body instanceof Uint8Array) ||
       typeof input.target !== "string" ||
       !input.target.startsWith("/") ||
-      input.target.startsWith("//")
+      input.target.startsWith("//") ||
+      input.target.includes("#")
     ) {
       return invalidRequest();
     }

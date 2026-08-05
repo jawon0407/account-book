@@ -164,7 +164,7 @@ function databaseClient(connectionString: string): ReturnType<typeof createDatab
 
 /**
  * The request-owned dependency graph exposed to route adapters.
- * The exposed signer is the exact instance injected into the request-owned controller.
+ * The exposed signer feeds the exposed request-owned client, and the controller receives that exact client.
  */
 export type RequestContainer = Readonly<{
   authController: AuthController;

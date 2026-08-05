@@ -45,7 +45,7 @@ describe("DelegatedApiClient", () => {
       expect(fetcher).toHaveBeenCalledOnce();
       const [url, init] = fetcher.mock.calls[0] as unknown as [URL, RequestInit];
       expect(url).toEqual(new URL("https://api.example.test/v1/test-mutation"));
-      expect(init).toMatchObject({
+      expect(init).toEqual({
         method: "POST",
         body,
         headers: {
@@ -60,6 +60,41 @@ describe("DelegatedApiClient", () => {
       expect(timeout).toHaveBeenCalledOnce();
       expect(timeout).toHaveBeenCalledWith(3_000);
       expect(response.status).toBe(200);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("sends a GET with exactly three server-owned headers and no body or content type", async () => {
+    const { client, fetcher, signer } = setup();
+    const body = new Uint8Array();
+    const timeoutSignal = new AbortController().signal;
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(timeoutSignal);
+    try {
+      await client.request({
+        body,
+        contentType: null,
+        method: "GET",
+        scope: "me:read",
+        sessionId: "123e4567-e89b-12d3-a456-426614174002",
+        target: "/v1/me",
+        userId: "123e4567-e89b-12d3-a456-426614174001",
+      });
+
+      expect(signer.sign.mock.calls[0]![0].body).toBe(body);
+      const [url, init] = fetcher.mock.calls[0] as unknown as [URL, RequestInit];
+      expect(url).toEqual(new URL("https://api.example.test/v1/me"));
+      expect(init).toEqual({
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          authorization: "Bearer delegated-token",
+          "x-request-id": requestId,
+        },
+        signal: timeoutSignal,
+      });
+      expect(Object.hasOwn(init, "body")).toBe(false);
+      expect(new Headers(init.headers).has("content-type")).toBe(false);
     } finally {
       timeout.mockRestore();
     }
@@ -81,6 +116,7 @@ describe("DelegatedApiClient", () => {
     ["an absolute target", { ...mutationRequest(), target: "https://evil.example.test/v1/mutation" }],
     ["a scheme-relative target", { ...mutationRequest(), target: "//user:pass@evil.example.test/v1/mutation" }],
     ["a target fragment", { ...mutationRequest(), target: "/v1/mutation#delegated-token" }],
+    ["an empty target fragment", { ...mutationRequest(), target: "/v1/mutation#" }],
     ["an unsupported method", { ...mutationRequest(), method: "PUT" }],
   ])("rejects %s before signing or fetching", async (_name, input) => {
     const { client, fetcher, signer } = setup();
@@ -95,7 +131,9 @@ describe("DelegatedApiClient", () => {
     "https://user:pass@api.example.test",
     "https://api.example.test/base",
     "https://api.example.test?query=1",
+    "https://api.example.test?",
     "https://api.example.test#fragment",
+    "https://api.example.test#",
     "http://api.example.test",
     "ftp://api.example.test",
   ])("rejects an unsafe base URL before constructing a client: %s", (value) => {
