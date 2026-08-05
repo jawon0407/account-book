@@ -8,10 +8,10 @@ import {
   Module,
   Post,
   Req,
-  UseFilters,
   UseGuards,
   type LoggerService,
 } from "@nestjs/common";
+import { APP_FILTER } from "@nestjs/core";
 import type { NestFastifyApplication } from "@nestjs/platform-fastify";
 import { Test } from "@nestjs/testing";
 import type { FastifyRequest } from "fastify";
@@ -139,7 +139,6 @@ class TestMutationController {
 
 Controller()(TestMutationController);
 UseGuards(AuthGuard)(TestMutationController);
-UseFilters(ApiErrorFilter)(TestMutationController);
 const createDescriptor = Object.getOwnPropertyDescriptor(
   TestMutationController.prototype,
   "create",
@@ -183,7 +182,7 @@ Module({
   providers: [
     AuthGuard,
     { provide: ACCESS_TOKEN_VERIFIER, useValue: verifier },
-    ApiErrorFilter,
+    { provide: APP_FILTER, useClass: ApiErrorFilter },
   ],
 })(TestMutationModule);
 
