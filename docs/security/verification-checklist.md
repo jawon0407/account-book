@@ -52,7 +52,7 @@
 - [ ] BFF delegated request interface가 browser `userId`, `Authorization`, cookie, host, browser request ID를 받지 않는다.
 - [ ] `method`, relative `target`, canonical `contentType`, exact body bytes의 SHA-256, server-generated `requestId`를 하나의 request binding에 넣고, route metadata의 최소 `scope`를 API에서 다시 검증한다.
 - [ ] mutation은 `POST`·`PATCH`·`DELETE`의 non-empty JSON만 허용하고 raw body와 `content-length`의 exact byte count를 검사한다. JSON parser와 guard의 상한은 같은 32 KiB(32,768 bytes)다.
-- [ ] BFF signer와 upstream fetch가 동일 `Uint8Array` body를 사용하며, one-byte body·target/query·scope·duplicate raw header 변경과 replay를 fail closed 테스트로 확인했다.
+- [ ] BFF client가 caller-owned body를 진입 시 snapshot하고 signer와 upstream fetch에는 동일한 내부 `Uint8Array`만 사용하며, signer-await 원본 변경·one-byte body·target/query·scope·duplicate raw header 변경과 replay를 fail closed 테스트로 확인했다.
 - [ ] BFF→API timeout은 3초이며 signer·timeout·network·replay-store 오류가 요청 허용으로 바뀌지 않는다.
 - [ ] `BFF_JWT_PRIVATE_KEY`는 Vercel server-only secret만 사용하고 Heroku API에는 없다. Heroku에는 public-key set과 accepted `kid`만 secret으로 주입한다.
 - [ ] public-key rotation은 current + previous key만 제한적으로 overlap하고, 새 key signing·이전 `kid` 제거/거부 drill을 같은 변경에서 검증한다.

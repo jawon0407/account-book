@@ -50,7 +50,7 @@ const approvedPackageLocalSkipLibCheck = [
 
 const expectedWorkspaceOverrides = {
   "next@16.2.11>sharp": "-",
-  "next@16.2.11>postcss": "8.5.19",
+  "next@16.2.11>postcss": "8.5.23",
   "find-my-way@9.6.0": "9.7.0",
   "fast-uri@3.1.4": "3.1.5",
   "fast-uri@4.1.1": "4.1.2",
@@ -110,13 +110,13 @@ function assertPatchedProductionResolutions(lockfile) {
     lockfile.slice(snapshotsStart),
   ];
   const patchedEntries = [
-    /^ {2}postcss@8\.5\.19:\r?$/mu,
+    /^ {2}postcss@8\.5\.23:\r?$/mu,
     /^ {2}find-my-way@9\.7\.0:\r?$/mu,
     /^ {2}fast-uri@3\.1\.5:(?: \{\})?\r?$/mu,
     /^ {2}fast-uri@4\.1\.2:(?: \{\})?\r?$/mu,
   ];
   const vulnerableEntries = [
-    /^ {2}postcss@8\.5\.10:\r?$/mu,
+    /^ {2}postcss@8\.5\.22:\r?$/mu,
     /^ {2}find-my-way@9\.6\.0:\r?$/mu,
     /^ {2}fast-uri@3\.1\.4:(?: \{\})?\r?$/mu,
     /^ {2}fast-uri@4\.1\.1:(?: \{\})?\r?$/mu,
@@ -239,7 +239,7 @@ test("lockfile resolves only patched production dependency versions", () => {
 
   assertPatchedProductionResolutions(lockfile);
   assert.throws(
-    () => assertPatchedProductionResolutions(lockfile.replaceAll("postcss@8.5.19", "postcss@8.5.10")),
+    () => assertPatchedProductionResolutions(lockfile.replaceAll("postcss@8.5.23", "postcss@8.5.22")),
     /patched production dependency resolution/u,
   );
   assert.throws(
@@ -249,7 +249,7 @@ test("lockfile resolves only patched production dependency versions", () => {
   assert.throws(
     () =>
       assertPatchedProductionResolutions(
-        lockfile.replace("\nsnapshots:", "\n  postcss@8.5.10:\n\nsnapshots:"),
+        lockfile.replace("\nsnapshots:", "\n  postcss@8.5.22:\n\nsnapshots:"),
       ),
     /vulnerable production dependency resolution/u,
   );

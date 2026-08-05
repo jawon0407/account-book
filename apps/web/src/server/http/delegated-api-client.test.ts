@@ -21,12 +21,19 @@ function mutationRequest(body = new TextEncoder().encode('{"amountKrw":"12000"}'
 
 function setup(baseUrl = new URL("https://api.example.test")) {
   const signer = {
-    sign: vi.fn(async (_input: DelegatedSignInput) => ({
-      requestId,
-      token: "delegated-token",
-    })),
+    sign: vi.fn(async (input: DelegatedSignInput) => {
+      void input;
+      return {
+        requestId,
+        token: "delegated-token",
+      };
+    }),
   };
-  const fetcher = vi.fn(async (_input: URL | RequestInfo, _init?: RequestInit) => new Response(null, { status: 200 }));
+  const fetcher = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+    void input;
+    void init;
+    return new Response(null, { status: 200 });
+  });
   const client = new DelegatedApiClient(baseUrl, signer, fetcher as typeof fetch);
   return { client, fetcher, signer };
 }
@@ -41,13 +48,15 @@ describe("DelegatedApiClient", () => {
       const response = await client.request(mutationRequest(body));
 
       expect(signer.sign).toHaveBeenCalledOnce();
-      expect(signer.sign.mock.calls[0]![0].body).toBe(body);
+      const signedBody = signer.sign.mock.calls[0]![0].body;
+      expect(signedBody).not.toBe(body);
+      expect(signedBody).toEqual(body);
       expect(fetcher).toHaveBeenCalledOnce();
       const [url, init] = fetcher.mock.calls[0] as unknown as [URL, RequestInit];
       expect(url).toEqual(new URL("https://api.example.test/v1/test-mutation"));
       expect(init).toEqual({
         method: "POST",
-        body,
+        body: signedBody,
         headers: {
           accept: "application/json",
           authorization: "Bearer delegated-token",
@@ -56,13 +65,50 @@ describe("DelegatedApiClient", () => {
         },
         signal: timeoutSignal,
       });
-      expect(init.body).toBe(body);
+      expect(init.body).toBe(signedBody);
       expect(timeout).toHaveBeenCalledOnce();
       expect(timeout).toHaveBeenCalledWith(3_000);
       expect(response.status).toBe(200);
     } finally {
       timeout.mockRestore();
     }
+  });
+
+  it("snapshots caller-owned bytes before awaiting the signer", async () => {
+    const body = new TextEncoder().encode('{"amountKrw":"12000"}');
+    const expected = Uint8Array.from(body);
+    let releaseSigning: ((value: Readonly<{ requestId: string; token: string }>) => void) | undefined;
+    const signer = {
+      sign: vi.fn((input: DelegatedSignInput) => {
+        void input;
+        return new Promise<Readonly<{ requestId: string; token: string }>>((resolve) => {
+          releaseSigning = resolve;
+        });
+      }),
+    };
+    const fetcher = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      void input;
+      void init;
+      return new Response(null, { status: 200 });
+    });
+    const client = new DelegatedApiClient(
+      new URL("https://api.example.test"),
+      signer,
+      fetcher as typeof fetch,
+    );
+
+    const pending = client.request(mutationRequest(body));
+    expect(signer.sign).toHaveBeenCalledOnce();
+    const signedBody = signer.sign.mock.calls[0]![0].body;
+    body.fill(0);
+    expect(releaseSigning).toBeTypeOf("function");
+    releaseSigning!({ requestId, token: "delegated-token" });
+    await pending;
+
+    const [, init] = fetcher.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(signedBody).not.toBe(body);
+    expect(signedBody).toEqual(expected);
+    expect(init.body).toBe(signedBody);
   });
 
   it("sends a GET with exactly three server-owned headers and no body or content type", async () => {
@@ -81,7 +127,9 @@ describe("DelegatedApiClient", () => {
         userId: "123e4567-e89b-12d3-a456-426614174001",
       });
 
-      expect(signer.sign.mock.calls[0]![0].body).toBe(body);
+      const signedBody = signer.sign.mock.calls[0]![0].body;
+      expect(signedBody).not.toBe(body);
+      expect(signedBody).toEqual(body);
       const [url, init] = fetcher.mock.calls[0] as unknown as [URL, RequestInit];
       expect(url).toEqual(new URL("https://api.example.test/v1/me"));
       expect(init).toEqual({

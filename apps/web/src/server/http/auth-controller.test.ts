@@ -74,7 +74,10 @@ function setup(overrides: Record<string, unknown> = {}) {
   };
   const provider = { signOut: vi.fn(async () => { events.push("provider-sign-out"); }) };
   const delegatedApiClient = {
-    request: vi.fn(async (_input: DelegatedApiRequest) => new Response(JSON.stringify(user), { status: 200, headers: { "Content-Type": "application/json", "Set-Cookie": "upstream=forbidden" } })),
+    request: vi.fn(async (input: DelegatedApiRequest) => {
+      void input;
+      return new Response(JSON.stringify(user), { status: 200, headers: { "Content-Type": "application/json", "Set-Cookie": "upstream=forbidden" } });
+    }),
   };
   expect(AuthController).toBeTypeOf("function");
   const controller = new AuthController!({

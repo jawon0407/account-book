@@ -72,7 +72,7 @@ flowchart LR
 
 ### 변경 요청 framing과 운영 규칙
 
-변경은 `POST`·`PATCH`·`DELETE`만 허용하며, raw JSON parser가 보존한 비어 있지 않은 `Uint8Array`가 1..32,768 bytes인지, raw header에 중복·`transfer-encoding`이 없는지, 선택한 `content-length`가 exact byte count와 같은지를 먼저 확인한다. `PUT`, JSON 이외 content type, raw body 부재는 verifier 전에 거부한다. canonical request binding은 `method`, query를 정렬한 relative `target`, 정규화된 `contentType`, **그 exact body bytes의 SHA-256**, server-generated canonical UUID `requestId`를 줄바꿈으로 연결한다. BFF client는 signer와 upstream fetch에 같은 `Uint8Array` 인스턴스를 쓰므로 byte가 한 개라도 달라지면 binding이 달라진다.
+변경은 `POST`·`PATCH`·`DELETE`만 허용하며, raw JSON parser가 보존한 비어 있지 않은 `Uint8Array`가 1..32,768 bytes인지, raw header에 중복·`transfer-encoding`이 없는지, 선택한 `content-length`가 exact byte count와 같은지를 먼저 확인한다. `PUT`, JSON 이외 content type, raw body 부재는 verifier 전에 거부한다. canonical request binding은 `method`, query를 정렬한 relative `target`, 정규화된 `contentType`, **그 exact body bytes의 SHA-256**, server-generated canonical UUID `requestId`를 줄바꿈으로 연결한다. BFF client는 caller-owned body를 진입 시 내부 `Uint8Array`로 snapshot한 뒤 그 인스턴스만 signer와 upstream fetch에 공유하므로, signer를 기다리는 동안 caller가 원본을 바꿔도 전송 byte가 drift하지 않는다.
 
 `method`·`target`·`contentType`·`body`·`scope`는 BFF server route/use-case와 strict public contract가 결정한다. `scope`는 API controller metadata와 shared allowlist에서 다시 확인한다. browser `userId`, `Authorization`, cookie, host, request ID는 BFF의 delegated request interface에 없고 신뢰하지 않는다. `requestId`는 signer가 생성해 JWT claim과 outbound `X-Request-Id`에 함께 넣는다. BFF→API 호출은 3초 timeout이며 signer·timeout·network failure는 fail closed로 unavailable 오류가 된다.
 

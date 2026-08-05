@@ -89,7 +89,8 @@ function validatedTarget(input: DelegatedApiRequest, baseUrl: URL): URL {
 
 /**
  * Signs and sends one already-serialized internal API request without accepting browser-owned headers.
- * The exact body instance is shared with the signer and fetch implementation so the JWT binding cannot drift.
+ * Caller-owned bytes are snapshotted before signing, then that exact internal body instance is shared with
+ * the signer and fetch implementation so mutation during the signing await cannot drift the JWT binding.
  */
 export class DelegatedApiClient {
   private readonly baseUrl: URL;
@@ -104,18 +105,19 @@ export class DelegatedApiClient {
 
   public async request(input: DelegatedApiRequest): Promise<Response> {
     const target = validatedTarget(input, this.baseUrl);
+    const request = Object.freeze({ ...input, body: Uint8Array.from(input.body) });
     try {
-      const signed = await this.signer.sign(input);
+      const signed = await this.signer.sign(request);
       const headers: Record<string, string> = {
         accept: "application/json",
         authorization: `Bearer ${signed.token}`,
         "x-request-id": signed.requestId,
       };
-      if (input.contentType !== null) headers["content-type"] = input.contentType;
+      if (request.contentType !== null) headers["content-type"] = request.contentType;
       return await this.fetcher(target, {
-        method: input.method,
+        method: request.method,
         headers,
-        ...(input.method === "GET" ? {} : { body: input.body as BodyInit }),
+        ...(request.method === "GET" ? {} : { body: request.body as BodyInit }),
         signal: AbortSignal.timeout(3_000),
       });
     } catch {
