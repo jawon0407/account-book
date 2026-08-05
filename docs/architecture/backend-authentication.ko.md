@@ -78,7 +78,7 @@ flowchart LR
 
 키 배치는 분리한다. `BFF_JWT_PRIVATE_KEY`는 Vercel server-only secret이며 Heroku API에는 배포하지 않는다. `BFF_JWT_PUBLIC_KEYS`와 accepted-`kid` set은 Heroku secret이다. rotation 때 API는 current public key와 직전 public key만 제한적으로 겹쳐 검증하고, overlap 종료 전에 새 key signing 확인 후 직전 key를 제거·거부하는 drill을 수행한다. 운영 로그는 `requestId`, `jti`, 결과 코드와 route 같은 구조화 필드만 기록하며 JWT, 원문 body, cookie, private/public key material을 기록하지 않는다. replay store 오류는 503으로 fail closed한다.
 
-rate limit의 identity는 인증 principal + route다. 신뢰 가능한 platform-provided IP는 abuse 분석용 보조 signal일 뿐 NAT·proxy 공유 IP를 사용자 식별자로 단독 사용하지 않는다. 현재 `auth_rate_limits` schema만 있고 persistent rate-limit use case는 구현되지 않았으므로, 이 규칙은 출시 전 구현·abuse regression이 필요한 운영 요구사항이다.
+rate limit의 identity는 인증 principal + route다. 신뢰 가능한 platform-provided IP는 abuse 분석용 보조 signal일 뿐 NAT·proxy 공유 IP를 사용자 식별자로 단독 사용하지 않는다. 현재 `auth_rate_limits` schema만 있고 persistent rate-limit use case는 구현되지 않았다. 담당자는 API owner이며 기한은 **최초 hosted delegated mutation release 전** 구현·abuse regression·운영 관측 완료다. 재검토 조건은 rate-limit backend, route/scope, 또는 trusted platform IP 의미 변경이며 배포 전에 다시 검토한다.
 
 과거 `apps/api/tsconfig.json`에 두었던 package-local `skipLibCheck: true` 예외는 제거했다. 동일 Node 22 계열의 `@types/node`를 TypeScript 6.0.3 호환 선언이 포함된 22.20.1로 갱신해 `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`와 외부 선언 검사를 모두 유지한다.
 

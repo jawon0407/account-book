@@ -177,7 +177,7 @@ pnpm run verify                                            # exit 0; legacy 53, 
 
 ## M2 delegated mutation 경계: 로컬 RED/GREEN 증거
 
-이 절은 2026-08-05 작업 트리에서 확인한 로컬 구현 증거다. hosted Heroku/Vercel secret 주입, 실제 public-key rotation, 운영 replay store·rate-limit 관측은 실행하지 않았으므로 완료나 출시 승인으로 해석하지 않는다.
+이 절은 2026-08-05 작업 트리에서 확인한 로컬 구현 증거다. hosted Heroku/Vercel secret 주입, 실제 public-key rotation, 운영 replay store·rate-limit 관측은 실행하지 않았으므로 완료나 출시 승인으로 해석하지 않는다. 담당자는 Platform owner(공개 키·secret 배치와 rotation)와 Security owner(BFF 침해 대응 훈련)이며, 기한은 **최초 hosted delegated mutation release 전**이다. 재검토 조건은 Vercel/Heroku secret·keyset 배치 또는 BFF delegation scope 변경이고, 변경 rollout 전에 다시 검토한다.
 
 | 단계 | RED | GREEN과 커밋 |
 | --- | --- | --- |
@@ -191,6 +191,6 @@ matrix는 BFF signer와 API verifier의 real classes, deterministic P-256 key/cl
 
 운영 로그는 `requestId`와 `jti`를 구조화 필드로만 남기고 JWT·원문 body·body digest의 원문 복원 재료를 넣지 않는다. BFF private signing key `BFF_JWT_PRIVATE_KEY`는 Vercel의 server-only secret에만 두고, API의 public-key set은 Heroku secret에만 둔다. API는 current public key와 직전 public key만 검증하는 제한된 overlap을 사용하며, overlap 종료 후 이전 `kid` 제거·거부를 rotation drill로 검증한다. replay store를 읽거나 쓰지 못하면 요청을 허용하지 않는다.
 
-rate limit은 browser IP만을 principal로 쓰지 않는다. 인증 principal + route를 기본 key로 하고, 신뢰 가능한 platform-provided IP는 보조 신호로만 사용한다. 이 persistent rate-limit use case는 아직 구현되지 않았으므로 release 전에 abuse test와 운영 관측을 추가해야 한다. BFF 침해 시에도 이미 허용된 scope로 30초 이내 요청이 가능하다는 잔여 위험은 least-privilege scope, one-time replay, key rotation/kill switch, 이 rate-limit 설계로 줄일 뿐 제거하지 못한다.
+rate limit은 browser IP만을 principal로 쓰지 않는다. 인증 principal + route를 기본 key로 하고, 신뢰 가능한 platform-provided IP는 보조 신호로만 사용한다. 이 persistent rate-limit use case는 아직 구현되지 않았다. 담당자는 API owner이고, 기한은 **최초 hosted delegated mutation release 전** abuse test와 운영 관측을 추가하는 것이다. 재검토 조건은 rate-limit backend, route/scope, 또는 trusted platform IP 의미 변경이며 배포 전에 다시 검토한다. BFF 침해 시에도 이미 허용된 scope로 30초 이내 요청이 가능하다는 잔여 위험은 least-privilege scope, one-time replay, key rotation/kill switch, 이 rate-limit 설계로 줄일 뿐 제거하지 못한다.
 
 Fastify body-too-large 413 복구 allowlist는 Fastify `5.10.0`의 고정 message와 Nest `11.1.28` wrapper 동작에 결합돼 있다. 담당자는 API owner이며, 두 dependency 중 하나를 업그레이드하거나 parser/filter 동작을 바꾸기 **전** matrix의 oversized 413·forged 413 fail-closed regression을 다시 실행하고 allowlist를 재검토해야 한다. 이 조건이 충족되기 전 dependency upgrade를 배포하지 않는다.

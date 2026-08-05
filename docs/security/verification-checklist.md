@@ -57,7 +57,7 @@
 - [ ] `BFF_JWT_PRIVATE_KEY`는 Vercel server-only secret만 사용하고 Heroku API에는 없다. Heroku에는 public-key set과 accepted `kid`만 secret으로 주입한다.
 - [ ] public-key rotation은 current + previous key만 제한적으로 overlap하고, 새 key signing·이전 `kid` 제거/거부 drill을 같은 변경에서 검증한다.
 - [ ] 구조화 로그는 `requestId`, `jti`, principal/route/result를 남기되 JWT, 원문 body, cookie, key material 또는 body 재구성값을 남기지 않는다.
-- [ ] rate limit key는 인증 principal + route이며 신뢰 가능한 platform IP는 보조 signal일 뿐 IP 단독 식별·차단의 근거가 아니다.
+- [ ] API owner가 인증 principal + route를 rate-limit key로 구현하고, 신뢰 가능한 platform IP는 보조 signal로만 사용한다. 기한은 **최초 hosted delegated mutation release 전**이며, rate-limit backend·route/scope·trusted platform IP 의미 변경 전 재검토한다.
 
 ### 오프라인·파일·동기화
 
@@ -210,5 +210,5 @@ format
 - [ ] Hosted DB login은 owner가 아니고 `app_session_bff` role만 갖는다.
 - [ ] Google/Kakao/`custom:naver` live checklist를 완료했다. 미실행이면 운영 출시를 차단한다.
 - [ ] Evidence commit SHA와 CI head SHA가 같다.
-- [ ] delegated mutation matrix가 exact body 200, one-byte mismatch, query mismatch, read scope, replay, expiry, duplicate raw headers, 32 KiB 초과 413과 verifier 미호출을 확인했다. 로컬 matrix만으로 hosted Vercel/Heroku secret·rotation·rate-limit 운영 증거를 완료로 표시하지 않는다.
+- [ ] delegated mutation matrix가 exact body 200, one-byte mismatch, query mismatch, read scope, replay, expiry, duplicate raw headers, 32 KiB 초과 413과 verifier 미호출을 확인했다. Platform owner는 hosted Vercel/Heroku secret·key rotation 증거를, Security owner는 BFF 침해 대응 훈련을 **최초 hosted delegated mutation release 전** 완료한다. secret/keyset 배치 또는 BFF delegation scope 변경 전 재검토한다.
 - [ ] Fastify `5.10.0` / Nest `11.1.28` body-too-large 413 allowlist는 API owner가 두 dependency 업그레이드 또는 parser/filter 변경 전에 oversized·forged-413 fail-closed integration regression으로 재검토했다. 이 재검토가 없으면 해당 변경을 배포하지 않는다.
