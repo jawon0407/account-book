@@ -51,6 +51,7 @@ const approvedPackageLocalSkipLibCheck = [
 const expectedWorkspaceOverrides = {
   "next@16.2.11>sharp": "-",
   "next@16.2.11>postcss": "8.5.23",
+  "nanoid@3.3.16": "3.3.18",
   "find-my-way@9.6.0": "9.7.0",
   "fast-uri@3.1.4": "3.1.5",
   "fast-uri@4.1.1": "4.1.2",
@@ -111,12 +112,14 @@ function assertPatchedProductionResolutions(lockfile) {
   ];
   const patchedEntries = [
     /^ {2}postcss@8\.5\.23:\r?$/mu,
+    /^ {2}nanoid@3\.3\.18:(?: \{\})?\r?$/mu,
     /^ {2}find-my-way@9\.7\.0:\r?$/mu,
     /^ {2}fast-uri@3\.1\.5:(?: \{\})?\r?$/mu,
     /^ {2}fast-uri@4\.1\.2:(?: \{\})?\r?$/mu,
   ];
   const vulnerableEntries = [
     /^ {2}postcss@8\.5\.22:\r?$/mu,
+    /^ {2}nanoid@3\.3\.16:(?: \{\})?\r?$/mu,
     /^ {2}find-my-way@9\.6\.0:\r?$/mu,
     /^ {2}fast-uri@3\.1\.4:(?: \{\})?\r?$/mu,
     /^ {2}fast-uri@4\.1\.1:(?: \{\})?\r?$/mu,
@@ -240,6 +243,10 @@ test("lockfile resolves only patched production dependency versions", () => {
   assertPatchedProductionResolutions(lockfile);
   assert.throws(
     () => assertPatchedProductionResolutions(lockfile.replaceAll("postcss@8.5.23", "postcss@8.5.22")),
+    /patched production dependency resolution/u,
+  );
+  assert.throws(
+    () => assertPatchedProductionResolutions(lockfile.replaceAll("nanoid@3.3.18", "nanoid@3.3.16")),
     /patched production dependency resolution/u,
   );
   assert.throws(
