@@ -202,19 +202,29 @@ PR #4는 금융 변경 경계 Task 1~7의 로컬 구현과 검증을 담고 있�
 
 ## 9. 테스트와 현재 증거
 
-기준 SHA `51a9667511058395c4f72e4af42e2e4c25b243dc`에서 확인된 최신 증거는 다음과 같다.
+기능 코드·CI 증거의 기준 SHA는 `51a9667511058395c4f72e4af42e2e4c25b243dc`이며, 아래 표의 hosted 이전 기능 검증과 CI 결과는 이 SHA에만 귀속된다. 개발 의존성 patch의 별도 로컬 GREEN 증거는 patch 커밋 `af4f059d80b87e1812b18fcfc52d6b50aeec8eb3`에서 확인했다.
 
 | 항목                          | 결과                                                                                                      |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------- |
 | 로컬 `pnpm verify`            | 829/829 tests, 6/6 typecheck, production build 성공                                                       |
 | `pnpm audit --prod`           | 알려진 production vulnerability 0건                                                                       |
-| 전체 `pnpm audit`             | 0 findings — 개발 의존성 7건(High 3, Moderate 4) 해소                                                       |
+| 전체 `pnpm audit`             | 개발 의존성 7건: High 3, Moderate 4 — 당시 미해결                                                          |
 | 동일 SHA push CI              | [GitHub Actions run 32158792436](https://github.com/jawon0407/account-book/actions/runs/32158792436) 성공 |
 | 동일 SHA PR CI                | [GitHub Actions run 32158800903](https://github.com/jawon0407/account-book/actions/runs/32158800903) 성공 |
 | disposable PostgreSQL         | CI에서 검증됨                                                                                             |
 | 실제 Chromium 인증 E2E        | CI에서 검증됨                                                                                             |
 | hosted Vercel/Heroku/Supabase | 미실행                                                                                                    |
 | live Google·Kakao·Naver       | 미실행                                                                                                    |
+의존성 patch 커밋 `af4f059d80b87e1812b18fcfc52d6b50aeec8eb3`의 pinned-runtime GREEN 증거:
+
+| 항목 | 결과 |
+| --- | --- |
+| 런타임 | Node `22.15.1`, pnpm `11.9.0` |
+| `pnpm why brace-expansion -r` | singleton `brace-expansion@5.0.9` |
+| `pnpm why undici -r` | singleton `undici@7.29.0` |
+| `pnpm audit` | 0 findings |
+| `pnpm audit --prod` | 0 findings |
+| `pnpm verify` | 829/829 tests, 6/6 typecheck, production build 성공 |
 
 RED/GREEN은 테스트 주도 개발의 상태를 뜻한다.
 
