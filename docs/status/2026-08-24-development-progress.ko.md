@@ -15,7 +15,7 @@
 | 구분                       | 상태                 | 판단                                                                           |
 | -------------------------- | -------------------- | ------------------------------------------------------------------------------ |
 | 저장소·TypeScript·CI 기반  | ✅ 구현 및 자동 검증 | pnpm monorepo, 엄격한 TypeScript, lint/typecheck/test/build/audit gate가 있다. |
-| 개발 의존성 보안           | 🟡 patch 필요        | 전체 audit에 개발 의존성 7건(High 3, Moderate 4)이 남아 있다.                  |
+| 개발 의존성 보안           | ✅ patched           | brace-expansion 5.0.9·undici 7.29.0으로 개발 의존성 audit 7건을 해소했고 전체 audit가 통과했다. |
 | 서버 소유 인증 경계        | ✅ 로컬·CI 구현      | opaque session, OAuth transaction, recovery, BFF 인증 경계가 구현됐다.         |
 | BFF → API delegated JWT    | ✅ 로컬·CI 구현      | 30초 ES256 토큰, request binding, scope, one-time replay 방어가 구현됐다.      |
 | 실제 hosted 인증·운영 검증 | 🔒 미실행            | Vercel·Heroku·Supabase와 Google·Kakao·Naver 실환경 증거가 필요하다.            |
@@ -185,7 +185,7 @@ PR #4는 금융 변경 경계 Task 1~7의 로컬 구현과 검증을 담고 있�
 
 ### 8.2 실제 데이터 저장 전 반드시 남겨야 하는 증거
 
-- 현재 feature 브랜치의 개발 의존성 7건(High 3, Moderate 4)과 기본 브랜치 Dependabot 9건(High 4, Moderate 5)을 patched version으로 해소하고 전체 audit를 다시 통과
+- 현재 feature 브랜치의 개발 의존성 7건(High 3, Moderate 4)을 brace-expansion 5.0.9·undici 7.29.0으로 해소하고 전체 audit와 production audit를 통과
 - Vercel Node.js Function, Heroku Common Runtime, Supabase hosted DB의 실제 TLS와 최소 권한 role 검증
 - Supavisor/PgBouncer 연결 문자열 분리와 최대 연결 수 검증
 - Google·Kakao·Naver별 callback, state, 취소, email 누락, scope 차이의 hosted smoke
@@ -208,7 +208,7 @@ PR #4는 금융 변경 경계 Task 1~7의 로컬 구현과 검증을 담고 있�
 | ----------------------------- | --------------------------------------------------------------------------------------------------------- |
 | 로컬 `pnpm verify`            | 829/829 tests, 6/6 typecheck, production build 성공                                                       |
 | `pnpm audit --prod`           | 알려진 production vulnerability 0건                                                                       |
-| 전체 `pnpm audit`             | 개발 의존성 7건: High 3, Moderate 4 — 미해결                                                              |
+| 전체 `pnpm audit`             | 0 findings — 개발 의존성 7건(High 3, Moderate 4) 해소                                                       |
 | 동일 SHA push CI              | [GitHub Actions run 32158792436](https://github.com/jawon0407/account-book/actions/runs/32158792436) 성공 |
 | 동일 SHA PR CI                | [GitHub Actions run 32158800903](https://github.com/jawon0407/account-book/actions/runs/32158800903) 성공 |
 | disposable PostgreSQL         | CI에서 검증됨                                                                                             |
@@ -269,7 +269,7 @@ flowchart TD
     J --> K[실제 데이터 지인 베타 승인]
 ```
 
-바로 다음 개발 작업은 발견된 개발 의존성 취약 경로를 patched version으로 올리고 전체 audit와 회귀 검증을 통과시키는 것이다. 그다음 현재 PR에서 승인된 BFF 데이터베이스 경계를 구현한다. 이 작업들이 끝나도 hosted 증거 없이 PR을 운영 준비 완료로 표시하지 않는다. M2는 금융 도메인 전체를 다루므로 [금융 변경 경계 계획](../superpowers/plans/2026-07-27-financial-mutation-boundary.md)의 보안 원칙을 유지하면서 별도의 세부 구현 계획을 승인받아 진행한다.
+개발 의존성 취약 경로는 patched version으로 올리고 전체 audit와 회귀 검증을 통과했다. 그다음 현재 PR에서 승인된 BFF 데이터베이스 경계를 구현한다. 이 작업들이 끝나도 hosted 증거 없이 PR을 운영 준비 완료로 표시하지 않는다. M2는 금융 도메인 전체를 다루므로 [금융 변경 경계 계획](../superpowers/plans/2026-07-27-financial-mutation-boundary.md)의 보안 원칙을 유지하면서 별도의 세부 구현 계획을 승인받아 진행한다.
 
 ## 12. 참고 문서
 
