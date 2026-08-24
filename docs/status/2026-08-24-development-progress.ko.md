@@ -238,14 +238,13 @@ disposable CI 성공은 재현 가능한 코드 증거지만 실제 플랫폼의
 
 ### 10.1 Codex가 플랫폼 계정 없이 진행할 수 있는 작업
 
-1. `brace-expansion`과 `undici` 개발 의존성 경로를 patched version으로 올리고 전체 audit·회귀 검증을 통과시킨다.
-2. 현재 PR의 BFF DB role/connection hardening을 TDD로 구현한다.
-3. Heroku `PORT`와 production start/deploy 설정을 추가한다.
-4. persistent rate limit, 구조화 로그·redaction, migration workflow의 코드와 테스트를 만든다.
-5. hosted smoke와 rotation/kill-switch/backup drill을 실행할 스크립트·runbook을 보강한다.
-6. M2 장부를 별도 승인된 실행 계획으로 분해한다.
-7. 금융 schema → repository → API → PC 웹 → Expo 모바일 → 교차 클라이언트 E2E 순으로 구현한다.
-8. 모든 단계에서 RED/GREEN 기록, 한국어 개발 흐름, 매개변수와 보안 판단을 문서화한다.
+1. 현재 PR의 BFF DB role/connection hardening을 TDD로 구현한다.
+2. Heroku `PORT`와 production start/deploy 설정을 추가한다.
+3. persistent rate limit, 구조화 로그·redaction, migration workflow의 코드와 테스트를 만든다.
+4. hosted smoke와 rotation/kill-switch/backup drill을 실행할 스크립트·runbook을 보강한다.
+5. M2 장부를 별도 승인된 실행 계획으로 분해한다.
+6. 금융 schema → repository → API → PC 웹 → Expo 모바일 → 교차 클라이언트 E2E 순으로 구현한다.
+7. 모든 단계에서 RED/GREEN 기록, 한국어 개발 흐름, 매개변수와 보안 판단을 문서화한다.
 
 ### 10.2 사용자가 직접 해야 하거나 최종 승인해야 하는 작업
 
