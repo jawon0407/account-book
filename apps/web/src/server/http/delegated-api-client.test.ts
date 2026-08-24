@@ -1,0 +1,229 @@
+import { describe, expect, expectTypeOf, it, vi } from "vitest";
+import {
+  DelegatedApiClient,
+  type DelegatedApiRequest,
+} from "./delegated-api-client.js";
+import type { DelegatedSignInput } from "../security/delegated-jwt-signer.js";
+
+const requestId = "123e4567-e89b-42d3-a456-426614174004";
+
+function mutationRequest(body = new TextEncoder().encode('{"amountKrw":"12000"}')): DelegatedApiRequest {
+  return {
+    body,
+    contentType: "application/json",
+    method: "POST",
+    scope: "transaction:write",
+    sessionId: "123e4567-e89b-12d3-a456-426614174002",
+    target: "/v1/test-mutation",
+    userId: "123e4567-e89b-12d3-a456-426614174001",
+  };
+}
+
+function setup(baseUrl = new URL("https://api.example.test")) {
+  const signer = {
+    sign: vi.fn(async (input: DelegatedSignInput) => {
+      void input;
+      return {
+        requestId,
+        token: "delegated-token",
+      };
+    }),
+  };
+  const fetcher = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+    void input;
+    void init;
+    return new Response(null, { status: 200 });
+  });
+  const client = new DelegatedApiClient(baseUrl, signer, fetcher as typeof fetch);
+  return { client, fetcher, signer };
+}
+
+describe("DelegatedApiClient", () => {
+  it("signs and sends the same exact bytes with only server-owned headers", async () => {
+    const { client, fetcher, signer } = setup();
+    const body = new TextEncoder().encode('{"amountKrw":"12000"}');
+    const timeoutSignal = new AbortController().signal;
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(timeoutSignal);
+    try {
+      const response = await client.request(mutationRequest(body));
+
+      expect(signer.sign).toHaveBeenCalledOnce();
+      const signedBody = signer.sign.mock.calls[0]![0].body;
+      expect(signedBody).not.toBe(body);
+      expect(signedBody).toEqual(body);
+      expect(fetcher).toHaveBeenCalledOnce();
+      const [url, init] = fetcher.mock.calls[0] as unknown as [URL, RequestInit];
+      expect(url).toEqual(new URL("https://api.example.test/v1/test-mutation"));
+      expect(init).toEqual({
+        method: "POST",
+        body: signedBody,
+        headers: {
+          accept: "application/json",
+          authorization: "Bearer delegated-token",
+          "content-type": "application/json",
+          "x-request-id": requestId,
+        },
+        signal: timeoutSignal,
+      });
+      expect(init.body).toBe(signedBody);
+      expect(timeout).toHaveBeenCalledOnce();
+      expect(timeout).toHaveBeenCalledWith(3_000);
+      expect(response.status).toBe(200);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("snapshots caller-owned bytes before awaiting the signer", async () => {
+    const body = new TextEncoder().encode('{"amountKrw":"12000"}');
+    const expected = Uint8Array.from(body);
+    let releaseSigning: ((value: Readonly<{ requestId: string; token: string }>) => void) | undefined;
+    const signer = {
+      sign: vi.fn((input: DelegatedSignInput) => {
+        void input;
+        return new Promise<Readonly<{ requestId: string; token: string }>>((resolve) => {
+          releaseSigning = resolve;
+        });
+      }),
+    };
+    const fetcher = vi.fn(async (input: URL | RequestInfo, init?: RequestInit) => {
+      void input;
+      void init;
+      return new Response(null, { status: 200 });
+    });
+    const client = new DelegatedApiClient(
+      new URL("https://api.example.test"),
+      signer,
+      fetcher as typeof fetch,
+    );
+
+    const pending = client.request(mutationRequest(body));
+    expect(signer.sign).toHaveBeenCalledOnce();
+    const signedBody = signer.sign.mock.calls[0]![0].body;
+    body.fill(0);
+    expect(releaseSigning).toBeTypeOf("function");
+    releaseSigning!({ requestId, token: "delegated-token" });
+    await pending;
+
+    const [, init] = fetcher.mock.calls[0] as unknown as [URL, RequestInit];
+    expect(signedBody).not.toBe(body);
+    expect(signedBody).toEqual(expected);
+    expect(init.body).toBe(signedBody);
+  });
+
+  it("sends a GET with exactly three server-owned headers and no body or content type", async () => {
+    const { client, fetcher, signer } = setup();
+    const body = new Uint8Array();
+    const timeoutSignal = new AbortController().signal;
+    const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(timeoutSignal);
+    try {
+      await client.request({
+        body,
+        contentType: null,
+        method: "GET",
+        scope: "me:read",
+        sessionId: "123e4567-e89b-12d3-a456-426614174002",
+        target: "/v1/me",
+        userId: "123e4567-e89b-12d3-a456-426614174001",
+      });
+
+      const signedBody = signer.sign.mock.calls[0]![0].body;
+      expect(signedBody).not.toBe(body);
+      expect(signedBody).toEqual(body);
+      const [url, init] = fetcher.mock.calls[0] as unknown as [URL, RequestInit];
+      expect(url).toEqual(new URL("https://api.example.test/v1/me"));
+      expect(init).toEqual({
+        method: "GET",
+        headers: {
+          accept: "application/json",
+          authorization: "Bearer delegated-token",
+          "x-request-id": requestId,
+        },
+        signal: timeoutSignal,
+      });
+      expect(Object.hasOwn(init, "body")).toBe(false);
+      expect(new Headers(init.headers).has("content-type")).toBe(false);
+    } finally {
+      timeout.mockRestore();
+    }
+  });
+
+  it("does not expose browser credential or routing fields in its request interface", () => {
+    type ForbiddenCredentialKeys = Extract<
+      keyof DelegatedApiRequest,
+      "authorization" | "cookie" | "headers" | "host" | "requestId"
+    >;
+    expectTypeOf<ForbiddenCredentialKeys>().toEqualTypeOf<never>();
+  });
+
+  it.each([
+    ["a GET body", { ...mutationRequest(), body: new Uint8Array([1]), contentType: null, method: "GET" }],
+    ["a GET content type", { ...mutationRequest(new Uint8Array()), contentType: "application/json", method: "GET" }],
+    ["a mutation without content type", { ...mutationRequest(), contentType: null }],
+    ["an empty mutation body", mutationRequest(new Uint8Array())],
+    ["an absolute target", { ...mutationRequest(), target: "https://evil.example.test/v1/mutation" }],
+    ["a scheme-relative target", { ...mutationRequest(), target: "//user:pass@evil.example.test/v1/mutation" }],
+    ["a target fragment", { ...mutationRequest(), target: "/v1/mutation#delegated-token" }],
+    ["an empty target fragment", { ...mutationRequest(), target: "/v1/mutation#" }],
+    ["an unsupported method", { ...mutationRequest(), method: "PUT" }],
+  ])("rejects %s before signing or fetching", async (_name, input) => {
+    const { client, fetcher, signer } = setup();
+
+    await expect(client.request(input as unknown as DelegatedApiRequest))
+      .rejects.toThrow(/^DELEGATED_API_REQUEST_INVALID$/u);
+    expect(signer.sign).not.toHaveBeenCalled();
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "https://user:pass@api.example.test",
+    "https://api.example.test/base",
+    "https://api.example.test?query=1",
+    "https://api.example.test?",
+    "https://api.example.test#fragment",
+    "https://api.example.test#",
+    "http://api.example.test",
+    "ftp://api.example.test",
+  ])("rejects an unsafe base URL before constructing a client: %s", (value) => {
+    expect(() => setup(new URL(value))).toThrow(/^AUTH_CONFIGURATION_INVALID$/u);
+  });
+
+  it.each([
+    "https://api.example.test",
+    "http://localhost:3001",
+    "http://127.0.0.1:3001",
+    "http://[::1]:3001",
+  ])("accepts an HTTPS or explicit loopback root base URL: %s", (value) => {
+    expect(() => setup(new URL(value))).not.toThrow();
+  });
+
+  it("clones its validated base URL", async () => {
+    const baseUrl = new URL("https://api.example.test");
+    const { client, fetcher } = setup(baseUrl);
+    baseUrl.hostname = "evil.example.test";
+
+    await client.request(mutationRequest());
+
+    expect(fetcher.mock.calls[0]![0]).toEqual(new URL("https://api.example.test/v1/test-mutation"));
+  });
+
+  it("collapses signer failures without invoking fetch or exposing the cause", async () => {
+    const { client, fetcher, signer } = setup();
+    signer.sign.mockRejectedValueOnce(new Error("private-key and delegated claim detail"));
+
+    await expect(client.request(mutationRequest()))
+      .rejects.toThrow(/^DELEGATED_API_UNAVAILABLE$/u);
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    new DOMException("delegated-token timeout detail", "TimeoutError"),
+    new Error("private network topology detail"),
+  ])("collapses timeout and network failures without exposing the cause", async (failure) => {
+    const { client, fetcher } = setup();
+    fetcher.mockRejectedValueOnce(failure);
+
+    await expect(client.request(mutationRequest()))
+      .rejects.toThrow(/^DELEGATED_API_UNAVAILABLE$/u);
+  });
+});

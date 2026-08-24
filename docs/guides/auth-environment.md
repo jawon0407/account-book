@@ -10,7 +10,7 @@
 | `APP_ORIGIN` | canonical origin; production HTTPS, user-info/path/query/fragment 금지; non-production exact loopback만 HTTP |
 | `AUTH_ADAPTER_MODE` | 기본 `supabase`; `fake`는 non-production exact loopback만 |
 | `DATABASE_URL` | server-only `postgres:`/`postgresql:` URL |
-| `API_INTERNAL_URL` | root-only HTTP(S) origin |
+| `API_INTERNAL_URL` | credential/path/query/fragment(빈 `?`/`#` delimiter 포함) 없는 root-only HTTPS origin; non-production disposable E2E에서만 exact loopback(`localhost`, `127.0.0.1`, `[::1]`) HTTP 허용 |
 | `BFF_JWT_KEY_ID` | API의 accepted `kid`와 일치하는 safe key ID |
 | `BFF_JWT_PRIVATE_KEY` | P-256 PKCS8 DER의 canonical base64url private key; BFF에만 배포 |
 | `AUTH_TOKEN_KEY_ID` | `[A-Za-z0-9._-]`, 1..128자 |

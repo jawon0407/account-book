@@ -6,7 +6,20 @@ export const DELEGATED_JWT_TTL_SECONDS = 30;
 export const DELEGATED_JWT_REPLAY_SECONDS = 45;
 export const DELEGATED_JWT_MAX_BYTES = 4096;
 
-export const DelegatedScopeSchema = z.enum(["me:read"]);
+/** Single JSON body limit for Fastify's parser and guard, keeping their validation boundary aligned. */
+export const DELEGATED_JSON_BODY_MAX_BYTES = 32_768;
+
+/** Restricts `scope` to the least-privilege capability the BFF may exercise, not a general user role. */
+export const DelegatedScopeSchema = z.enum([
+  "me:read",
+  "account:read",
+  "account:write",
+  "category:read",
+  "category:write",
+  "transaction:read",
+  "transaction:write",
+  "dashboard:read",
+]);
 export type DelegatedScope = z.infer<typeof DelegatedScopeSchema>;
 
 const MethodSchema = z.enum(["GET", "POST", "PUT", "PATCH", "DELETE"]);

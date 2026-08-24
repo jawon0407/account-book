@@ -51,7 +51,7 @@
 | `APP_ORIGIN` | 모든 BFF mode에서 필수 | path/query/fragment/credential 없는 exact origin. production은 HTTPS만, non-production은 exact loopback에 한해 HTTP 허용 |
 | `AUTH_ADAPTER_MODE` | optional, default `supabase` | `supabase | fake`. `fake`는 non-production exact loopback에서만 허용 |
 | `DATABASE_URL` | BFF 필수 | `postgres:` 또는 `postgresql:` connection. process-shared DB client 생성에 사용하며 로그에 출력하지 않음 |
-| `API_INTERNAL_URL` | BFF 필수 | root-only `http:`/`https:` server URL. `/api/me`가 고정 `/v1/me`를 조립 |
+| `API_INTERNAL_URL` | BFF 필수 | credential/path/query/fragment(빈 `?`/`#` delimiter 포함) 없는 root-only HTTPS origin. non-production disposable E2E에서만 exact loopback(`localhost`, `127.0.0.1`, `[::1]`) HTTP를 허용하며 `/api/me`는 고정 `/v1/me`만 조립 |
 | `AUTH_TOKEN_KEY_ID` | BFF 필수 | 현재 AES-GCM key ID, `[A-Za-z0-9._-]` 1~128자 |
 | `AUTH_TOKEN_KEY` | BFF 필수 secret | canonical base64url로 인코딩한 정확히 32바이트 key |
 | `AUTH_TOKEN_PREVIOUS_KEYS` | optional secret | 이전 key ID에서 32바이트 canonical base64url key로 가는 JSON object. 현재 ID와 중복 금지 |

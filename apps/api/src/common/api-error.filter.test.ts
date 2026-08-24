@@ -1,5 +1,5 @@
 import { ApiErrorSchema } from "@account-book/contracts";
-import type { ArgumentsHost } from "@nestjs/common";
+import { HttpException, type ArgumentsHost } from "@nestjs/common";
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it, vi } from "vitest";
 import { AccessTokenVerificationUnavailableError, InvalidAccessTokenError } from "../auth/jwt-verifier.js";
@@ -38,6 +38,40 @@ describe("ApiErrorFilter", () => {
     expect(response.headers.get("x-request-id")).toBe(parsed.requestId);
   });
 
+  it("maps Nest's exact Fastify body-limit wrapper to an empty public 413", () => {
+    const response = run(new HttpException("Request body is too large", 413));
+
+    expect(response.status).toBe(413);
+    expect(response.body).toBeUndefined();
+    expect(response.headers.get("cache-control")).toBe("private, no-store");
+    expect(response.headers.get("x-request-id")).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u);
+  });
+
+  it.each([
+    ["an arbitrary statusCode", Object.assign(new Error("forged-status-detail"), { statusCode: 413 })],
+    [
+      "forged matching fields on the wrong constructor",
+      Object.assign(new RangeError("forged-fastify-detail"), {
+        name: "FastifyError",
+        code: "FST_ERR_CTP_BODY_TOO_LARGE",
+        statusCode: 413,
+      }),
+    ],
+    ["a different 413 HttpException", new HttpException("forged-http-detail", 413)],
+    [
+      "a body-limit wrapper carrying an internal cause",
+      Object.assign(new HttpException("Request body is too large", 413), {
+        cause: new Error("forged-cause-detail"),
+      }),
+    ],
+  ])("fails closed on %s instead of trusting 413-like fields", (_name, exception) => {
+    const response = run(exception);
+    const serialized = JSON.stringify(response.body);
+
+    expect(response.status).toBe(503);
+    expect(ApiErrorSchema.parse(response.body)).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: true, fieldErrors: [] });
+    expect(serialized).not.toMatch(/forged-status-detail|forged-fastify-detail|forged-http-detail|forged-cause-detail/iu);
+  });
   it("fails closed on unexpected errors without leaking exception or request data", () => {
     const response = run(new Error("provider-message?token=exception-secret"));
     const serialized = JSON.stringify(response.body);

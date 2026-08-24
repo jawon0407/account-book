@@ -11,6 +11,7 @@ const module = await import("./container.js").catch(() => ({} as Record<string, 
 const resolveAuthRuntime = module.resolveAuthRuntime as ((environment: Readonly<Record<string, string | undefined>>) => { mode: string; origin: URL }) | undefined;
 const createRequestContainer = module.createRequestContainer as ((environment: Readonly<Record<string, string | undefined>>) => {
   authController: unknown;
+  delegatedApiClient: { request: unknown };
   delegatedJwtSigner: { sign: unknown };
 }) | undefined;
 const { createDatabaseClient } = await import("@account-book/database");
@@ -59,7 +60,7 @@ const runtimeEnvironment = {
   APP_ORIGIN: "http://localhost:3000",
   AUTH_ADAPTER_MODE: "fake",
   DATABASE_URL: "postgres://database.example.test/account_book",
-  API_INTERNAL_URL: "http://api.internal.test:3001",
+  API_INTERNAL_URL: "https://api.internal.test",
   AUTH_TOKEN_KEY_ID: "current",
   AUTH_TOKEN_KEY: key,
   AUTH_CSRF_HMAC_KEY: csrfKey,
@@ -132,20 +133,26 @@ describe("authentication runtime selection", () => {
     expect(createDatabaseClient).toHaveBeenCalledTimes(1);
   });
 
-  it("exposes a request-owned delegated signer only for a canonical PKCS8 P-256 private key", () => {
+  it("wires one request-owned delegated client to the request-owned signer and controller", () => {
     const first = createRequestContainer!(runtimeEnvironment);
     const second = createRequestContainer!(runtimeEnvironment);
     const firstControllerDependencies = (first.authController as {
-      dependencies?: Readonly<{ delegatedSigner?: unknown }>;
+      dependencies?: Readonly<{ delegatedApiClient?: unknown }>;
     }).dependencies;
     const secondControllerDependencies = (second.authController as {
-      dependencies?: Readonly<{ delegatedSigner?: unknown }>;
+      dependencies?: Readonly<{ delegatedApiClient?: unknown }>;
     }).dependencies;
+    const firstClientSigner = (first.delegatedApiClient as unknown as { signer?: unknown }).signer;
+    const secondClientSigner = (second.delegatedApiClient as unknown as { signer?: unknown }).signer;
 
     expect(first.delegatedJwtSigner.sign).toBeTypeOf("function");
+    expect(first.delegatedApiClient.request).toBeTypeOf("function");
     expect(first.delegatedJwtSigner).not.toBe(second.delegatedJwtSigner);
-    expect(firstControllerDependencies?.delegatedSigner).toBe(first.delegatedJwtSigner);
-    expect(secondControllerDependencies?.delegatedSigner).toBe(second.delegatedJwtSigner);
+    expect(first.delegatedApiClient).not.toBe(second.delegatedApiClient);
+    expect(firstClientSigner).toBe(first.delegatedJwtSigner);
+    expect(secondClientSigner).toBe(second.delegatedJwtSigner);
+    expect(firstControllerDependencies?.delegatedApiClient).toBe(first.delegatedApiClient);
+    expect(secondControllerDependencies?.delegatedApiClient).toBe(second.delegatedApiClient);
   });
 
   it.each([
