@@ -8,6 +8,8 @@ PC와 모바일에서 사용할 수 있는 보안 우선 동기화형 개인 가
 
 현재 구현 SHA `51a9667511058395c4f72e4af42e2e4c25b243dc`는 동일 SHA의 GitHub `security-gate` [push run](https://github.com/jawon0407/account-book/actions/runs/32158792436)과 [PR run](https://github.com/jawon0407/account-book/actions/runs/32158800903)에서 disposable PostgreSQL과 실제 Chromium 인증 E2E를 포함해 통과했습니다. 로컬 `pnpm verify`도 829/829 tests, 6/6 typecheck와 production build를 통과했고 `pnpm audit --prod`는 알려진 production vulnerability 0건을 보고했습니다.
 
+전체 `pnpm audit`에는 개발 의존성 경로의 7건(High 3, Moderate 4)이 남아 있습니다. GitHub Dependabot은 기본 브랜치에서 9건(High 4, Moderate 5)을 보고하므로, 개발 도구 공급망 patch는 병합 전 보안 차단 조건입니다.
+
 현재 제품 전체로는 5개 milestone 중 1단계의 로컬 코드·CI가 완료됐고 hosted 운영 gate는 미완료입니다. 금융 변경 요청의 보안 계약과 검증 경계는 구현됐지만 거래·계정·분류·대시보드 같은 운영 장부 기능과 별도 모바일 앱은 아직 구현 전입니다. 실제 Vercel·Heroku·Supabase 배포, 최소 권한 role의 hosted 검증, persistent rate limit, Google·Kakao·Naver live OAuth, backup·복구·key rotation·kill-switch 훈련은 베타 출시 전 차단 조건으로 남아 있습니다.
 
 ## Approved Product Direction
