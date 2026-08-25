@@ -163,6 +163,24 @@ a:active { color: var(--ink); }
   .auth-surface { grid-column: 2; grid-row: 1; }
 }
 
+/* 1080–1920px uses the approved 60vw stage; 1921px and wider lock to 1080px. */
+@media (min-width: 1080px) and (max-width: 1920px) {
+  .auth-shell {
+    flex: 0 0 60vw;
+    width: 60vw;
+    max-width: none;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  }
+}
+
+@media (min-width: 1921px) {
+  .auth-shell {
+    flex: 0 0 1080px;
+    width: 1080px;
+    max-width: 1080px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;
