@@ -492,7 +492,7 @@ Add this section after the existing visual-direction section:
 - 모바일: 단일 열, 44px 이상 터치 대상
 - 모션: 기능 설명용 단발성 전환만 허용하고 움직임 축소 설정을 존중
 
-상세 결정과 검증 기준은 [`docs/superpowers/specs/2026-08-25-accessible-neumorphism-auth-design.md`](docs/superpowers/specs/2026-08-25-accessible-neumorphism-auth-design.md)를 따른다.
+상세 결정과 검증 기준은 [`docs/superpowers/specs/2026-08-25-accessible-neumorphism-auth-design.md`](../specs/2026-08-25-accessible-neumorphism-auth-design.md)를 따른다.
 ```
 
 - [ ] **Step 2: Update the Korean progress document**
@@ -565,4 +565,3 @@ Invoke `superpowers:verification-before-completion`, rerun the commands it requi
 - Dependency coverage: The plan uses the already installed Axe and Playwright packages and adds no dependency.
 - Type consistency: No React props, exported TypeScript types, or request contracts change.
 - Scope control: Native mobile UI and financial dashboard components are intentionally excluded; they will consume the documented design rules in their own feature plans.
-
