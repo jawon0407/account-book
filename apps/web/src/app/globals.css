@@ -66,7 +66,8 @@ a:active { color: var(--ink); }
   margin: auto;
   overflow: hidden;
   background: var(--surface);
-  border: 1px solid color-mix(in oklch, var(--line) 45%, transparent);
+  outline: 1px solid color-mix(in oklch, var(--line) 45%, transparent);
+  outline-offset: -1px;
   border-radius: 16px;
 }
 

@@ -314,3 +314,5 @@ flowchart TD
 - 웹 타입 검사, 웹 소스 ESLint, Next.js 프로덕션 빌드도 통과했다.
 - 루트 `pnpm test` 한 번 실행은 내부 중첩 명령이 시스템 pnpm을 선택해 사용할 수 없었지만, 같은 세 단계를 고정 Corepack 명령으로 모두 실행했다.
 - 실행 중인 로컬 서버가 `#F7F7F5`와 `--shadow-raised`를 포함한 갱신 CSS를 제공하는 것을 확인했다.
+- 최초 PR CI는 `.auth-shell`의 1px 테두리가 `clientWidth`를 좌우 2px 줄여 데스크톱 너비 E2E 2개에서 실패했다.
+- 테두리를 레이아웃 크기에 영향을 주지 않는 내부 `outline`으로 교체했으며 Chromium에서 1080→648, 1920→1152, 1921→1080을 다시 확인했다.
