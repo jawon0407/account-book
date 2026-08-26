@@ -38,6 +38,10 @@ const CsrfContextSchema = z.enum(["session", "interaction"]);
 const OAuthStartBodySchema = z.object({ returnPath: ReturnPathSchema }).strict();
 const EmptyBodySchema = z.object({}).strict();
 
+type AuthErrorCode = Extract<ApiError["code"], `AUTH_${string}`>;
+
+function isAuthErrorCode(code: ApiError["code"]): code is AuthErrorCode { return code.startsWith("AUTH_"); }
+
 type PublicSession = Readonly<{
   selector: string;
   user: CurrentUser;
@@ -75,12 +79,12 @@ export type AuthControllerDependencies = Readonly<{
 }>;
 
 class BoundaryError extends Error {
-  public constructor(public readonly code: ApiError["code"], public readonly status: number) {
+  public constructor(public readonly code: AuthErrorCode, public readonly status: number) {
     super(code);
   }
 }
 
-function fail(code: ApiError["code"], status: number): never {
+function fail(code: AuthErrorCode, status: number): never {
   throw new BoundaryError(code, status);
 }
 
@@ -94,8 +98,8 @@ function noStoreHeaders(): Headers {
   return new Headers({ "Cache-Control": "private, no-store", Pragma: "no-cache", Expires: "0" });
 }
 
-function message(code: ApiError["code"]): string {
-  const messages: Record<ApiError["code"], string> = {
+function message(code: AuthErrorCode): string {
+  const messages: Record<AuthErrorCode, string> = {
     AUTH_INVALID_CREDENTIALS: "The authentication input was rejected.",
     AUTH_EMAIL_VERIFICATION_REQUIRED: "Email verification is required.",
     AUTH_SESSION_EXPIRED: "The session has expired.",
@@ -109,7 +113,7 @@ function message(code: ApiError["code"]): string {
 }
 
 function errorResponse(error: unknown): Response {
-  let code: ApiError["code"] = "AUTH_PROVIDER_UNAVAILABLE";
+  let code: AuthErrorCode = "AUTH_PROVIDER_UNAVAILABLE";
   let status = 503;
   if (error instanceof BoundaryError) {
     code = error.code;
@@ -117,7 +121,7 @@ function errorResponse(error: unknown): Response {
   } else if (error !== null && typeof error === "object") {
     const candidate = (error as { code?: unknown }).code;
     const parsed = ApiErrorSchema.shape.code.safeParse(candidate);
-    if (parsed.success) {
+    if (parsed.success && isAuthErrorCode(parsed.data)) {
       code = parsed.data;
       status = statusFor(code);
     } else if ((error as { message?: unknown }).message === "AUTH_CSRF_REJECTED") {
@@ -129,7 +133,7 @@ function errorResponse(error: unknown): Response {
 }
 
 /** Creates a fixed public error envelope with explicitly constrained retry semantics. */
-export function safeAuthFailure(code: ApiError["code"], status: number, retryable = code === "AUTH_PROVIDER_UNAVAILABLE" && status === 503): Response {
+export function safeAuthFailure(code: AuthErrorCode, status: number, retryable = code === "AUTH_PROVIDER_UNAVAILABLE" && status === 503): Response {
   const body: ApiError = {
     code,
     message: message(code),
@@ -146,7 +150,7 @@ function sessionFailureResponse(error: SessionOperationError): Response {
   return safeAuthFailure("AUTH_PROVIDER_UNAVAILABLE", 503, true);
 }
 
-function statusFor(code: ApiError["code"]): number {
+function statusFor(code: AuthErrorCode): number {
   switch (code) {
     case "AUTH_INVALID_CREDENTIALS": return 401;
     case "AUTH_EMAIL_VERIFICATION_REQUIRED": return 403;
@@ -203,7 +207,7 @@ function cookie(request: Request, name: typeof SESSION_COOKIE_NAME | typeof INTE
   }
 }
 
-async function boundedJson(stream: ReadableStream<Uint8Array> | null, stated: string | null, maximum: number, code: ApiError["code"], status: number): Promise<unknown> {
+async function boundedJson(stream: ReadableStream<Uint8Array> | null, stated: string | null, maximum: number, code: AuthErrorCode, status: number): Promise<unknown> {
   if (stated !== null && (!/^(?:0|[1-9][0-9]*)$/u.test(stated) || Number(stated) > maximum)) {
     try { await stream?.cancel(); } catch { /* The fixed boundary error still wins. */ }
     return fail(code, status);
@@ -489,7 +493,7 @@ export class AuthController {
       }
       const parsed = ApiErrorSchema.safeParse(payload);
       if (!parsed.success) return fail("AUTH_PROVIDER_UNAVAILABLE", 502);
-      return errorResponse(new BoundaryError(parsed.data.code, statusFor(parsed.data.code)));
+      return errorResponse(new BoundaryError(isAuthErrorCode(parsed.data.code) ? parsed.data.code : "AUTH_PROVIDER_UNAVAILABLE", isAuthErrorCode(parsed.data.code) ? statusFor(parsed.data.code) : 502));
     } catch (error) {
       if (error instanceof SessionOperationError) return sessionFailureResponse(error);
       return errorResponse(error);

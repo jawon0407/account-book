@@ -326,6 +326,6 @@ flowchart TD
 - contracts 전체 검증: `corepack pnpm@11.9.0 --filter @account-book/contracts test` — 7 files, 57 tests 통과; typecheck/build 통과
 - 전체 저장소 lint: `corepack pnpm@11.9.0 lint` — 통과
 - 전체 저장소 legacy test — 53/53 통과; workspace test — contracts 57, database 12, API 147, web 508 통과; E2E preflight 85/85 통과
-- 고정 runtime workaround로 workspace typecheck/build를 실행했으나 web의 기존 `ApiErrorCode` exhaustive mapping이 새 LEDGER 오류 코드를 처리하지 않아 typecheck/build gate가 실패했다. 이 문서는 해당 gate를 통과했다고 주장하지 않는다.
+- Task 6 fix round에서 auth-controller가 auth-only 오류 코드 subset을 사용하고 ledger 오류를 `AUTH_PROVIDER_UNAVAILABLE`로 정규화하도록 보강했다. 고정 runtime workaround로 workspace typecheck/build를 다시 실행해 통과했다.
 - DB 금융 schema/RLS, API controller/service/repository, PC web 장부 기능, mobile 앱은 아직 미구현이다.
 - 다음 계획: PostgreSQL 금융 schema, roles, grants, RLS, indexes.

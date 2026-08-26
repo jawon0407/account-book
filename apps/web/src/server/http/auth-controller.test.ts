@@ -342,6 +342,11 @@ describe("AuthController", () => {
     expect(unexpectedStatus.status).toBe(401);
     expect(await unexpectedStatus.json()).toMatchObject({ code: "AUTH_SESSION_EXPIRED", retryable: false });
 
+    subject.delegatedApiClient.request.mockResolvedValueOnce(new Response(JSON.stringify({ code: "LEDGER_NOT_FOUND", message: "hidden ledger error", requestId: "upstream-request", retryable: false, fieldErrors: [] }), { status: 404 }));
+    const ledgerError = await subject.controller.me!(request("/api/me", { headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
+    expect(ledgerError.status).toBe(502);
+    expect(await ledgerError.json()).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: false });
+
     subject.delegatedApiClient.request.mockRejectedValueOnce(new Error("internal network detail"));
     const unavailable = await subject.controller.me!(request("/api/me", { headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
     expect(unavailable.status).toBe(502);
