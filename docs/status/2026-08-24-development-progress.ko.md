@@ -316,3 +316,16 @@ flowchart TD
 - 실행 중인 로컬 서버가 `#F7F7F5`와 `--shadow-raised`를 포함한 갱신 CSS를 제공하는 것을 확인했다.
 - 최초 PR CI는 `.auth-shell`의 1px 테두리가 `clientWidth`를 좌우 2px 줄여 데스크톱 너비 E2E 2개에서 실패했다.
 - 테두리를 레이아웃 크기에 영향을 주지 않는 내부 `outline`으로 교체했으며 Chromium에서 1080→648, 1920→1152, 1921→1080을 다시 확인했다.
+
+## 2026-08-26 M2.1 공개 계약 진행
+
+- 브랜치: `feature/ledger-public-contracts`
+- Task 5 구현 커밋: `c2db82c`
+- 공개 schema 수: common 10개, account 9개, category 7개, transaction 10개
+- contracts 집중 검증: `corepack pnpm@11.9.0 --filter @account-book/contracts exec vitest run src/errors.test.ts` — 9/9 tests 통과
+- contracts 전체 검증: `corepack pnpm@11.9.0 --filter @account-book/contracts test` — 7 files, 57 tests 통과; typecheck/build 통과
+- 전체 저장소 lint: `corepack pnpm@11.9.0 lint` — 통과
+- 전체 저장소 legacy test — 53/53 통과; workspace test — contracts 57, database 12, API 147, web 508 통과; E2E preflight 85/85 통과
+- 고정 runtime workaround로 workspace typecheck/build를 실행했으나 web의 기존 `ApiErrorCode` exhaustive mapping이 새 LEDGER 오류 코드를 처리하지 않아 typecheck/build gate가 실패했다. 이 문서는 해당 gate를 통과했다고 주장하지 않는다.
+- DB 금융 schema/RLS, API controller/service/repository, PC web 장부 기능, mobile 앱은 아직 미구현이다.
+- 다음 계획: PostgreSQL 금융 schema, roles, grants, RLS, indexes.

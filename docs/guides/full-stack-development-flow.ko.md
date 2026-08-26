@@ -98,18 +98,26 @@ React Native 화면
 ```ts
 type CreateTransactionInput = Readonly<{
   accountId: string;
-  amountKrw: string;
+  amountKrw: number;
   categoryId: string;
   idempotencyKey: string;
-  kind: "income" | "expense";
   memo?: string;
   occurredOn: string;
+  type: "income" | "expense";
 }>;
 ```
 
+amountKrw는 1 이상 Number.MAX_SAFE_INTEGER 이하의 정수다. PostgreSQL BIGINT보다
+공개 JSON 범위를 의도적으로 좁혀 웹·Node·React Native가 같은 값을 정확히
+표현하게 한다. idempotencyKey는 생성 시도 UUID이며 저장된 거래 ID가 아니다.
+transactionId는 성공 시 서버가 생성해 응답한다.
+
+> 2026-07-16 PWA offline client-ID flow는 현재 M2 runtime model이 아니다. 승인된
+> 2026-07-27 web/native-mobile design은 online server ledger와 server-created permanent ID를 사용한다.
+
 중요한 판단:
 
-- 금액은 JSON number가 아니라 정규화된 정수 문자열로 전송한다.
+- 금액은 JSON number인 정수로 전송한다.
 - `userId`는 요청에 받지 않고 인증 principal에서 가져온다.
 - 수정·삭제는 `expectedVersion`을 요구한다.
 - 알 수 없는 필드는 strict schema에서 거부한다.
