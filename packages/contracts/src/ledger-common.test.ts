@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   CursorSchema,
+  ExpectedVersionSchema,
   IdempotencyKeySchema,
   LedgerIdSchema,
   LocalDateSchema,
@@ -10,6 +11,7 @@ import {
   TimestampSchema,
   VersionSchema,
 } from "./ledger-common.js";
+import type { ExpectedVersion } from "./ledger-common.js";
 
 const uuid = "123e4567-e89b-42d3-a456-426614174000";
 const uuidV4 = "123e4567-e89b-42d3-a456-426614174000";
@@ -30,6 +32,8 @@ describe("ledger numeric boundaries", () => {
     expect(SignedKrwBalanceSchema.parse(Number.MIN_SAFE_INTEGER)).toBe(Number.MIN_SAFE_INTEGER);
     expect(SignedKrwBalanceSchema.parse(Number.MAX_SAFE_INTEGER)).toBe(Number.MAX_SAFE_INTEGER);
     expect(VersionSchema.parse(1)).toBe(1);
+    const expectedVersion: ExpectedVersion = ExpectedVersionSchema.parse(1);
+    expect(expectedVersion).toBe(1);
   });
 
   it.each([0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, "1000", Number.NaN, Number.POSITIVE_INFINITY])(
@@ -56,3 +60,4 @@ describe("ledger dates and paging", () => {
     expect(() => PageSizeSchema.parse(value)).toThrow();
   });
 });
+

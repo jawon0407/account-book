@@ -31,6 +31,7 @@ export type Timestamp = z.infer<typeof TimestampSchema>;
 export const VersionSchema = z.number().int().min(1).max(Number.MAX_SAFE_INTEGER);
 export const ExpectedVersionSchema = VersionSchema;
 export type Version = z.infer<typeof VersionSchema>;
+export type ExpectedVersion = z.infer<typeof ExpectedVersionSchema>;
 
 /** Carries a server-issued cursor that clients store and return without parsing. */
 export const CursorSchema = z.string().min(1).max(512).regex(/^[A-Za-z0-9_-]+$/u);
@@ -39,3 +40,4 @@ export type Cursor = z.infer<typeof CursorSchema>;
 /** Bounds one ledger page; the API applies its default when this input is absent. */
 export const PageSizeSchema = z.number().int().min(1).max(100);
 export type PageSize = z.infer<typeof PageSizeSchema>;
+
