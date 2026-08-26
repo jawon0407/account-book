@@ -36,7 +36,7 @@ function freshRequestId(): string {
 
 export function buildApiError(input: BuilderInput): ApiError {
   const code = ApiErrorCodeSchema.parse(input.code);
-  const requestId = typeof input.requestId === "string" && RequestIdSchema.safeParse(input.requestId).success ? input.requestId : "00000000-0000-4000-8000-000000000000";
+  const requestId = typeof input.requestId === "string" && RequestIdSchema.safeParse(input.requestId).success ? input.requestId : freshRequestId();
   const fieldErrors = Array.isArray(input.fieldErrors) ? input.fieldErrors.flatMap((value) => {
     if (value === null || typeof value !== "object") return [];
     const candidate = value as { field?: unknown; code?: unknown };

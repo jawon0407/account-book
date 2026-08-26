@@ -1,4 +1,4 @@
-import { ApiErrorSchema, type ApiError } from "@account-book/contracts";
+import { ApiErrorSchema, buildApiError, type ApiError } from "@account-book/contracts";
 import ky from "ky";
 
 export const apiClient = ky.create({
@@ -57,11 +57,5 @@ export async function apiError(error: unknown): Promise<ApiClientError> {
       // Fall through to a fixed local error.
     }
   }
-  return new ApiClientError({
-    code: "AUTH_PROVIDER_UNAVAILABLE",
-    message: "The authentication service is unavailable.",
-    requestId: "browser-request-error",
-    retryable: false,
-    fieldErrors: [],
-  });
+  return new ApiClientError(buildApiError({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: false, fieldErrors: [] }));
 }

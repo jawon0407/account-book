@@ -5,7 +5,7 @@ mocks.create.mockReturnValue(mocks.client);
 vi.mock("ky", () => ({ default: { create: mocks.create } }));
 
 const module = await import("./api-client.js").catch(() => ({} as Record<string, unknown>));
-const apiError = module.apiError as ((error: unknown) => Promise<Readonly<{ code: string; retryable: boolean }>>) | undefined;
+const apiError = module.apiError as ((error: unknown) => Promise<any>) | undefined;
 
 describe("browser API client", () => {
   it("creates exactly one relative same-origin ky boundary with retries disabled", () => {
@@ -18,6 +18,13 @@ describe("browser API client", () => {
       timeout: 10_000,
       headers: { accept: "application/json" },
     });
+  });
+
+  it("uses a strict fresh local fallback envelope", async () => {
+    const error = await apiError!({});
+    expect(error.code).toBe("AUTH_PROVIDER_UNAVAILABLE");
+    expect(error.envelope.requestId).toMatch(/^[0-9a-f-]{36}$/iu);
+    expect(error.envelope.message).toBe("The authentication service is unavailable.");
   });
 
   it("parses ky 2 error data after the response body has already been consumed", async () => {

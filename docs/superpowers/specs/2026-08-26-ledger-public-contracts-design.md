@@ -159,7 +159,7 @@ UpdateTransactionInput은 expectedVersion과 변경 가능한 type, accountId, c
 
 DeleteTransactionInput은 expectedVersion을 요구한다. 삭제 결과는 id, 마지막 version과 deletedAt을 가진 tombstone 응답이다.
 
-Transaction 응답은 kind를 판별자로 사용하는 다음 세 strict variant의 union이다.
+Transaction 응답은 kind를 판별자로 사용하는 다음 다섯 strict variant의 union이다. 시작 잔액(opening_balance)은 direction으로 asset/liability를 표현한다.
 
 | variant | kind | categoryId | transferId | direction |
 | --- | --- | --- | --- | --- |

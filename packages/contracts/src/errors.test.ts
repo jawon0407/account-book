@@ -1,3 +1,4 @@
+import { AccountListQuerySchema, ArchiveAccountInputSchema, CreateAccountInputSchema, CreateCategoryInputSchema, CreateTransactionInputSchema, CreateTransferInputSchema, DeleteTransactionInputSchema, SetOpeningBalanceInputSchema, TransactionListQuerySchema, UpdateAccountInputSchema, UpdateCategoryInputSchema, UpdateTransactionInputSchema } from "./index.js";
 import { describe, expect, it } from "vitest";
 import { ApiErrorCodeSchema, ApiErrorSchema, buildApiError, parseApiError, PublicErrorMessages, PublicFieldErrorFields, sanitizeApiErrorInput } from "./index.js";
 
@@ -96,8 +97,18 @@ describe("strict public error builder", () => {
     expect(ApiErrorSchema.parse(body)).toEqual(body);
   });
 
+  it("generates distinct UUIDs for invalid request IDs", () => {
+    const first = buildApiError({ code: "LEDGER_NOT_FOUND", requestId: "secret", retryable: false });
+    const second = buildApiError({ code: "LEDGER_NOT_FOUND", requestId: "secret", retryable: false });
+    expect(first.requestId).toMatch(/^[0-9a-f-]{36}$/iu);
+    expect(second.requestId).toMatch(/^[0-9a-f-]{36}$/iu);
+    expect(first.requestId).not.toBe(second.requestId);
+  });
+
   it("defines every exported ledger request/query field in the public field allowlist", () => {
-    const expected = ["email", "password", "returnPath", "provider", "accountId", "amountKrw", "categoryId", "idempotencyKey", "kind", "name", "expectedVersion", "direction", "occurredOn", "includeArchived", "sortOrder", "fromAccountId", "memo", "toAccountId", "type", "cursor", "limit", "from", "to"];
+    const schemas = [CreateAccountInputSchema, UpdateAccountInputSchema, ArchiveAccountInputSchema, SetOpeningBalanceInputSchema, CreateCategoryInputSchema, UpdateCategoryInputSchema, CreateTransactionInputSchema, UpdateTransactionInputSchema, DeleteTransactionInputSchema, CreateTransferInputSchema, TransactionListQuerySchema, AccountListQuerySchema];
+    const intentionalAuthFields = ["email", "password", "provider", "returnPath"];
+    const expected = [...new Set([...schemas.flatMap((schema) => Object.keys(schema.shape)), ...intentionalAuthFields])];
     expect(new Set(PublicFieldErrorFields.options)).toEqual(new Set(expected));
   });
 });
