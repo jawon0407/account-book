@@ -1,4 +1,4 @@
-import { AccountListQuerySchema, ArchiveAccountInputSchema, CreateAccountInputSchema, CreateCategoryInputSchema, CreateTransactionInputSchema, CreateTransferInputSchema, DeleteTransactionInputSchema, SetOpeningBalanceInputSchema, TransactionListQuerySchema, UpdateAccountInputSchema, UpdateCategoryInputSchema, UpdateTransactionInputSchema } from "./index.js";
+import { AccountListQuerySchema, ArchiveAccountInputSchema, ArchiveCategoryInputSchema, CategoryListQuerySchema, CreateAccountInputSchema, CreateCategoryInputSchema, CreateTransactionInputSchema, CreateTransferInputSchema, DeleteTransactionInputSchema, PasswordResetRequestInputSchema, PasswordUpdateInputSchema, SetOpeningBalanceInputSchema, SignInInputSchema, SignUpInputSchema, TransactionListQuerySchema, UpdateAccountInputSchema, UpdateCategoryInputSchema, UpdateTransactionInputSchema } from "./index.js";
 import { describe, expect, it } from "vitest";
 import { ApiErrorCodeSchema, ApiErrorSchema, buildApiError, parseApiError, PublicErrorMessages, PublicFieldErrorFields, sanitizeApiErrorInput } from "./index.js";
 
@@ -106,9 +106,9 @@ describe("strict public error builder", () => {
   });
 
   it("defines every exported ledger request/query field in the public field allowlist", () => {
-    const schemas = [CreateAccountInputSchema, UpdateAccountInputSchema, ArchiveAccountInputSchema, SetOpeningBalanceInputSchema, CreateCategoryInputSchema, UpdateCategoryInputSchema, CreateTransactionInputSchema, UpdateTransactionInputSchema, DeleteTransactionInputSchema, CreateTransferInputSchema, TransactionListQuerySchema, AccountListQuerySchema];
-    const intentionalAuthFields = ["email", "password", "provider", "returnPath"];
-    const expected = [...new Set([...schemas.flatMap((schema) => Object.keys(schema.shape)), ...intentionalAuthFields])];
+    const schemas = [SignUpInputSchema, SignInInputSchema, PasswordResetRequestInputSchema, PasswordUpdateInputSchema, CreateAccountInputSchema, UpdateAccountInputSchema, ArchiveAccountInputSchema, SetOpeningBalanceInputSchema, CreateCategoryInputSchema, UpdateCategoryInputSchema, ArchiveCategoryInputSchema, CreateTransactionInputSchema, UpdateTransactionInputSchema, DeleteTransactionInputSchema, CreateTransferInputSchema, TransactionListQuerySchema, AccountListQuerySchema, CategoryListQuerySchema];
+    const intentionalBoundaryFields = ["provider", "returnPath"];
+    const expected = [...new Set([...schemas.flatMap((schema) => Object.keys(schema.shape)), ...intentionalBoundaryFields])];
     expect(new Set(PublicFieldErrorFields.options)).toEqual(new Set(expected));
   });
 });
