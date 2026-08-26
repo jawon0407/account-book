@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ApiErrorSchema, parseApiError } from "./index.js";
+import { ApiErrorCodeSchema, ApiErrorSchema, parseApiError } from "./index.js";
 
 const validError = {
   code: "AUTH_INVALID_CREDENTIALS",
@@ -8,6 +8,16 @@ const validError = {
   retryable: false,
   fieldErrors: [{ field: "email", code: "INVALID" }],
 };
+
+const ledgerCodes = [
+  "LEDGER_VALIDATION_FAILED",
+  "LEDGER_NOT_FOUND",
+  "LEDGER_VERSION_CONFLICT",
+  "LEDGER_IDEMPOTENCY_CONFLICT",
+  "LEDGER_ACCOUNT_UNAVAILABLE",
+  "LEDGER_CATEGORY_UNAVAILABLE",
+  "LEDGER_TRANSFER_INVALID",
+] as const;
 
 describe("public API error contract", () => {
   it("accepts a valid error", () => {
@@ -43,5 +53,26 @@ describe("public API error contract", () => {
 
   it("does not accept raw secret-bearing properties", () => {
     expect(() => parseApiError({ ...validError, stack: "SQL SELECT token FROM sessions", accessToken: "secret", cookie: "session=secret", oauthCode: "code" })).toThrow();
+  });
+
+
+  it("accepts only the approved public ledger error codes", () => {
+    for (const code of ledgerCodes) {
+      expect(ApiErrorCodeSchema.parse(code)).toBe(code);
+      expect(ApiErrorSchema.parse({ ...validError, code })).toMatchObject({ code });
+    }
+    for (const code of ["LEDGER_SQL_ERROR", "LEDGER_OWNER_MISMATCH", "LEDGER_INTERNAL"]) {
+      expect(() => ApiErrorCodeSchema.parse(code)).toThrow();
+    }
+  });
+
+  it("rejects ledger errors carrying internal or financial fields", () => {
+    expect(() => parseApiError({
+      ...validError,
+      code: "LEDGER_NOT_FOUND",
+      memo: "실제 거래 메모",
+      sql: "select * from transactions",
+      table: "transactions",
+    })).toThrow();
   });
 });
