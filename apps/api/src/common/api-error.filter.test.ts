@@ -1,4 +1,4 @@
-import { ApiErrorSchema } from "@account-book/contracts";
+import { ApiErrorSchema, PublicErrorMessages } from "@account-book/contracts";
 import { HttpException, type ArgumentsHost } from "@nestjs/common";
 import type { FastifyInstance } from "fastify";
 import { describe, expect, it, vi } from "vitest";
@@ -26,9 +26,19 @@ function run(exception: unknown, requestId = "unsafe\r\ninbound", principal?: { 
   return { get body() { return body; }, get status() { return status; }, headers };
 }
 
+function assertRawEnvelope(response: ReturnType<typeof run>, code: keyof typeof PublicErrorMessages, retryable: boolean): void {
+  const body = response.body as { code: string; message: string; requestId: string; retryable: boolean; fieldErrors: unknown[] };
+  expect(body.code).toBe(code);
+  expect(body.message).toBe(PublicErrorMessages[code]);
+  expect(body.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu);
+  expect(body.retryable).toBe(retryable);
+  expect(body.fieldErrors).toEqual([]);
+  expect(response.headers.get("x-request-id")).toBe(body.requestId);
+}
 describe("ApiErrorFilter", () => {
   it("maps authentication failures to one no-store shared envelope", () => {
     const response = run(new InvalidAccessTokenError());
+    assertRawEnvelope(response, "AUTH_SESSION_EXPIRED", false);
     const parsed = ApiErrorSchema.parse(response.body);
 
     expect(response.status).toBe(401);
@@ -85,6 +95,7 @@ describe("ApiErrorFilter", () => {
   it("uses a verified principal correlation ID and maps unavailable verification to a fixed 503", () => {
     const verifiedId = "123e4567-e89b-12d3-a456-426614174002";
     const response = run(new AccessTokenVerificationUnavailableError(), "123e4567-e89b-12d3-a456-426614174003", { requestId: verifiedId });
+    assertRawEnvelope(response, "AUTH_PROVIDER_UNAVAILABLE", true);
     const parsed = ApiErrorSchema.parse(response.body);
 
     expect(response.status).toBe(503);

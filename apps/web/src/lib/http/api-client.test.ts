@@ -25,9 +25,10 @@ describe("browser API client", () => {
     const error = await apiError!({});
     const second = await apiError!({});
     expect(error.code).toBe("AUTH_PROVIDER_UNAVAILABLE");
-    expect(error.envelope.requestId).toMatch(/^[0-9a-f-]{36}$/iu);
+    const parsed = ApiErrorSchema.parse(error.envelope);
+    const parsedSecond = ApiErrorSchema.parse(second.envelope);
     expect(error.envelope.message).toBe("The authentication service is unavailable.");
-    expect(error.envelope.requestId).not.toBe(second.envelope.requestId);
+    expect(parsed.requestId).not.toBe(parsedSecond.requestId);
   });
 
   it("parses ky 2 error data after the response body has already been consumed", async () => {
