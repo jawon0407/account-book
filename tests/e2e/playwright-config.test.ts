@@ -8,9 +8,10 @@ test("mutation: project routing, serial execution, or trace-off policy cannot dr
   const { default: config } = await import("./playwright.config.js");
   const projects = new Map((config.projects ?? []).map((project) => [project.name, project]));
 
-  assert.deepEqual([...projects.keys()].sort(), ["http-contract", "ui-desktop-1440x900", "ui-mobile-390x844"]);
+  assert.deepEqual([...projects.keys()].sort(), ["http-contract", "layout-desktop-width-boundaries", "ui-desktop-1440x900", "ui-mobile-390x844"]);
   assert.equal(projects.get("ui-mobile-390x844")?.testMatch, "ui/auth-ui.spec.ts");
   assert.equal(projects.get("ui-desktop-1440x900")?.testMatch, "ui/auth-ui.spec.ts");
+  assert.equal(projects.get("layout-desktop-width-boundaries")?.testMatch, "layout/auth-shell-width.spec.ts");
   assert.equal(projects.get("http-contract")?.testMatch, "auth-response.spec.ts");
   assert.equal(config.fullyParallel, false);
   assert.equal(config.workers, 1);

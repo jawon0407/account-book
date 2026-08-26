@@ -2,7 +2,13 @@ import { Inject, Injectable } from "@nestjs/common";
 import type { CanActivate, ExecutionContext } from "@nestjs/common";
 import { Reflector } from "@nestjs/core";
 import type { FastifyRequest } from "fastify";
-import { DELEGATED_JWT_MAX_BYTES, DelegatedScopeSchema, type DelegatedScope } from "@account-book/contracts/internal-api";
+import {
+  DELEGATED_JSON_BODY_MAX_BYTES,
+  DELEGATED_JWT_MAX_BYTES,
+  DelegatedScopeSchema,
+  normalizeDelegatedContentType,
+  type DelegatedScope,
+} from "@account-book/contracts/internal-api";
 import {
   ACCESS_TOKEN_VERIFIER,
   InvalidAccessTokenError,
@@ -13,25 +19,33 @@ import { DELEGATED_SCOPE } from "./delegated-scope.js";
 
 const BEARER = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/u;
 const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
+const CANONICAL_DECIMAL = /^(?:0|[1-9][0-9]*)$/u;
+type GuardRequest = Readonly<{
+  method: "GET" | "POST" | "PATCH" | "DELETE";
+  target: string;
+  contentType: string | null;
+  body: Uint8Array;
+  requestId: string;
+}>;
 
-/** Reads one raw header field, rejecting duplicated or framework-coalesced evidence. */
-function oneRawHeader(request: FastifyRequest, name: string): string | undefined {
+/** Reads raw header pairs once, rejecting duplicate evidence before framework normalization. */
+function rawHeaderMap(request: FastifyRequest): ReadonlyMap<string, string> {
   const rawHeaders = request.raw.rawHeaders;
-  if (rawHeaders.length % 2 !== 0) throw new InvalidAccessTokenError();
-  const values: string[] = [];
+  if (!Array.isArray(rawHeaders) || rawHeaders.length % 2 !== 0) throw new InvalidAccessTokenError();
+  const headers = new Map<string, string>();
   for (let index = 0; index < rawHeaders.length; index += 2) {
-    if (rawHeaders[index]?.toLowerCase() === name) {
-      const value = rawHeaders[index + 1];
-      if (value === undefined) throw new InvalidAccessTokenError();
-      values.push(value);
-    }
+    const name = rawHeaders[index];
+    const value = rawHeaders[index + 1];
+    if (typeof name !== "string" || typeof value !== "string") throw new InvalidAccessTokenError();
+    const normalizedName = name.toLowerCase();
+    if (headers.has(normalizedName)) throw new InvalidAccessTokenError();
+    headers.set(normalizedName, value);
   }
-  if (values.length > 1) throw new InvalidAccessTokenError();
-  return values[0];
+  return headers;
 }
 
-function bearerToken(request: FastifyRequest): string {
-  const value = oneRawHeader(request, "authorization");
+function bearerToken(headers: ReadonlyMap<string, string>): string {
+  const value = headers.get("authorization");
   if (
     value === undefined
     || Buffer.byteLength(value, "utf8") > DELEGATED_JWT_MAX_BYTES + "Bearer ".length
@@ -45,17 +59,43 @@ function bearerToken(request: FastifyRequest): string {
   return match[1];
 }
 
-/** Rejects body-capable framing before any token data is sent to the verifier. */
-function requestIdAndFraming(request: FastifyRequest): string {
-  if (request.method !== "GET") throw new InvalidAccessTokenError();
-  if (oneRawHeader(request, "content-type") !== undefined || oneRawHeader(request, "transfer-encoding") !== undefined) {
+/** Builds the exact request descriptor from raw Fastify evidence, rejecting ambiguous framing. */
+function requestIdAndFraming(request: FastifyRequest, headers: ReadonlyMap<string, string>): GuardRequest {
+  const requestId = headers.get("x-request-id");
+  if (requestId === undefined || !CANONICAL_UUID.test(requestId)) throw new InvalidAccessTokenError();
+  if (headers.has("transfer-encoding")) throw new InvalidAccessTokenError();
+
+  const rawBody = request.rawBody;
+  if (rawBody !== undefined && !(rawBody instanceof Uint8Array)) throw new InvalidAccessTokenError();
+  const body = rawBody ?? new Uint8Array();
+  const contentLength = headers.get("content-length");
+  if (
+    contentLength !== undefined
+    && (!CANONICAL_DECIMAL.test(contentLength) || BigInt(contentLength) !== BigInt(body.byteLength))
+  ) {
     throw new InvalidAccessTokenError();
   }
-  const contentLength = oneRawHeader(request, "content-length");
-  if (contentLength !== undefined && contentLength !== "0") throw new InvalidAccessTokenError();
-  const requestId = oneRawHeader(request, "x-request-id");
-  if (requestId === undefined || !CANONICAL_UUID.test(requestId)) throw new InvalidAccessTokenError();
-  return requestId;
+  const target = request.raw.url;
+  if (typeof target !== "string") throw new InvalidAccessTokenError();
+
+  if (request.method === "GET") {
+    if (headers.has("content-type") || body.byteLength !== 0) throw new InvalidAccessTokenError();
+    return { method: "GET", target, contentType: null, body, requestId };
+  }
+  if (request.method !== "POST" && request.method !== "PATCH" && request.method !== "DELETE") {
+    throw new InvalidAccessTokenError();
+  }
+  if (rawBody === undefined || body.byteLength === 0 || body.byteLength > DELEGATED_JSON_BODY_MAX_BYTES) {
+    throw new InvalidAccessTokenError();
+  }
+  try {
+    if (normalizeDelegatedContentType(headers.get("content-type") ?? null) !== "application/json") {
+      throw new InvalidAccessTokenError();
+    }
+  } catch {
+    throw new InvalidAccessTokenError();
+  }
+  return { method: request.method, target, contentType: "application/json", body, requestId };
 }
 
 /** Resolves only a contract-valid route capability, failing closed for missing metadata. */
@@ -87,14 +127,13 @@ export class AuthGuard implements CanActivate {
    */
   public async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<FastifyRequest>();
-    const token = bearerToken(request);
-    const requestId = requestIdAndFraming(request);
+    const headers = rawHeaderMap(request);
+    const token = bearerToken(headers);
+    const guardedRequest = requestIdAndFraming(request, headers);
     const requiredScope = routeScope(this.reflector, context);
-    const target = request.raw.url;
-    if (typeof target !== "string") throw new InvalidAccessTokenError();
     const principal: AuthPrincipal = await this.verifier.verify({
       token,
-      request: { method: "GET", target, contentType: null, body: new Uint8Array(), requestId },
+      request: guardedRequest,
       requiredScope,
     });
     request.principal = principal;

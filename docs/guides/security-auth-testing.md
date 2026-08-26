@@ -174,3 +174,23 @@ pnpm run verify                                            # exit 0; legacy 53, 
 ```
 
 로컬 PostgreSQL listener가 없어 개발 PC에서는 `pnpm test:db`, guarded `prepare:e2e`, Playwright browser journey를 실행하지 않았다. Chromium cache가 있어도 DB guard를 약화하지 않았다. 이 로컬 공백은 같은 SHA의 GitHub run 15가 disposable PostgreSQL과 Chromium으로 대체했다. `pnpm audit --prod --audit-level high`는 exit 0이며 알려진 production dependency 취약점이 없었다. Hosted Supabase의 실제 role·pooler·`cron.job`, Google·Kakao·Naver provider, key rotation overlap/removal, kill-switch, backup·restore는 disposable CI가 대신할 수 없는 출시 차단 증거로 남아 있다.
+
+## M2 delegated mutation 경계: 로컬 RED/GREEN 증거
+
+이 절은 2026-08-05 작업 트리에서 확인한 로컬 구현 증거다. hosted Heroku/Vercel secret 주입, 실제 public-key rotation, 운영 replay store·rate-limit 관측은 실행하지 않았으므로 완료나 출시 승인으로 해석하지 않는다. 담당자는 Platform owner(공개 키·secret 배치와 rotation)와 Security owner(BFF 침해 대응 훈련)이며, 기한은 **최초 hosted delegated mutation release 전**이다. 재검토 조건은 Vercel/Heroku secret·keyset 배치 또는 BFF delegation scope 변경이고, 변경 rollout 전에 다시 검토한다.
+
+| 단계 | RED | GREEN과 커밋 |
+| --- | --- | --- |
+| shared contract | `pnpm --filter @account-book/contracts test -- internal-api.test.ts`: 2 tests failed (`DELEGATED_JSON_BODY_MAX_BYTES` 부재와 필요한 scope 거부). | 같은 명령과 `pnpm --filter @account-book/contracts typecheck`: 3 files/24 tests passed, typecheck 0. `22b5163f7f641210cca38be9ff734c99d996211b` |
+| Fastify raw JSON | `pnpm --filter @account-book/api test -- raw-json-body.test.ts`: `raw-json-body.js` 부재로 새 suite가 실패했고 기존 API 113 tests passed. lifecycle/form parser RED도 각각 기존 parser 충돌과 415를 재현했다. | focused final: 8 files/118 tests passed, typecheck·`git diff --check` 0. `5e122c618f584078c0a59145308a76dd367ef2af`, `e81d1179089e21b2eb36b6c27c294276d37d789a`, `15baaf2b376fb7a1ee745f4109e32fe6e6eb8d46` |
+| API framing | `pnpm --filter @account-book/api test -- auth.guard.test.ts`: POST/PATCH/DELETE exact-body cases 3건이 기존 GET-only guard 때문에 실패, 나머지 125 tests passed. | guard·JWT verifier focused commands: 8 files/128 tests passed; API typecheck·diff check 0. `a6d62f6c24aacc78681c6718367bd24e1ce96d9f` |
+| BFF client | `pnpm --filter @account-book/web test -- delegated-api-client.test.ts`: module 부재로 exit 1. URL hardening round RED는 25 passed/3 failed였다. Task 7 signer-await mutation RED는 505/508 통과·3 실패로 caller-owned body가 바뀔 수 있음을 재현했다. | 기존 final focused 28/28, 관련 3 files/97/97, web typecheck·diff checks 0. Task 7 clone-on-entry 뒤 동일 명령은 web 26 files/508 tests를 모두 통과했다. 기존 구현 커밋은 `9fd29e1`, `a91f0b3`이며 Task 7 검증 commit은 Task 7 report에 기록한다. |
+| 실제 Nest/Fastify matrix | `pnpm --filter @account-book/api test -- mutation-boundary.integration.test.ts`: default POST 201과 required 200 불일치로 새 matrix 8개가 실패, 기존 134 tests passed. oversized-filter RED는 13/14, filter RED는 6/7이었다. | matrix focused 14/14, filter+matrix 23/23, API 전체 9 files/147 tests, lint·typecheck·diff check 모두 0. `4fbdcbb`, `5c3461f` |
+
+matrix는 BFF signer와 API verifier의 real classes, deterministic P-256 key/clock, atomic 의미의 in-memory replay store를 사용했다. exact body만 통과하고 JSON으로 유효한 한 byte 변경·target query mismatch·read scope·재사용 `jti`는 거부한다. 32 KiB보다 1 byte 큰 body는 verifier 전에 413이며, replay store error는 503으로 fail closed한다. raw duplicate header는 loopback HTTP/1.1 raw header pair로 보냈다. JWT·원문 body·internal replay detail은 response와 captured log에 없는지 검사했다.
+
+운영 로그는 `requestId`와 `jti`를 구조화 필드로만 남기고 JWT·원문 body·body digest의 원문 복원 재료를 넣지 않는다. BFF private signing key `BFF_JWT_PRIVATE_KEY`는 Vercel의 server-only secret에만 두고, API의 public-key set은 Heroku secret에만 둔다. API는 current public key와 직전 public key만 검증하는 제한된 overlap을 사용하며, overlap 종료 후 이전 `kid` 제거·거부를 rotation drill로 검증한다. replay store를 읽거나 쓰지 못하면 요청을 허용하지 않는다.
+
+rate limit은 browser IP만을 principal로 쓰지 않는다. 인증 principal + route를 기본 key로 하고, 신뢰 가능한 platform-provided IP는 보조 신호로만 사용한다. 이 persistent rate-limit use case는 아직 구현되지 않았다. 담당자는 API owner이고, 기한은 **최초 hosted delegated mutation release 전** abuse test와 운영 관측을 추가하는 것이다. 재검토 조건은 rate-limit backend, route/scope, 또는 trusted platform IP 의미 변경이며 배포 전에 다시 검토한다. BFF 침해 시에도 이미 허용된 scope로 30초 이내 요청이 가능하다는 잔여 위험은 least-privilege scope, one-time replay, key rotation/kill switch, 이 rate-limit 설계로 줄일 뿐 제거하지 못한다.
+
+Fastify body-too-large 413 복구 allowlist는 Fastify `5.10.0`의 고정 message와 Nest `11.1.28` wrapper 동작에 결합돼 있다. 담당자는 API owner이며, 두 dependency 중 하나를 업그레이드하거나 parser/filter 동작을 바꾸기 **전** matrix의 oversized 413·forged 413 fail-closed regression을 다시 실행하고 allowlist를 재검토해야 한다. 이 조건이 충족되기 전 dependency upgrade를 배포하지 않는다.

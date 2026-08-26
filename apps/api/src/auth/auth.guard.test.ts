@@ -12,10 +12,14 @@ const principal = {
   requestId: "123e4567-e89b-12d3-a456-426614174002",
 } as const;
 
-function request(rawHeaders: string[]): FastifyRequest {
+function request(
+  rawHeaders: string[],
+  options: Readonly<{ method?: string; url?: string; rawBody?: Uint8Array }> = {},
+): FastifyRequest {
   return {
-    method: "GET",
-    raw: { rawHeaders, url: "/v1/me?view=summary" },
+    method: options.method ?? "GET",
+    raw: { rawHeaders, url: options.url ?? "/v1/me?view=summary" },
+    rawBody: options.rawBody,
   } as unknown as FastifyRequest;
 }
 
@@ -38,6 +42,58 @@ function guard(verifier: AccessTokenVerifier, scope: unknown = "me:read"): AuthG
 }
 
 describe("AuthGuard", () => {
+  it.each(["POST", "PATCH", "DELETE"] as const)("passes the exact raw %s JSON mutation binding to the delegated verifier", async (method) => {
+    const verify = vi.fn(async () => principal);
+    const subject = guard({ verify } satisfies AccessTokenVerifier, "transaction:write");
+    const exactBody = new TextEncoder().encode('{"amount":12345}');
+    const requestId = "123e4567-e89b-12d3-a456-426614174002";
+    const incoming = request([
+      "Authorization", "Bearer aaa.bbb.ccc",
+      "X-Request-Id", requestId,
+      "Content-Type", "application/json; charset=utf-8",
+      "Content-Length", "16",
+    ], {
+      method,
+      url: "/v1/test-mutation?b=2&a=1",
+      rawBody: exactBody,
+    });
+
+    await expect(subject.canActivate(context(incoming))).resolves.toBe(true);
+    expect(verify).toHaveBeenCalledWith({
+      token: "aaa.bbb.ccc",
+      request: {
+        method,
+        target: "/v1/test-mutation?b=2&a=1",
+        contentType: "application/json",
+        body: exactBody,
+        requestId,
+      },
+      requiredScope: "transaction:write",
+    });
+    expect(verify.mock.calls[0]?.[0].request.body).toBe(exactBody);
+  });
+
+  it.each([
+    ["PUT", ["Content-Type", "application/json", "Content-Length", "2"], new Uint8Array([123, 125])],
+    ["POST", ["Content-Type", "application/json", "Content-Length", "0"], new Uint8Array()],
+    ["POST", ["Content-Type", "text/plain", "Content-Length", "2"], new Uint8Array([123, 125])],
+    ["POST", ["Content-Type", "application/json", "content-type", "application/json", "Content-Length", "2"], new Uint8Array([123, 125])],
+    ["POST", ["Content-Type", "application/json", "Content-Length", "2", "Transfer-Encoding", "chunked"], new Uint8Array([123, 125])],
+    ["POST", ["Content-Type", "application/json", "Content-Length", "3"], new Uint8Array([123, 125])],
+    ["POST", ["Content-Type", "application/json", "Content-Length", "32769"], new Uint8Array(32_769)],
+  ] as const)("rejects unsupported or ambiguously framed %s mutations before verification", async (method, headers, rawBody) => {
+    const verify = vi.fn(async () => principal);
+    const subject = guard({ verify } satisfies AccessTokenVerifier, "transaction:write");
+    const incoming = request([
+      "Authorization", "Bearer aaa.bbb.ccc",
+      "X-Request-Id", "123e4567-e89b-12d3-a456-426614174002",
+      ...headers,
+    ], { method, rawBody });
+
+    await expect(subject.canActivate(context(incoming))).rejects.toBeInstanceOf(InvalidAccessTokenError);
+    expect(verify).not.toHaveBeenCalled();
+  });
+
   it("passes the exact raw GET request binding and request ID to the delegated verifier", async () => {
     const verify = vi.fn(async () => principal);
     const subject = guard({ verify } satisfies AccessTokenVerifier);

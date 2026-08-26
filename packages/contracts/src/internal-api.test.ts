@@ -1,10 +1,35 @@
 import { describe, expect, it } from "vitest";
 import {
   canonicalDelegatedRequest,
+  DELEGATED_JSON_BODY_MAX_BYTES,
+  DelegatedScopeSchema,
   normalizeDelegatedContentType,
 } from "./internal-api.js";
 
 describe("delegated internal API request contract", () => {
+  it("sets the shared JSON request-body limit to 32 KiB", () => {
+    expect(DELEGATED_JSON_BODY_MAX_BYTES).toBe(32_768);
+  });
+
+  it("allows only the delegated capabilities required by the BFF", () => {
+    for (const scope of [
+      "me:read",
+      "account:read",
+      "account:write",
+      "category:read",
+      "category:write",
+      "transaction:read",
+      "transaction:write",
+      "dashboard:read",
+    ]) {
+      expect(DelegatedScopeSchema.safeParse(scope).success).toBe(true);
+    }
+
+    for (const scope of ["admin", "transaction:*", "user:write", ""]) {
+      expect(DelegatedScopeSchema.safeParse(scope).success).toBe(false);
+    }
+  });
+
   it("sorts query pairs and binds the exact body digest and request ID", () => {
     expect(canonicalDelegatedRequest({
       bodySha256: "47DEQpj8HBSa-_TImW-5JCeuQeRkm5NMpJWZG3hSuFU",

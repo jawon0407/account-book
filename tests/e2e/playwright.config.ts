@@ -67,6 +67,11 @@ export default defineConfig({
       use: { viewport: { width: 1440, height: 900 } },
     },
     {
+      name: "layout-desktop-width-boundaries",
+      testMatch: "layout/auth-shell-width.spec.ts",
+      use: { viewport: { width: 1080, height: 900 } },
+    },
+    {
       name: "http-contract",
       testMatch: "auth-response.spec.ts",
     },
