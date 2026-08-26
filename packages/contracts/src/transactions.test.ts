@@ -73,19 +73,26 @@ describe("transfer and transaction response schemas", () => {
       { ...baseTransaction, kind: "expense", categoryId, transferId: null },
       { ...baseTransaction, kind: "transfer_out", categoryId: null, transferId },
       { ...baseTransaction, kind: "transfer_in", categoryId: null, transferId },
-      { ...baseTransaction, kind: "opening_balance", categoryId: null, transferId: null },
+      { ...baseTransaction, kind: "opening_balance", categoryId: null, transferId: null, direction: "asset" },
     ]) expect(TransactionSchema.parse(value)).toMatchObject({ kind: value.kind });
     expect(() => TransactionSchema.parse({ ...baseTransaction, kind: "income", categoryId: null, transferId })).toThrow();
     expect(() => TransactionSchema.parse({ ...baseTransaction, kind: "transfer_in", categoryId, transferId: null })).toThrow();
     expect(() => TransactionSchema.parse({ ...baseTransaction, kind: "opening_balance", categoryId, transferId: null })).toThrow();
+    expect(TransactionSchema.parse({ ...baseTransaction, kind: "opening_balance", categoryId: null, transferId: null, direction: "liability" })).toMatchObject({ direction: "liability" });
+    expect(() => TransactionSchema.parse({ ...baseTransaction, kind: "opening_balance", categoryId: null, transferId: null })).toThrow();
+    expect(() => TransactionSchema.parse({ ...baseTransaction, kind: "opening_balance", categoryId: null, transferId: null, direction: "loan" })).toThrow();
   });
 
   it("validates transfer result, tombstones, and strict bounded lists", () => {
     const debit = { ...baseTransaction, kind: "transfer_out", categoryId: null, transferId };
-    const credit = { ...baseTransaction, kind: "transfer_in", categoryId: null, transferId };
+    const credit = { ...baseTransaction, id: categoryId, accountId: categoryId, kind: "transfer_in", categoryId: null, transferId };
     expect(CreateTransferResultSchema.parse({ debit, credit, transferId })).toMatchObject({ transferId });
     expect(() => CreateTransferResultSchema.parse({ debit: credit, credit: debit, transferId })).toThrow();
     expect(() => CreateTransferResultSchema.parse({ debit, credit: { ...credit, transferId: categoryId }, transferId })).toThrow();
+    expect(() => CreateTransferResultSchema.parse({ debit, credit: { ...credit, id: accountId }, transferId })).toThrow();
+    expect(() => CreateTransferResultSchema.parse({ debit, credit: { ...credit, accountId }, transferId })).toThrow();
+    expect(() => CreateTransferResultSchema.parse({ debit, credit: { ...credit, amountKrw: 99 }, transferId })).toThrow();
+    expect(() => CreateTransferResultSchema.parse({ debit, credit: { ...credit, occurredOn: "2026-08-27" }, transferId })).toThrow();
     expect(TransactionTombstoneSchema.parse({ id: accountId, version: 2, deletedAt: timestamp })).toEqual({ id: accountId, version: 2, deletedAt: timestamp });
     expect(() => TransactionListQuerySchema.parse({ from: "2026-08-27", to: "2026-08-26" })).toThrow();
     expect(() => TransactionListQuerySchema.parse({ nope: true })).toThrow();

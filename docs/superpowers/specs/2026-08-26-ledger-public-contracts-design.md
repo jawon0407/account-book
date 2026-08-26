@@ -165,11 +165,13 @@ Transaction 응답은 kind를 판별자로 사용하는 다음 세 strict varian
 | --- | --- | --- | --- |
 | 일반 거래 | income 또는 expense | UUID | null |
 | 이체 행 | transfer_out 또는 transfer_in | null | UUID |
-| 시작 잔액 | opening_balance | null | null |
+| 시작 잔액 | opening_balance | null | null | asset 또는 liability |
 
 모든 variant는 id, accountId, 양의 amountKrw, occurredOn, memo, version, deletedAt, createdAt과 updatedAt을 공통으로 가진다. 목록과 화면은 kind를 기준으로 원장 방향을 해석하고 amountKrw 자체의 부호에 의존하지 않는다. 삭제되지 않은 기본 목록에서는 deletedAt이 null인 항목만 반환하지만 계약은 동기화 확장을 위해 tombstone 값을 표현할 수 있다.
 
 ## 9. 이체 생성 계약
+
+이체 응답의 debit·credit 행은 서로 다른 id와 accountId를 가지며 amountKrw, occurredOn, memo와 top-level transferId를 서로 일치시킨다. memo는 양쪽 행에 같은 nullable 값으로 저장되는 명령 메타데이터다.
 
 CreateTransferInput은 다음 필드를 가진다.
 

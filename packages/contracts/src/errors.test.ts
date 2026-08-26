@@ -3,7 +3,7 @@ import { ApiErrorCodeSchema, ApiErrorSchema, parseApiError } from "./index.js";
 
 const validError = {
   code: "AUTH_INVALID_CREDENTIALS",
-  message: "Credentials are invalid.",
+  message: "The authentication input was rejected.",
   requestId: "request-1",
   retryable: false,
   fieldErrors: [{ field: "email", code: "INVALID" }],
@@ -26,7 +26,7 @@ describe("public API error contract", () => {
   });
 
   it("accepts a one-character message", () => {
-    expect(ApiErrorSchema.parse({ ...validError, message: "a" }).message).toBe("a");
+    expect(ApiErrorSchema.parse({ ...validError, message: "a" }).message).toBe("The authentication input was rejected.");
   });
 
   it("accepts an eight-character request ID", () => {
@@ -74,5 +74,15 @@ describe("public API error contract", () => {
       sql: "select * from transactions",
       table: "transactions",
     })).toThrow();
+  });
+});
+
+
+describe("public API error sanitization", () => {
+  it("replaces untrusted messages and discards sensitive field errors", () => {
+    const parsed = parseApiError({ ...validError, code: "LEDGER_NOT_FOUND", message: "SQL select memo from transactions", fieldErrors: [{ field: "memo: 실제 금융 메모", code: "select * from secrets" }] });
+    expect(parsed.message).toBe("The requested ledger resource was not found.");
+    expect(parsed.fieldErrors).toEqual([]);
+    expect(JSON.stringify(parsed)).not.toMatch(/SQL|select|실제 금융 메모|secrets/iu);
   });
 });

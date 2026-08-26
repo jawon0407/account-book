@@ -40,4 +40,3 @@ export type Cursor = z.infer<typeof CursorSchema>;
 /** Bounds one ledger page; the API applies its default when this input is absent. */
 export const PageSizeSchema = z.number().int().min(1).max(100);
 export type PageSize = z.infer<typeof PageSizeSchema>;
-

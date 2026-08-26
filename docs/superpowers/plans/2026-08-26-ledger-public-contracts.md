@@ -585,7 +585,7 @@ Create five strict variants:
 - expense: kind literal expense, categoryId LedgerIdSchema, transferId null;
 - transfer_out: kind literal transfer_out, categoryId null, transferId LedgerIdSchema;
 - transfer_in: kind literal transfer_in, categoryId null, transferId LedgerIdSchema;
-- opening_balance: kind literal opening_balance, categoryId null, transferId null.
+- opening_balance: kind literal opening_balance, categoryId null, transferId null, direction asset 또는 liability.
 
 Export TransactionSchema as z.discriminatedUnion("kind", all five variants).
 
@@ -597,7 +597,7 @@ CreateTransferResultSchema must be:
       transferId: LedgerIdSchema,
     }).strict();
 
-TransactionTombstoneSchema must contain id, version and deletedAt. TransactionListQuerySchema contains optional accountId, categoryId, cursor, from, limit, to and type, rejects from > to, and remains strict. TransactionListResponseSchema contains items as z.array(TransactionSchema).max(100) and nextCursor as CursorSchema.nullable().
+CreateTransferResultSchema additionally requires debit·credit ids and accountIds to differ, and amountKrw, occurredOn, memo to match. memo is the same nullable command metadata on both persisted rows. TransactionTombstoneSchema must contain id, version and deletedAt. TransactionListQuerySchema contains optional accountId, categoryId, cursor, from, limit, to and type, rejects from > to, and remains strict. TransactionListResponseSchema contains items as z.array(TransactionSchema).max(100) and nextCursor as CursorSchema.nullable().
 
 Export z.infer types for every public schema. Do not export the internal variant helper schemas except TransferInTransactionSchema and TransferOutTransactionSchema required by CreateTransferResultSchema tests.
 

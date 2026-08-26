@@ -18,7 +18,7 @@ export { ApiErrorCodeSchema, ApiErrorSchema, parseApiError } from "./errors.js";
 export type { ApiErrorCode, ApiError } from "./errors.js";
 
 export { LedgerIdSchema, IdempotencyKeySchema, PositiveKrwAmountSchema, SignedKrwBalanceSchema, LocalDateSchema, TimestampSchema, VersionSchema, ExpectedVersionSchema, CursorSchema, PageSizeSchema } from "./ledger-common.js";
-export type { LedgerId, IdempotencyKey, PositiveKrwAmount, SignedKrwBalance, LocalDate, Timestamp, Version, Cursor, PageSize } from "./ledger-common.js";
+export type { LedgerId, IdempotencyKey, PositiveKrwAmount, SignedKrwBalance, LocalDate, Timestamp, Version, ExpectedVersion, Cursor, PageSize } from "./ledger-common.js";
 export { AccountKindSchema, OpeningBalanceDirectionSchema, CreateAccountInputSchema, UpdateAccountInputSchema, ArchiveAccountInputSchema, SetOpeningBalanceInputSchema, AccountSchema, AccountListQuerySchema, AccountListResponseSchema } from "./accounts.js";
 export type { AccountKind, OpeningBalanceDirection, CreateAccountInput, UpdateAccountInput, ArchiveAccountInput, SetOpeningBalanceInput, Account, AccountListQuery, AccountListResponse } from "./accounts.js";
 export { CategoryKindSchema, CreateCategoryInputSchema, UpdateCategoryInputSchema, ArchiveCategoryInputSchema, CategorySchema, CategoryListQuerySchema, CategoryListResponseSchema } from "./categories.js";

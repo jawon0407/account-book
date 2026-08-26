@@ -10,6 +10,7 @@ import {
   TimestampSchema,
   VersionSchema,
 } from "./ledger-common.js";
+import { OpeningBalanceDirectionSchema } from "./accounts.js";
 
 const MemoSchema = z.string().trim().min(1).max(500);
 
@@ -76,7 +77,7 @@ export const TransferOutTransactionSchema = TransactionBaseSchema.extend({ kind:
 export type TransferOutTransaction = z.infer<typeof TransferOutTransactionSchema>;
 export const TransferInTransactionSchema = TransactionBaseSchema.extend({ kind: z.literal("transfer_in"), categoryId: z.null(), transferId: LedgerIdSchema }).strict();
 export type TransferInTransaction = z.infer<typeof TransferInTransactionSchema>;
-const OpeningBalanceTransactionSchema = TransactionBaseSchema.extend({ kind: z.literal("opening_balance"), categoryId: z.null(), transferId: z.null() }).strict();
+const OpeningBalanceTransactionSchema = TransactionBaseSchema.extend({ kind: z.literal("opening_balance"), categoryId: z.null(), transferId: z.null(), direction: OpeningBalanceDirectionSchema }).strict();
 
 export const TransactionSchema = z.discriminatedUnion("kind", [
   IncomeTransactionSchema,
@@ -96,7 +97,7 @@ export const CreateTransferResultSchema = z.object({
   transferId: LedgerIdSchema,
 }).strict().refine((result) => result.debit.transferId === result.transferId && result.credit.transferId === result.transferId, {
   message: "TRANSFER_RESULT_ID_MISMATCH",
-});
+}).refine((result) => result.debit.id !== result.credit.id && result.debit.accountId !== result.credit.accountId && result.debit.amountKrw === result.credit.amountKrw && result.debit.occurredOn === result.credit.occurredOn && result.debit.memo === result.credit.memo, { message: "TRANSFER_RESULT_FIELDS_MISMATCH" });
 export type CreateTransferResult = z.infer<typeof CreateTransferResultSchema>;
 
 export const TransactionListQuerySchema = z.object({

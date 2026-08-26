@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  ApiErrorCodeSchema,
   ApiErrorSchema,
   AuthProviderSchema,
   CurrentUserSchema,
@@ -120,7 +121,7 @@ function errorResponse(error: unknown): Response {
     status = error.status;
   } else if (error !== null && typeof error === "object") {
     const candidate = (error as { code?: unknown }).code;
-    const parsed = ApiErrorSchema.shape.code.safeParse(candidate);
+    const parsed = ApiErrorCodeSchema.safeParse(candidate);
     if (parsed.success && isAuthErrorCode(parsed.data)) {
       code = parsed.data;
       status = statusFor(code);
