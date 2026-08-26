@@ -161,11 +161,11 @@ DeleteTransactionInput은 expectedVersion을 요구한다. 삭제 결과는 id, 
 
 Transaction 응답은 kind를 판별자로 사용하는 다음 세 strict variant의 union이다.
 
-| variant | kind | categoryId | transferId |
-| --- | --- | --- | --- |
+| variant | kind | categoryId | transferId | direction |
+| --- | --- | --- | --- | --- |
 | 일반 거래 | income 또는 expense | UUID | null |
 | 이체 행 | transfer_out 또는 transfer_in | null | UUID |
-| 시작 잔액 | opening_balance | null | null | asset 또는 liability |
+| 시작 잔액 | opening_balance | null | null | null | asset 또는 liability |
 
 모든 variant는 id, accountId, 양의 amountKrw, occurredOn, memo, version, deletedAt, createdAt과 updatedAt을 공통으로 가진다. 목록과 화면은 kind를 기준으로 원장 방향을 해석하고 amountKrw 자체의 부호에 의존하지 않는다. 삭제되지 않은 기본 목록에서는 deletedAt이 null인 항목만 반환하지만 계약은 동기화 확장을 위해 tombstone 값을 표현할 수 있다.
 

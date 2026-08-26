@@ -13,7 +13,7 @@ function result(value: unknown, failure = false) {
 }
 
 function apiFailure(code: string, status: number) {
-  return Object.assign(new Error("untrusted"), { response: new Response(JSON.stringify({ code, message: "Safe message", requestId: "request-123", retryable: false, fieldErrors: [] }), { status, headers: { "Content-Type": "application/json" } }) });
+  return Object.assign(new Error("untrusted"), { response: new Response(JSON.stringify({ code, message: code === "AUTH_SESSION_EXPIRED" ? "The session has expired." : code === "AUTH_SESSION_REFRESH_REQUIRED" ? "The session must be refreshed." : code === "AUTH_CSRF_REJECTED" ? "The request could not be verified." : "The authentication input was rejected.", requestId: "123e4567-e89b-12d3-a456-426614174011", retryable: false, fieldErrors: [] }), { status, headers: { "Content-Type": "application/json" } }) });
 }
 
 describe("authentication queries", () => {

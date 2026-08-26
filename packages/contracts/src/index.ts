@@ -14,7 +14,7 @@ export type {
   SignInInput,
   SignUpInput,
 } from "./auth.js";
-export { ApiErrorCodeSchema, ApiErrorSchema, parseApiError } from "./errors.js";
+export { ApiErrorCodeSchema, ApiErrorSchema, PublicErrorMessages, PublicFieldErrorCodes, PublicFieldErrorFields, buildApiError, parseApiError, sanitizeApiErrorInput } from "./errors.js";
 export type { ApiErrorCode, ApiError } from "./errors.js";
 
 export { LedgerIdSchema, IdempotencyKeySchema, PositiveKrwAmountSchema, SignedKrwBalanceSchema, LocalDateSchema, TimestampSchema, VersionSchema, ExpectedVersionSchema, CursorSchema, PageSizeSchema } from "./ledger-common.js";

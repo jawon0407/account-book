@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   ApiErrorCodeSchema,
   ApiErrorSchema,
+  buildApiError,
   AuthProviderSchema,
   CurrentUserSchema,
   PasswordResetRequestInputSchema,
@@ -99,20 +100,6 @@ function noStoreHeaders(): Headers {
   return new Headers({ "Cache-Control": "private, no-store", Pragma: "no-cache", Expires: "0" });
 }
 
-function message(code: AuthErrorCode): string {
-  const messages: Record<AuthErrorCode, string> = {
-    AUTH_INVALID_CREDENTIALS: "The authentication input was rejected.",
-    AUTH_EMAIL_VERIFICATION_REQUIRED: "Email verification is required.",
-    AUTH_SESSION_EXPIRED: "The session has expired.",
-    AUTH_SESSION_REFRESH_REQUIRED: "The session must be refreshed.",
-    AUTH_CSRF_REJECTED: "The request could not be verified.",
-    AUTH_OAUTH_TRANSACTION_INVALID: "The authentication transaction is invalid.",
-    AUTH_RATE_LIMITED: "Too many authentication attempts.",
-    AUTH_PROVIDER_UNAVAILABLE: "The authentication service is unavailable.",
-  };
-  return messages[code];
-}
-
 function errorResponse(error: unknown): Response {
   let code: AuthErrorCode = "AUTH_PROVIDER_UNAVAILABLE";
   let status = 503;
@@ -135,13 +122,12 @@ function errorResponse(error: unknown): Response {
 
 /** Creates a fixed public error envelope with explicitly constrained retry semantics. */
 export function safeAuthFailure(code: AuthErrorCode, status: number, retryable = code === "AUTH_PROVIDER_UNAVAILABLE" && status === 503): Response {
-  const body: ApiError = {
+  const body = buildApiError({
     code,
-    message: message(code),
     requestId: randomUUID(),
     retryable,
     fieldErrors: [],
-  };
+  });
   return json(body, status);
 }
 

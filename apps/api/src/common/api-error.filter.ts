@@ -1,4 +1,4 @@
-import type { ApiError } from "@account-book/contracts";
+import { buildApiError } from "@account-book/contracts";
 import { Catch, HttpException, type ArgumentsHost, type ExceptionFilter } from "@nestjs/common";
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { AccessTokenVerificationUnavailableError, InvalidAccessTokenError } from "../auth/jwt-verifier.js";
@@ -45,13 +45,12 @@ export class ApiErrorFilter implements ExceptionFilter {
     }
     const authenticationFailure = exception instanceof InvalidAccessTokenError;
     const unavailable = exception instanceof AccessTokenVerificationUnavailableError;
-    const body: ApiError = {
+    const body = buildApiError({
       code: authenticationFailure ? "AUTH_SESSION_EXPIRED" : "AUTH_PROVIDER_UNAVAILABLE",
-      message: authenticationFailure ? "Authentication session has expired." : "Authentication service is unavailable.",
       requestId,
       retryable: unavailable || !authenticationFailure,
       fieldErrors: [],
-    };
+    });
     reply
       .header("X-Request-Id", requestId)
       .header("Cache-Control", "private, no-store")

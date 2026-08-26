@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { ApiErrorCodeSchema, ApiErrorSchema, parseApiError } from "./index.js";
+import { ApiErrorCodeSchema, ApiErrorSchema, buildApiError, parseApiError, PublicErrorMessages, PublicFieldErrorFields, sanitizeApiErrorInput } from "./index.js";
 
 const validError = {
   code: "AUTH_INVALID_CREDENTIALS",
   message: "The authentication input was rejected.",
-  requestId: "request-1",
+  requestId: "123e4567-e89b-12d3-a456-426614174000",
   retryable: false,
   fieldErrors: [{ field: "email", code: "INVALID" }],
 };
@@ -25,12 +25,12 @@ describe("public API error contract", () => {
     expect(parseApiError(validError)).toEqual(validError);
   });
 
-  it("accepts a one-character message", () => {
-    expect(ApiErrorSchema.parse({ ...validError, message: "a" }).message).toBe("The authentication input was rejected.");
+  it("rejects a non-derived message", () => {
+    expect(() => ApiErrorSchema.parse({ ...validError, message: "a" })).toThrow();
   });
 
-  it("accepts an eight-character request ID", () => {
-    expect(ApiErrorSchema.parse({ ...validError, requestId: "request1" }).requestId).toBe("request1");
+  it("requires a canonical UUID request ID", () => {
+    expect(() => ApiErrorSchema.parse({ ...validError, requestId: "request1" })).toThrow();
   });
 
   it("accepts twenty field errors", () => {
@@ -59,7 +59,7 @@ describe("public API error contract", () => {
   it("accepts only the approved public ledger error codes", () => {
     for (const code of ledgerCodes) {
       expect(ApiErrorCodeSchema.parse(code)).toBe(code);
-      expect(ApiErrorSchema.parse({ ...validError, code })).toMatchObject({ code });
+      expect(ApiErrorSchema.parse({ ...validError, code, message: PublicErrorMessages[code] })).toMatchObject({ code });
     }
     for (const code of ["LEDGER_SQL_ERROR", "LEDGER_OWNER_MISMATCH", "LEDGER_INTERNAL"]) {
       expect(() => ApiErrorCodeSchema.parse(code)).toThrow();
@@ -80,9 +80,24 @@ describe("public API error contract", () => {
 
 describe("public API error sanitization", () => {
   it("replaces untrusted messages and discards sensitive field errors", () => {
-    const parsed = parseApiError({ ...validError, code: "LEDGER_NOT_FOUND", message: "SQL select memo from transactions", fieldErrors: [{ field: "memo: 실제 금융 메모", code: "select * from secrets" }] });
+    const parsed = sanitizeApiErrorInput({ ...validError, code: "LEDGER_NOT_FOUND", message: "SQL select memo from transactions", fieldErrors: [{ field: "memo: 실제 금융 메모", code: "select * from secrets" }] });
     expect(parsed.message).toBe("The requested ledger resource was not found.");
     expect(parsed.fieldErrors).toEqual([]);
     expect(JSON.stringify(parsed)).not.toMatch(/SQL|select|실제 금융 메모|secrets/iu);
+  });
+});
+
+describe("strict public error builder", () => {
+  it("normalizes untrusted request IDs and messages before wire serialization", () => {
+    const body = buildApiError({ code: "LEDGER_NOT_FOUND", requestId: "SQL secret memo", message: "select * from accounts", retryable: false, fieldErrors: [{ field: "memo: secret", code: "DROP TABLE" }] });
+    expect(body.message).toBe("The requested ledger resource was not found.");
+    expect(body.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu);
+    expect(JSON.stringify(body)).not.toMatch(/SQL|secret|memo:|DROP|select/iu);
+    expect(ApiErrorSchema.parse(body)).toEqual(body);
+  });
+
+  it("defines every exported ledger request/query field in the public field allowlist", () => {
+    const expected = ["email", "password", "returnPath", "provider", "accountId", "amountKrw", "categoryId", "idempotencyKey", "kind", "name", "expectedVersion", "direction", "occurredOn", "includeArchived", "sortOrder", "fromAccountId", "memo", "toAccountId", "type", "cursor", "limit", "from", "to"];
+    expect(new Set(PublicFieldErrorFields.options)).toEqual(new Set(expected));
   });
 });

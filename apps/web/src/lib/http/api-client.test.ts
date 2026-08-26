@@ -24,8 +24,8 @@ describe("browser API client", () => {
     expect(apiError).toBeTypeOf("function");
     const envelope = {
       code: "AUTH_INVALID_CREDENTIALS",
-      message: "Untrusted display message",
-      requestId: "request-123",
+      message: "The authentication input was rejected.",
+      requestId: "123e4567-e89b-12d3-a456-426614174012",
       retryable: false,
       fieldErrors: [],
     };
