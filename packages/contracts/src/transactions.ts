@@ -94,7 +94,9 @@ export const CreateTransferResultSchema = z.object({
   credit: TransferInTransactionSchema,
   debit: TransferOutTransactionSchema,
   transferId: LedgerIdSchema,
-}).strict();
+}).strict().refine((result) => result.debit.transferId === result.transferId && result.credit.transferId === result.transferId, {
+  message: "TRANSFER_RESULT_ID_MISMATCH",
+});
 export type CreateTransferResult = z.infer<typeof CreateTransferResultSchema>;
 
 export const TransactionListQuerySchema = z.object({

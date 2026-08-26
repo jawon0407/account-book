@@ -85,6 +85,7 @@ describe("transfer and transaction response schemas", () => {
     const credit = { ...baseTransaction, kind: "transfer_in", categoryId: null, transferId };
     expect(CreateTransferResultSchema.parse({ debit, credit, transferId })).toMatchObject({ transferId });
     expect(() => CreateTransferResultSchema.parse({ debit: credit, credit: debit, transferId })).toThrow();
+    expect(() => CreateTransferResultSchema.parse({ debit, credit: { ...credit, transferId: categoryId }, transferId })).toThrow();
     expect(TransactionTombstoneSchema.parse({ id: accountId, version: 2, deletedAt: timestamp })).toEqual({ id: accountId, version: 2, deletedAt: timestamp });
     expect(() => TransactionListQuerySchema.parse({ from: "2026-08-27", to: "2026-08-26" })).toThrow();
     expect(() => TransactionListQuerySchema.parse({ nope: true })).toThrow();
