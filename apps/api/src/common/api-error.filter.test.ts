@@ -76,11 +76,13 @@ describe("ApiErrorFilter", () => {
     ],
   ])("fails closed on %s instead of trusting 413-like fields", (_name, exception) => {
     const response = run(exception);
-    const serialized = JSON.stringify(response.body);
 
     expect(response.status).toBe(503);
-    expect(ApiErrorSchema.parse(response.body)).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: true, fieldErrors: [] });
+    assertRawEnvelope(response, "AUTH_PROVIDER_UNAVAILABLE", true);
+    const serialized = JSON.stringify(response.body);
     expect(serialized).not.toMatch(/forged-status-detail|forged-fastify-detail|forged-http-detail|forged-cause-detail/iu);
+
+    expect(ApiErrorSchema.parse(response.body)).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: true, fieldErrors: [] });
   });
   it("fails closed on unexpected errors without leaking exception or request data", () => {
     const response = run(new Error("provider-message?token=exception-secret"));
@@ -122,6 +124,15 @@ describe("ApiErrorFilter", () => {
     registerRequestContext(server);
     hook!(request as never, reply as never, undefined, () => undefined);
 
-    expect(headers.get("x-request-id")).toBe(ApiErrorSchema.parse(body).requestId);
+    const rawBody = body as { code: string; message: string; requestId: string; retryable: boolean; fieldErrors: unknown[] };
+    expect(rawBody.code).toBe("AUTH_SESSION_EXPIRED");
+    expect(rawBody.message).toBe(PublicErrorMessages.AUTH_SESSION_EXPIRED);
+    expect(rawBody.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu);
+    expect(rawBody.retryable).toBe(false);
+    expect(rawBody.fieldErrors).toEqual([]);
+    expect(headers.get("x-request-id")).toBe(rawBody.requestId);
+
+    const parsed = ApiErrorSchema.parse(body);
+    expect(headers.get("x-request-id")).toBe(parsed.requestId);
   });
 });
