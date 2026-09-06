@@ -322,10 +322,10 @@ flowchart TD
 - 브랜치: `feature/ledger-public-contracts`
 - Task 5 구현 커밋: `c2db82c`
 - 공개 schema 수: common 10개, account 9개, category 7개, transaction 10개
-- contracts 집중 검증: `corepack pnpm@11.9.0 --filter @account-book/contracts exec vitest run src/errors.test.ts` — 9/9 tests 통과
-- contracts 전체 검증: `corepack pnpm@11.9.0 --filter @account-book/contracts test` — 7 files, 57 tests 통과; typecheck/build 통과
+- contracts 집중 검증: `corepack pnpm@11.9.0 --filter @account-book/contracts exec vitest run src/errors.test.ts` — 13/13 tests 통과
+- contracts 전체 검증: `corepack pnpm@11.9.0 --filter @account-book/contracts test` — 7 files, 61 tests 통과; typecheck/build 통과
 - 전체 저장소 lint: `corepack pnpm@11.9.0 lint` — 통과
-- 전체 저장소 legacy test — 53/53 통과; workspace test — contracts 57, database 12, API 147, web 508 통과; E2E preflight 85/85 통과
+- 전체 저장소 legacy test — 53/53 통과; workspace test — contracts 61, database 12, API 147, web 509 통과; E2E preflight 85/85 통과
 - Task 6 fix round에서 auth-controller가 auth-only 오류 코드 subset을 사용하고 ledger 오류를 `AUTH_PROVIDER_UNAVAILABLE`로 정규화하도록 보강했다. 고정 runtime workaround로 workspace typecheck/build를 다시 실행해 통과했다.
 - DB 금융 schema/RLS, API controller/service/repository, PC web 장부 기능, mobile 앱은 아직 미구현이다.
 - 다음 계획: PostgreSQL 금융 schema, roles, grants, RLS, indexes.
