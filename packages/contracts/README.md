@@ -5,7 +5,7 @@ Framework-independent runtime validation and TypeScript types for authentication
 
 ## 금융 공개 계약
 
-계좌·카테고리·거래 공개 요청과 응답은 package root에서 import한다. 생성 명령의
+계좌·카테고리·거래·이체 공개 요청과 응답은 package root에서 import한다. 생성 명령의
 idempotencyKey는 재시도 작업 식별자이며 인증 수단이 아니다. 요청 body는 userId를
 받지 않고 API가 검증한 principal에서 사용자를 결정한다.
 
@@ -14,6 +14,9 @@ idempotencyKey는 재시도 작업 식별자이며 인증 수단이 아니다. �
 - 생성: UUID v4 idempotencyKey 필수
 - 수정·삭제: expectedVersion 필수
 - 내부 delegated JWT 계약: @account-book/contracts/internal-api에서만 import
+- 공개 오류 생성: `buildApiError`로 고정 메시지·UUID requestId·허용된 fieldErrors만 만든다.
+- 신뢰되지 않은 오류 정규화: `sanitizeApiErrorInput`으로 안전한 공개 envelope를 만든다.
+- 수신 오류 엄격 검증: `parseApiError`는 이미 정규화된 wire data만 검사하며 입력을 보정하지 않는다.
 
 DB 소유권, category kind 일치, archive 상태, 멱등성 unique와 이체 원자성은 이
 package가 증명하지 않는다. 후속 API·PostgreSQL 계층이 같은 공개 계약을 다시

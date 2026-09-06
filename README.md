@@ -34,8 +34,14 @@ The approved target is a separate PC web and native mobile app, not an installab
 - [Authentication database schema (한국어)](docs/database/auth-schema.ko.md)
 - [Authentication backend operations (한국어)](docs/guides/backend-auth-operations.ko.md)
 - [Platform and OAuth onboarding (한국어)](docs/guides/platform-and-oauth-onboarding.ko.md)
+- [Full-stack development flow (한국어)](docs/guides/full-stack-development-flow.ko.md)
+- [M2.1 public ledger contract design (한국어)](docs/superpowers/specs/2026-08-26-ledger-public-contracts-design.md)
+- [M2.1 public ledger contract implementation plan](docs/superpowers/plans/2026-08-26-ledger-public-contracts.md)
+- [Public API contract inventory (한국어)](docs/api/README.md)
+- [Contracts package boundary (한국어)](packages/contracts/README.md)
 - [Approved application specification](docs/superpowers/specs/2026-07-16-account-book-app-design.md)
 - [Testing guide](docs/guides/testing.md)
+- [Changelog](CHANGELOG.md)
 
 ## Verify the Repository Structure
 
