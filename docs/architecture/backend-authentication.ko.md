@@ -307,7 +307,7 @@ provider boundary가 허용하는 오류 코드는 다음 다섯 개다.
 | shared per-user issuance gate | 비밀번호 변경과 늦은 로그인 race 차단 | 같은 초 token까지 거부할 수 있고 사용자별 lock 경합 발생 |
 | local-first logout orchestration | 외부 장애 중에도 local 접근과 browser cookie를 먼저 제거 | pending 외부 revoke retry worker는 아직 없음 |
 | delegated mutation | body·method·target·scope·request ID를 한 JWT에 결속하고 one-time replay를 소비 | BFF가 침해되면 이미 허용된 least-privilege scope로 짧은 요청을 만들 수 있음. key rotation·kill switch·replay fail-closed·principal+route rate limit으로 완화하지만 hosted 침해 대응 훈련이 필요 |
-| 413 parser allowlist | oversized JSON을 verifier 전에 413으로 돌려 body-limit 경계를 보존 | Fastify `5.10.0` body-limit message와 Nest `11.1.28` HttpException wrapper에 버전 결합. API owner는 둘 중 하나를 업그레이드하거나 parser/filter를 변경하기 전에 oversized·forged-413 integration regression과 allowlist를 재검토해야 하며, 확인 전 배포하지 않음 |
+| 413 parser allowlist | oversized JSON을 verifier 전에 413으로 돌려 body-limit 경계를 보존 | Fastify `5.12.3` body-limit message와 Nest `11.1.28` HttpException wrapper에 버전 결합. API owner는 둘 중 하나를 업그레이드하거나 parser/filter를 변경하기 전에 oversized·forged-413 integration regression과 allowlist를 재검토해야 하며, 확인 전 배포하지 않음 |
 
 ## 관련 문서
 

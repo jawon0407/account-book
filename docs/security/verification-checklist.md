@@ -211,4 +211,4 @@ format
 - [ ] Google/Kakao/`custom:naver` live checklist를 완료했다. 미실행이면 운영 출시를 차단한다.
 - [ ] Evidence commit SHA와 CI head SHA가 같다.
 - [ ] delegated mutation matrix가 exact body 200, one-byte mismatch, query mismatch, read scope, replay, expiry, duplicate raw headers, 32 KiB 초과 413과 verifier 미호출을 확인했다. Platform owner는 hosted Vercel/Heroku secret·key rotation 증거를, Security owner는 BFF 침해 대응 훈련을 **최초 hosted delegated mutation release 전** 완료한다. secret/keyset 배치 또는 BFF delegation scope 변경 전 재검토한다.
-- [ ] Fastify `5.10.0` / Nest `11.1.28` body-too-large 413 allowlist는 API owner가 두 dependency 업그레이드 또는 parser/filter 변경 전에 oversized·forged-413 fail-closed integration regression으로 재검토했다. 이 재검토가 없으면 해당 변경을 배포하지 않는다.
+- [ ] Fastify `5.12.3` / Nest `11.1.28` body-too-large 413 allowlist는 API owner가 두 dependency 업그레이드 또는 parser/filter 변경 전에 oversized·forged-413 fail-closed integration regression으로 재검토했다. 이 재검토가 없으면 해당 변경을 배포하지 않는다.

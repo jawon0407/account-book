@@ -36,6 +36,7 @@ The approved target is a separate PC web and native mobile app, not an installab
 - [Platform and OAuth onboarding (한국어)](docs/guides/platform-and-oauth-onboarding.ko.md)
 - [Approved application specification](docs/superpowers/specs/2026-07-16-account-book-app-design.md)
 - [Testing guide](docs/guides/testing.md)
+- [Changelog](CHANGELOG.md)
 
 ## Verify the Repository Structure
 
