@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 const packagePath = join(rootDir, "package.json");
+const apiPackagePath = join(rootDir, "apps", "api", "package.json");
 const webPackagePath = join(rootDir, "apps", "web", "package.json");
 const e2ePackagePath = join(rootDir, "tests", "e2e", "package.json");
 const tsconfigPath = join(rootDir, "tsconfig.base.json");
@@ -53,8 +54,9 @@ const expectedWorkspaceOverrides = {
   "next@16.2.11>postcss": "8.5.23",
   "nanoid@3.3.16": "3.3.18",
   "find-my-way@9.6.0": "9.7.0",
-  "fast-uri@3.1.4": "3.1.5",
-  "fast-uri@4.1.1": "4.1.2",
+  "@nestjs/platform-fastify@11.1.28>fastify": "5.12.3",
+  "fast-uri@3.1.5": "3.1.7",
+  "fast-uri@4.1.2": "4.1.4",
 };
 
 function tsconfigFiles(directory) {
@@ -114,15 +116,19 @@ function assertPatchedProductionResolutions(lockfile) {
     /^ {2}postcss@8\.5\.23:\r?$/mu,
     /^ {2}nanoid@3\.3\.18:(?: \{\})?\r?$/mu,
     /^ {2}find-my-way@9\.7\.0:\r?$/mu,
-    /^ {2}fast-uri@3\.1\.5:(?: \{\})?\r?$/mu,
-    /^ {2}fast-uri@4\.1\.2:(?: \{\})?\r?$/mu,
+    /^ {2}fastify@5\.12\.3:\r?$/mu,
+    /^ {2}fast-uri@3\.1\.7:(?: \{\})?\r?$/mu,
+    /^ {2}fast-uri@4\.1\.4:(?: \{\})?\r?$/mu,
   ];
   const vulnerableEntries = [
     /^ {2}postcss@8\.5\.22:\r?$/mu,
     /^ {2}nanoid@3\.3\.16:(?: \{\})?\r?$/mu,
     /^ {2}find-my-way@9\.6\.0:\r?$/mu,
+    /^ {2}fastify@5\.10\.0:\r?$/mu,
     /^ {2}fast-uri@3\.1\.4:(?: \{\})?\r?$/mu,
     /^ {2}fast-uri@4\.1\.1:(?: \{\})?\r?$/mu,
+    /^ {2}fast-uri@3\.1\.5:(?: \{\})?\r?$/mu,
+    /^ {2}fast-uri@4\.1\.2:(?: \{\})?\r?$/mu,
   ];
 
   for (const section of resolutionSections) {
@@ -137,6 +143,7 @@ function assertPatchedProductionResolutions(lockfile) {
 
 test("workspace pins strict TypeScript, boundaries, and verification policy", () => {
   const pkg = JSON.parse(readFileSync(packagePath, "utf8"));
+  const apiPackage = JSON.parse(readFileSync(apiPackagePath, "utf8"));
   const webPackage = JSON.parse(readFileSync(webPackagePath, "utf8"));
   const e2ePackage = JSON.parse(readFileSync(e2ePackagePath, "utf8"));
   const tsconfig = JSON.parse(readFileSync(tsconfigPath, "utf8"));
@@ -144,6 +151,7 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
   const npmrc = readFileSync(npmrcPath, "utf8");
 
   assert.deepEqual(pkg.devDependencies, expectedDevDependencies);
+  assert.equal(apiPackage.dependencies.fastify, "5.12.3");
   assert.equal(webPackage.dependencies.next, "16.2.11");
   assert.equal(
     e2ePackage.scripts["test:preflight"],
@@ -202,7 +210,7 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
   assert.deepEqual(allowBuilds, { esbuild: true });
   // Next 16.2.11 pulls sharp 0.34.5 only as an optional image optimizer.
   // The app has no next/image usage, so keep that unused native dependency absent.
-  // Its production PostCSS dependency and Fastify router are pinned to patched releases.
+  // Its production PostCSS dependency and Fastify stack are pinned to patched releases.
   assert.deepEqual(workspaceScalarOverrides(workspace), expectedWorkspaceOverrides);
   for (const policy of ["engine-strict=true", "save-exact=true", "strict-peer-dependencies=true"]) {
     assert.match(npmrc, new RegExp(`^${policy}$`, "m"));
@@ -254,6 +262,10 @@ test("lockfile resolves only patched production dependency versions", () => {
     /patched production dependency resolution/u,
   );
   assert.throws(
+    () => assertPatchedProductionResolutions(lockfile.replaceAll("fastify@5.12.3", "fastify@5.10.0")),
+    /patched production dependency resolution/u,
+  );
+  assert.throws(
     () =>
       assertPatchedProductionResolutions(
         lockfile.replace("\nsnapshots:", "\n  postcss@8.5.22:\n\nsnapshots:"),
@@ -268,24 +280,24 @@ test("lockfile resolves only patched production dependency versions", () => {
     /vulnerable production dependency resolution/u,
   );
   assert.throws(
-    () => assertPatchedProductionResolutions(lockfile.replaceAll("fast-uri@3.1.5", "fast-uri@3.1.4")),
+    () => assertPatchedProductionResolutions(lockfile.replaceAll("fast-uri@3.1.7", "fast-uri@3.1.5")),
     /patched production dependency resolution/u,
   );
   assert.throws(
-    () => assertPatchedProductionResolutions(lockfile.replaceAll("fast-uri@4.1.2", "fast-uri@4.1.1")),
+    () => assertPatchedProductionResolutions(lockfile.replaceAll("fast-uri@4.1.4", "fast-uri@4.1.2")),
     /patched production dependency resolution/u,
   );
   assert.throws(
     () =>
       assertPatchedProductionResolutions(
-        lockfile.replace("\nsnapshots:", "\nsnapshots:\n  fast-uri@3.1.4:"),
+        lockfile.replace("\nsnapshots:", "\nsnapshots:\n  fast-uri@3.1.5:"),
       ),
     /vulnerable production dependency resolution/u,
   );
   assert.throws(
     () =>
       assertPatchedProductionResolutions(
-        lockfile.replace("\nsnapshots:", "\nsnapshots:\n  fast-uri@4.1.1:"),
+        lockfile.replace("\nsnapshots:", "\nsnapshots:\n  fast-uri@4.1.2:"),
       ),
     /vulnerable production dependency resolution/u,
   );
