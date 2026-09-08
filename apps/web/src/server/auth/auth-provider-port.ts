@@ -43,6 +43,10 @@ export class AuthProviderError extends Error {
    * Creates a provider-boundary error containing only an allowlisted code.
    * @param code - The fixed failure code safe to expose to another server layer.
    */
+  /**
+   * 요청이나 제공자 세부값 없이 허용된 오류 코드만 보관합니다.
+   * @param code 공개 가능한 실패 코드; 기본은 제공자 가용성 오류.
+   */
   public constructor(public readonly code: AuthProviderErrorCode = "AUTH_PROVIDER_UNAVAILABLE") {
     super(code);
     this.name = "AuthProviderError";
@@ -59,12 +63,26 @@ export interface AuthProviderPort {
    * @returns An enumeration-resistant verification acknowledgement.
    * @throws {@link AuthProviderError} with a fixed auth failure code.
    */
+  /**
+   * 검증된 이메일·비밀번호로 PKCE 기반 가입을 시작하는 제공자 경계입니다. 구현은 가입 여부가 추측되지 않는 응답을 반환해야 합니다.
+   * @param input 검증된 가입 이메일·비밀번호.
+   * @param redirectUrl 신뢰된 메일 확인 콜백.
+   * @param codeChallenge 서버 PKCE 비밀값의 S256 해시.
+   * @returns 메일 인증 필요 여부 또는 인증된 서버 토큰 쌍.
+   * @throws 고정 코드의 AuthProviderError.
+   */
   signUp(input: SignUpInput, redirectUrl: URL, codeChallenge: string): Promise<EmailAuthResult>;
   /**
    * Exchanges email credentials for one verified provider session.
    * @param input - Validated email and password input.
    * @returns A complete server-only provider token pair.
    * @throws {@link AuthProviderError} with a fixed credential, verification, rate, or availability code.
+   */
+  /**
+   * 이메일·비밀번호를 제공자 세션으로 교환하는 경계입니다.
+   * @param input 검증된 로그인 입력.
+   * @returns 메일 인증된 사용자의 서버 전용 토큰 쌍.
+   * @throws 자격 증명·메일 미인증·요청 제한·가용성 오류.
    */
   signInWithPassword(input: SignInInput): Promise<AuthTokenPair>;
   /**
@@ -73,12 +91,24 @@ export interface AuthProviderPort {
    * @returns A complete verified server-only provider token pair.
    * @throws {@link AuthProviderError} with a fixed transaction or availability code.
    */
+  /**
+   * 메일 콜백 코드와 서버가 보관한 PKCE 비밀값을 함께 교환합니다.
+   * @param input 확인 코드와 대응하는 PKCE 검증값.
+   * @returns 검증된 서버 전용 토큰 쌍.
+   * @throws 트랜잭션 또는 제공자 오류.
+   */
   confirmEmail(input: EmailConfirmationInput): Promise<AuthTokenPair>;
   /**
    * Builds the provider authorization URL without persisting browser state in the SDK.
    * @param input - Approved provider, trusted redirect, and canonical challenge.
    * @returns The validated HTTPS-or-loopback authorization URL.
    * @throws {@link AuthProviderError} with a fixed transaction or availability code.
+   */
+  /**
+   * 허용 제공자와 서버가 정한 콜백·PKCE 챌린지로 인증 이동 URL을 준비합니다.
+   * @param input 제공자·신뢰된 콜백 URL·S256 챌린지.
+   * @returns 검증된 제공자 인증 URL.
+   * @throws 트랜잭션 또는 제공자 오류.
    */
   startOAuth(input: OAuthStartInput): Promise<OAuthStartResult>;
   /**
@@ -87,12 +117,24 @@ export interface AuthProviderPort {
    * @returns A complete verified server-only provider token pair.
    * @throws {@link AuthProviderError} with a fixed transaction, rate, or availability code.
    */
+  /**
+   * OAuth 인증 코드와 서버에 저장한 PKCE 비밀값을 제공자 토큰으로 교환합니다.
+   * @param input OAuth 코드와 대응하는 PKCE 검증값.
+   * @returns 검증된 서버 전용 토큰 쌍.
+   * @throws 트랜잭션·요청 제한·제공자 오류.
+   */
   exchangeOAuthCode(input: OAuthExchangeInput): Promise<AuthTokenPair>;
   /**
    * Refreshes one server-held provider refresh token.
    * @param refreshToken - The decrypted provider refresh token.
    * @returns A complete replacement provider token pair.
    * @throws {@link AuthProviderError} with a fixed credential, rate, or availability code.
+   */
+  /**
+   * 서버가 가진 갱신 토큰으로 제공자에게 새 토큰 쌍을 요청합니다.
+   * @param refreshToken 복호화한 제공자 갱신 토큰.
+   * @returns 새 접근·갱신 토큰 및 사용자·만료 정보.
+   * @throws 자격 증명·요청 제한·가용성 오류.
    */
   refresh(refreshToken: string): Promise<AuthTokenPair>;
   /**
@@ -101,6 +143,13 @@ export interface AuthProviderPort {
    * @param refreshToken - The decrypted provider refresh token.
    * @returns Completion after the provider accepts revocation.
    * @throws {@link AuthProviderError} with a fixed auth failure code.
+   */
+  /**
+   * 제공자 세션의 접근·갱신 토큰을 사용하여 외부 로그아웃을 수행합니다.
+   * @param accessToken 복호화한 제공자 접근 토큰.
+   * @param refreshToken 복호화한 제공자 갱신 토큰.
+   * @returns 제공자 폐기가 완료되면 값 없이 종료합니다.
+   * @throws 제공자 경계의 고정 오류.
    */
   signOut(accessToken: string, refreshToken: string): Promise<void>;
   /**
@@ -111,6 +160,14 @@ export interface AuthProviderPort {
    * @returns Completion after the enumeration-resistant provider request.
    * @throws {@link AuthProviderError} with a fixed credential, rate, or availability code.
    */
+  /**
+   * 서버 소유 PKCE와 신뢰된 콜백으로 복구 메일 발송을 요청합니다.
+   * @param email 검증된 이메일.
+   * @param redirectUrl 신뢰된 복구 콜백 URL.
+   * @param codeChallenge PKCE S256 챌린지.
+   * @returns 계정 존재 여부를 노출하지 않고 완료합니다.
+   * @throws 자격 증명·요청 제한·가용성 오류.
+   */
   requestPasswordReset(email: string, redirectUrl: URL, codeChallenge: string): Promise<void>;
   /**
    * Exchanges one recovery callback code using its server-held verifier.
@@ -118,12 +175,24 @@ export interface AuthProviderPort {
    * @returns Verified server-only recovery credentials and public user data.
    * @throws {@link AuthProviderError} with a fixed transaction, rate, or availability code.
    */
+  /**
+   * 복구 콜백 코드와 대응하는 서버 PKCE 비밀값을 교환합니다.
+   * @param input 복구 코드와 PKCE 검증값.
+   * @returns 서버 전용 복구 토큰과 공개 사용자 정보.
+   * @throws 트랜잭션·요청 제한·제공자 오류.
+   */
   exchangeRecoveryCode(input: RecoveryExchangeInput): Promise<RecoveryContext>;
   /**
    * Updates a recovered user's password after verifying token ownership.
    * @param input - Recovery credentials, expected user, and validated new password.
    * @returns Completion after the matching provider user is updated.
    * @throws {@link AuthProviderError} with a fixed credential, transaction, or availability code.
+   */
+  /**
+   * 복구 자격 증명이 기대한 사용자 소유인지 확인한 뒤 제공자 비밀번호를 변경합니다.
+   * @param input 복구 접근·갱신 토큰, 사용자 ID, 검증된 새 비밀번호.
+   * @returns 비밀번호 변경이 완료되면 값 없이 종료합니다.
+   * @throws 사용자 불일치·입력·제공자 오류.
    */
   updatePassword(input: PasswordUpdateAtProviderInput): Promise<void>;
 }

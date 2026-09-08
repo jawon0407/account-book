@@ -7,9 +7,10 @@ const webDirectory = fileURLToPath(new URL("../../apps/web", import.meta.url));
 const MAX_DIAGNOSTIC_BYTES = 16_384;
 
 /**
- * Keeps process diagnostics bounded so a failing startup cannot flood CI logs.
- * @param current - Previously retained diagnostic text.
- * @param chunk - Newly emitted stdout or stderr data.
+ * 자식 프로세스 진단 문자열을 합치고 앞 16384 코드 단위까지만 보관한다.
+ * @param current - 앞서 모아 둔 stdout/stderr 문자열이다.
+ * @param chunk - 새로 들어온 출력 조각. String으로 변환한다.
+ * @returns 길이를 제한한 새 문자열. 자체 출력이나 프로세스 변경은 없다.
  */
 function appendDiagnostic(current: string, chunk: unknown): string {
   return `${current}${String(chunk)}`.slice(0, MAX_DIAGNOSTIC_BYTES);

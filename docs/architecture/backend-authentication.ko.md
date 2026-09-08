@@ -1,5 +1,7 @@
 # 인증 백엔드 아키텍처
 
+> 2026-09-08 갱신: 이 문서의 SHA별 테스트·Task 기록은 당시 증거로 보존한다. 최신 HEAD `5cc94601c74a1e08f848a0cbc0bde191e7a47f81` CI는 899개 테스트 기록이며 로컬 UUID 보완은 contracts 66개로 별도 검증했다. 현재 금융 CRUD·원장 DB·`/app`·모바일은 미구현이다. 입문자는 [코드 읽기](../guides/code-reading.ko.md), 전체 상태는 [문서 지도](../README.md)를 먼저 읽는다. live Supabase 미검증과 disposable PostgreSQL CI 성공은 서로 다른 상태다.
+
 > **English Summary:** The implemented authentication boundary now includes 14 same-origin Next.js BFF routes, always-Secure opaque cookies, selector-bound CSRF, server-owned OAuth redirect handoff, request-scoped services over a shared database client, encrypted provider credentials, responsive accessible authentication screens, and a NestJS/Fastify API that independently verifies JWT signatures and claims before creating a request principal. Rate-limit use cases and live Supabase/PostgreSQL verification remain unfinished.
 
 이 문서는 현재 코드에 구현된 인증 도메인, 저장소, same-origin HTTP 경계가 왜 이런 구조를 택했는지 설명한다. 구현 근거는 [`apps/web/src/server`](../../apps/web/src/server/), [`apps/web/src/app/api`](../../apps/web/src/app/api/), browser query 계층과 [인증 DB 스키마](../database/auth-schema.ko.md)다.
@@ -10,7 +12,7 @@
 | --- | --- |
 | 구현됨 | 인증 계약과 도메인 서비스, Supabase server-only adapter, opaque session·PostgreSQL 저장소, Next.js BFF 14개 route, request-scoped controller/container, same-origin CSRF, server-owned OAuth redirect handoff, always-Secure cookie, no-store 응답, ky 2 browser client와 TanStack Query binding, Task 11 반응형 인증 UI, Task 12 NestJS/Fastify JWT guard와 `/health`·`/v1/me`, Task 13 disposable DB·ES256 IDP·Playwright 인증 체인과 CI gate, Task 14 browser UI·HTTP response contract 분리, exact app alert 선택자, token-free storage, opaque cookie·logout selector replay의 동일 SHA CI 증거 |
 | 스키마만 구현됨 | `auth_rate_limits` 테이블. 이를 사용하는 rate-limit use case는 없다. |
-| 아직 없음 | 관리자 페이지, rate-limit use case, revocation retry worker |
+| 아직 없음 | 금융 원장 DB/RLS·CRUD API, `/app` 화면, 별도 모바일 앱, 관리자 페이지, persistent rate-limit use case, revocation retry worker |
 | 이 작업 공간에서 미검증 | 실제 hosted Supabase Auth·role·pooler와 Google·Kakao·Naver live 통합 검증 |
 | 품질 후속 | 최종 SHA `93737d3`에서 Security/legacy 53개, contracts 22개, database 12개, API 113개, web 479개, E2E preflight 2개가 로컬에서 통과했다. 같은 SHA의 GitHub security-gate run 15는 disposable PostgreSQL과 Chromium E2E까지 통과했다. 기존 optional branch coverage `91.78%`의 100% threshold 충족은 별도 품질 후속이다. Hosted DB 최소 권한·pooler, persistent rate limit과 Google·Kakao·Naver live OAuth는 여전히 운영 출시 차단 항목이다. |
 | Task 14 동일 SHA 검증 | 최종 검증 코드 SHA `0d996fe726debaa8a2eec10865f63418635d06d8`에서 [push CI](https://github.com/jawon0407/account-book/actions/runs/30252139895)와 [PR CI](https://github.com/jawon0407/account-book/actions/runs/30252146533)가 성공했다. Node 22 CI는 disposable PostgreSQL DB 22개, browser-stage 정책·preflight 7개, 단일 worker Playwright HTTP·UI 8개를 통과했다. 로컬 Node 24는 `pnpm test`의 legacy/security 53개, contracts 22개, database package 12개, API 113개, web 479개, E2E preflight 2개를 통과했으며 PostgreSQL-backed Playwright는 로컬에서 실행하지 않았다. |

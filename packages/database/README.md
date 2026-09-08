@@ -1,5 +1,28 @@
-# Database Package
+# 데이터베이스 패키지
 
-The package exports the typed `app_private` authentication tables and a per-call
-Drizzle node-postgres client factory. The matching SQL migration is the source
-of truth for PostgreSQL privileges and constraints.
+현재 구현된 인증용 PostgreSQL 테이블의 TypeScript 정의와 Drizzle 클라이언트 생성 함수를 공유한다. 테이블 정의는 코드가 열 이름과 자료형을 이해하도록 돕는 설계도이며, import만으로 DB에 테이블이 생기지는 않는다. 실제 테이블·권한·제약 조건은 대응하는 SQL 마이그레이션이 기준이다.
+
+## 현재 들어 있는 기능
+
+- `src/client.ts`의 `createDatabaseClient(connectionString)`: 인증 스키마가 연결된 새 Drizzle node-postgres 클라이언트를 만든다. 빈 연결 문자열은 거부하지만 계정·SSL까지 검사하는 함수는 아니므로 호출 측 환경 설정 검사가 필요하다. 연결 문자열은 로그에 남기지 않는다.
+- `src/schema/auth.ts`: 사용자별 최소 허용 발급 시각, 로그인 세션, OAuth 왕복 요청, 비밀번호 복구, 이메일 확인, 인증 요청 횟수 제한 테이블을 정의한다. 토큰과 PKCE 검증값은 암호화된 자료를 넣을 열로 표현하고, 식별용 해시는 바이너리 열에 둔다. 이 정의가 직접 암호화를 수행하지는 않는다.
+- `src/schema/api.ts`: 위임 JWT 재사용 차단 테이블을 정의한다. 32바이트 토큰 ID 해시와 생성·만료 시각을 저장하며 기본키로 중복 삽입을 막는다. 이 스키마는 별도로 내보내며 클라이언트 생성 함수의 인증 스키마 묶음에는 포함하지 않는다.
+- `src/index.ts`: 다른 패키지가 사용할 생성 함수와 테이블 정의를 내보낸다.
+
+테이블에 붙은 콜백은 DB 제약 조건을 구성한다. 예를 들어 세션의 만료 시각은 생성 시각 뒤여야 하고, 비밀번호 복구는 단계에 맞는 필드 조합과 시간 순서를 가져야 한다. 실제 요청을 처리하거나 행을 저장하는 함수는 아니다.
+
+API의 실제 재사용 차단 쓰기는 `apps/api/src/persistence/postgres-replay-store.ts`에 있다. 단일 INSERT가 한 행을 추가하면 최초 사용으로 인정하고, 기본키 충돌로 추가하지 않으면 재사용으로 거부한다. 만료 행 자동 삭제는 이 패키지에 구현되어 있지 않다.
+
+## 아직 구현하지 않은 범위
+
+계좌·카테고리·거래·이체 테이블과 금융 데이터 저장 로직은 없다. `packages/contracts`에 있는 금융 스키마는 입력/응답 형식 약속일 뿐 DB 구현이 아니다. 사용자별 금융 자원 소유권 확인, 버전 충돌 처리, 생성 요청 중복 처리 방지와 이체의 원자적 저장은 후속 구현이 필요하다.
+
+## 확인 명령
+
+저장소 루트에서 다음 명령으로 단위 테스트·타입 검사·빌드를 실행할 수 있다. 명령 목록은 실행 결과를 보장하지 않으며 실제 DB 권한과 마이그레이션 적용 여부는 별도로 확인해야 한다.
+
+```powershell
+pnpm --filter @account-book/database test
+pnpm --filter @account-book/database typecheck
+pnpm --filter @account-book/database build
+```

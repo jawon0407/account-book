@@ -17,10 +17,21 @@ import {
   scanBlobsForSecrets,
 } from "./secret-scan.mjs";
 
+/**
+ * 테스트 저장소에서 Git 명령을 실제 실행한다. 인자에 따라 커밋 등 임시 상태를 바꿀 수 있다.
+ * @param rootDir - 명령을 실행할 저장소 경로.
+ * @param args - 셸 없이 Git에 전달할 인자 목록.
+ * @returns 앞뒤 공백을 제거한 출력. 실행 실패는 오류로 전파된다.
+ */
 function git(rootDir, ...args) {
   return execFileSync("git", args, { cwd: rootDir, encoding: "utf8" }).trim();
 }
 
+/**
+ * 임시 Git 저장소를 초기화하고 줄바꿈과 테스트 작성자 정보를 로컬 설정에 기록한다.
+ * @param rootDir - 테스트가 만든 임시 디렉터리.
+ * @returns 반환값 없음. 이 디렉터리의 Git 상태를 변경한다.
+ */
 function initGitFixture(rootDir) {
   git(rootDir, "init");
   git(rootDir, "config", "core.autocrlf", "false");
@@ -28,6 +39,12 @@ function initGitFixture(rootDir) {
   git(rootDir, "config", "user.email", "security-test@example.invalid");
 }
 
+/**
+ * 탐지 결과가 경로와 규칙 ID 두 필드만 포함하는지 고정 메시지로 단언한다.
+ * @param findings - 실제 스캐너 결과.
+ * @param expected - 기대하는 순서의 경로·규칙 목록.
+ * @returns 반환값 없음. 값·키·개수 불일치는 상세 비밀값 없이 테스트 실패.
+ */
 function assertSanitizedFindings(findings, expected) {
   const matches =
     Array.isArray(findings) &&
@@ -52,6 +69,11 @@ function assertSanitizedFindings(findings, expected) {
   );
 }
 
+/**
+ * 실제 개인키 대신 탐지 규칙을 자극할 시작 마커 문자열만 만든다.
+ * @param label - RSA·ENCRYPTED 등 선택적인 마커 종류.
+ * @returns 조합한 가짜 개인키 시작 마커.
+ */
 function syntheticPrivateKeyMarker(label = "") {
   return [
     "-----BEGIN ",
@@ -61,6 +83,10 @@ function syntheticPrivateKeyMarker(label = "") {
   ].join("");
 }
 
+/**
+ * 토큰 모양의 가짜 문자열과 방향 제어문자가 든 경로를 만들어 로그 정화를 시험한다.
+ * @returns 합성 경로와 각 구성 문자열. 실제 자격 증명이나 파일을 만들지는 않는다.
+ */
 function credentialShapedFilename() {
   const githubToken = ["gh", "p_", "P".repeat(36)].join("");
   const awsKey = ["AK", "IA", "W".repeat(16)].join("");

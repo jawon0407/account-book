@@ -32,6 +32,11 @@ const zeroArgumentMethods = new Set([
   "assertNoAuthorizationHeaders",
 ]);
 
+/**
+ * 실제 파일 경로를 해석해 심볼릭 링크 우회를 확인할 기준을 만든다.
+ * @param candidate - 검사할 파일 또는 디렉터리 경로다.
+ * @returns realpath 결과 또는 해석 실패 시 undefined. 읽기만 하고 파일을 변경하지 않는다.
+ */
 function canonicalPath(candidate: string): string | undefined {
   try {
     return realpathSync.native(candidate);
@@ -40,12 +45,23 @@ function canonicalPath(candidate: string): string | undefined {
   }
 }
 
+/**
+ * 상대 경로를 계산해 파일이 루트 디렉터리 내부인지 검사한다.
+ * @param directory - 실제 경로로 정규화한 허용 루트다.
+ * @param fileName - 실제 경로로 정규화한 검사 대상이다.
+ * @returns 같은 경로 또는 부모 밖으로 나가지 않는 하위 경로이면 true다.
+ */
 function isInside(directory: string, fileName: string): boolean {
   const relative = path.relative(directory, fileName);
   return relative === ""
     || (!path.isAbsolute(relative) && relative !== ".." && !relative.startsWith(`..${path.sep}`));
 }
 
+/**
+ * AST import가 정확한 safe-ui-test 모듈의 authTest 단일 이름 가져오기인지 검사한다.
+ * @param statement - TypeScript import 선언 노드다.
+ * @returns 별칭·타입 전용·default·추가 바인딩 없는 허용 형태면 true. 코드는 실행하지 않는다.
+ */
 function isApprovedImport(statement: ts.ImportDeclaration): boolean {
   if (statement.attributes !== undefined
     || !ts.isStringLiteral(statement.moduleSpecifier)
@@ -70,6 +86,11 @@ function isApprovedImport(statement: ts.ImportDeclaration): boolean {
     && binding.name.text === "authTest";
 }
 
+/**
+ * 문장에 export 또는 default modifier가 붙었는지 확인한다.
+ * @param statement - 검사할 AST 문장이다.
+ * @returns 두 modifier 중 하나가 있으면 true. 문장 AST를 변경하지 않는다.
+ */
 function hasExportModifier(statement: ts.Statement): boolean {
   if (!ts.canHaveModifiers(statement)) return false;
   return ts.getModifiers(statement)?.some((modifier) =>
@@ -77,6 +98,12 @@ function hasExportModifier(statement: ts.Statement): boolean {
   ) ?? false;
 }
 
+/**
+ * 민감한 소스 원문 대신 고정 분류만 담은 위반 결과를 만든다.
+ * @param category - boundary/import/syntax/capability 중 위반 분류다.
+ * @param capability - 허용 목록 기반 상세 위반 코드다.
+ * @returns category와 capability를 담은 객체다.
+ */
 function violation(
   category: UiFacadeBoundaryViolation["category"],
   capability: UiFacadeBoundaryCapability,
@@ -84,6 +111,12 @@ function violation(
   return { category, capability };
 }
 
+/**
+ * optional chaining·타입 인자 없이 고정 식별자를 직접 호출하는지 검사한다.
+ * @param expression - 검사할 AST 표현식이다.
+ * @param identifier - 기대 호출 이름. 예: authTest다.
+ * @returns 기대 직접 호출이면 true이며 CallExpression으로 타입을 좁힌다.
+ */
 function isDirectCall(expression: ts.Expression, identifier: string): expression is ts.CallExpression {
   return ts.isCallExpression(expression)
     && expression.questionDotToken === undefined
@@ -92,6 +125,12 @@ function isDirectCall(expression: ts.Expression, identifier: string): expression
     && expression.expression.text === identifier;
 }
 
+/**
+ * 문장이 단순 const 문자열 선언인지 검사하고 이름을 모은다.
+ * @param statement - 검사할 최상위 AST 문장이다.
+ * @param names - 이미 확인한 이름 집합. 성공한 선언 이름을 여기에 추가한다.
+ * @returns 전체 선언이 허용되면 true. 뒤 선언 실패 전 추가된 이름은 되돌리지 않으므로 호출자는 실패 시 검사를 중단한다.
+ */
 function recordStringConstants(statement: ts.Statement, names: Set<string>): boolean {
   if (!ts.isVariableStatement(statement)
     || statement.modifiers !== undefined
@@ -115,6 +154,11 @@ function recordStringConstants(statement: ts.Statement, names: Set<string>): boo
   return true;
 }
 
+/**
+ * callback 매개변수가 정확히 {authUi} 구조 분해 하나인지 검사한다.
+ * @param parameter - 타입·초기값·별칭·rest 여부를 검사할 AST 매개변수다.
+ * @returns 허용된 단일 바인딩이면 true. 입력 AST를 바꾸지 않는다.
+ */
 function isApprovedCallbackParameter(parameter: ts.ParameterDeclaration): boolean {
   if (parameter.modifiers !== undefined
     || parameter.dotDotDotToken !== undefined
@@ -134,6 +178,11 @@ function isApprovedCallbackParameter(parameter: ts.ParameterDeclaration): boolea
     && binding.name.text === "authUi";
 }
 
+/**
+ * callback modifier가 async 하나뿐인지 검사한다.
+ * @param callback - 화살표 함수 또는 함수 표현식 AST다.
+ * @returns async modifier가 정확히 하나이면 true다.
+ */
 function hasOnlyAsyncModifier(
   callback: ts.ArrowFunction | ts.FunctionExpression,
 ): boolean {
@@ -141,6 +190,12 @@ function hasOnlyAsyncModifier(
     && callback.modifiers[0]?.kind === ts.SyntaxKind.AsyncKeyword;
 }
 
+/**
+ * callback 문장이 await authUi의 허용 메서드 호출인지 검사한다.
+ * @param statement - 테스트 callback 안의 한 문장이다.
+ * @param stringConstants - 상위에서 검증한 문자열 const 이름 집합이다.
+ * @returns 첫 위반 또는 undefined. submit은 고정 email/password 또는 !wrong 변형만 허용하며 코드를 실행하지 않는다.
+ */
 function inspectFacadeCall(
   statement: ts.Statement,
   stringConstants: ReadonlySet<string>,
@@ -211,6 +266,12 @@ function inspectFacadeCall(
     : violation("capability", "unsafe-argument");
 }
 
+/**
+ * 최상위 authTest 호출의 제목·async callback·fixture·내부 동작을 검사한다.
+ * @param statement - 검사할 최상위 AST 문장이다.
+ * @param stringConstants - 허용된 합성 입력 const 이름 집합이다.
+ * @returns 첫 위반 또는 undefined. 이름 있는 callback·generator·임의 문장은 거부한다.
+ */
 function inspectAuthTestCall(
   statement: ts.Statement,
   stringConstants: ReadonlySet<string>,
@@ -247,6 +308,12 @@ function inspectAuthTestCall(
   return undefined;
 }
 
+/**
+ * 파일 경계·확장자·import·AST를 검사해 UI 테스트의 허용 기능만 남긴다.
+ * @param options - rootDirectory는 허용 루트, rootFile은 검사할 TypeScript 소스 파일이다.
+ * @returns 첫 위반 하나 또는 빈 배열. 파일 읽기/경로 실패는 고정 boundary 위반으로 반환한다.
+ * @remarks 파일을 읽고 AST로 파싱할 뿐 import하거나 테스트를 실행하지 않는다.
+ */
 export function findUiFacadeBoundaryViolations(
   options: UiFacadeBoundaryOptions,
 ): readonly UiFacadeBoundaryViolation[] {

@@ -21,6 +21,12 @@ const validInput = {
   userId: "123e4567-e89b-42d3-a456-426614174002",
 } as const;
 
+/**
+ * P-256 테스트 키와 고정 시각·난수·UUID로 결과를 비교 가능한 서명기를 만듭니다.
+ * @param override 잘못된 설정이나 다른 난수를 시험할 의존성 덮어쓰기.
+ * @returns 테스트용 DelegatedJwtSigner.
+ * @throws 덮어쓴 설정을 생성자가 거부하면 설정 오류.
+ */
 function signer(
   override: Partial<Readonly<{
     keyId: string;

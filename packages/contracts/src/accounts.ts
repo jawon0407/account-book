@@ -26,6 +26,11 @@ export const CreateAccountInputSchema = z.object({
 }).strict();
 export type CreateAccountInput = z.infer<typeof CreateAccountInputSchema>;
 
+/**
+ * 계좌 이름 변경 입력을 검사한다. refine은 expectedVersion만 있고 실제 변경값이 없는 요청을 거부한다.
+ * parse 성공 시 정리된 입력을 반환하며 이름이 없으면 ACCOUNT_UPDATE_EMPTY 검증 오류를 만든다.
+ * 버전 일치나 계좌 소유권 확인은 향후 금융 API의 책임이다.
+ */
 export const UpdateAccountInputSchema = z.object({
   expectedVersion: ExpectedVersionSchema,
   name: AccountNameSchema.optional(),
@@ -39,7 +44,7 @@ export const ArchiveAccountInputSchema = z.object({
 }).strict();
 export type ArchiveAccountInput = z.infer<typeof ArchiveAccountInputSchema>;
 
-/** Direction prevents clients from encoding liabilities with negative amounts. */
+/** 양수 금액과 자산/부채 방향을 분리한 시작 잔액 입력 계약. 실제 잔액을 기록하는 기능은 아니다. */
 export const SetOpeningBalanceInputSchema = z.object({
   accountId: LedgerIdSchema,
   amountKrw: PositiveKrwAmountSchema,

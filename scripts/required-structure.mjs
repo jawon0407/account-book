@@ -35,15 +35,13 @@ export const REQUIRED_PATHS = Object.freeze([
 ]);
 
 /**
- * Returns repository contract paths that do not exist below a root directory.
- *
- * Each path is checked independently so callers receive the complete missing
- * set in the same deterministic order as the supplied contract.
- *
- * @param {string} rootDir Absolute or relative directory used as the contract root.
- * @param {readonly string[]} [requiredPaths=REQUIRED_PATHS] Paths to verify.
- * @returns {Promise<string[]>} Missing paths in contract order.
- * @throws {TypeError} If `rootDir` is empty or a contract path is not a string.
+ * 저장소에 반드시 있어야 할 경로를 병렬로 확인하고 없는 경로를 입력 순서대로 모은다.
+ * 파일 내용을 읽거나 만들지 않고 접근 가능 여부만 확인한다.
+ * @param {string} rootDir 필수 경로의 기준이 될 절대 또는 상대 디렉터리.
+ * @param {readonly string[]} [requiredPaths=REQUIRED_PATHS] 확인할 상대 경로 목록.
+ * @returns {Promise<string[]>} 존재하지 않는 경로 목록. 모두 있으면 빈 배열.
+ * @throws {TypeError} 루트가 빈 값이거나 경로 목록에 문자열이 아닌 값이 있으면 발생한다.
+ * @throws 파일 부재(ENOENT) 이외의 접근 오류는 누락으로 숨기지 않고 호출자에게 전달한다.
  */
 export async function findMissingPaths(
   rootDir,

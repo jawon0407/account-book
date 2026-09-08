@@ -18,6 +18,11 @@ const exactEnvironment = {
   TEST_DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/account_book_test",
 } as const;
 
+/**
+ * DB 접속 없이 쿼리 순서와 관리자 신원을 재현하는 대역을 만든다.
+ * @param user - current_user 응답. 기본값은 postgres이며 권한 거부 분기를 시험할 때 바꾼다.
+ * @returns admin mock과 수집된 queries 배열. query callback은 SQL을 기록하고 신원 조회에만 고정 행을 반환한다.
+ */
 function fakeAdmin(user = "postgres") {
   const queries: string[] = [];
   const admin: Admin = {

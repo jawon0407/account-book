@@ -14,6 +14,11 @@ const publicKey = (() => {
   return Buffer.from(key.export({ format: "der", type: "spki" })).toString("base64url");
 })();
 
+/**
+ * 정상 환경 변수 기본값에 일부 잘못된 값을 덮어써 설정 경계 테스트 입력을 만든다.
+ * @param overrides - 기본값에서 바꿀 환경 변수.
+ * @returns 실제 process.env를 변경하지 않는 새 설정 객체.
+ */
 function validEnvironment(overrides: Readonly<Record<string, string>> = {}): Record<string, string> {
   return {
     API_DATABASE_URL: "postgresql://app_api:local-test-password@127.0.0.1:5432/account_book?sslmode=disable",

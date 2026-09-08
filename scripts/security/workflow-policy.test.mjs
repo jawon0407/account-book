@@ -22,24 +22,50 @@ const disposableDatabaseUrl =
 const postgresImage =
   "postgres:17@sha256:cb875afe6d2e8593c28c22d37d0fd7aaf035c43a42e2f7792cd4c09ceb6beac5";
 
+/**
+ * 줄바꿈 CRLF만 LF로 통일한 뒤 워크플로 전체의 해시를 계산한다.
+ * @param source - 검토 대상 YAML 원문.
+ * @returns 승인된 원문 해시와 비교할 SHA-256 16진수 문자열.
+ */
 function canonicalWorkflowDigest(source) {
   const normalizedSource = source.replace(/\r\n/gu, "\n");
   return createHash("sha256").update(normalizedSource, "utf8").digest("hex");
 }
 
+/**
+ * 줄 시작 또는 공백 뒤 #부터를 주석으로 간주해 제거한다. 완전한 YAML 파서가 아닌 테스트용 단순 규칙이다.
+ * @param line - YAML 한 줄.
+ * @returns 단순 주석과 뒤 공백을 제거한 줄.
+ */
 function stripYamlComment(line) {
   const comment = /(^|\s)#/u.exec(line);
   return (comment ? line.slice(0, comment.index) : line).trimEnd();
 }
 
+/**
+ * 주석과 빈 줄을 제외해 실제 설정 비교에 필요한 줄만 남긴다.
+ * @param lines - YAML 줄 목록.
+ * @returns 들여쓰기는 유지한 유효 줄 목록.
+ */
 function activeLines(lines) {
   return lines.map(stripYamlComment).filter((line) => line.trim().length > 0);
 }
 
+/**
+ * 블록 경계 판단에 사용할 앞쪽 공백 수를 센다.
+ * @param line - YAML 한 줄.
+ * @returns 연속된 선행 스페이스 개수. 탭은 세지 않는다.
+ */
 function indentation(line) {
   return /^ */u.exec(line)[0].length;
 }
 
+/**
+ * 들여쓰기 없는 key: 행부터 다음 최상위 행 전까지를 블록으로 모은다.
+ * @param source - YAML 전체 원문.
+ * @param key - 찾을 최상위 키 이름.
+ * @returns 일치하는 원문 줄 배열들의 목록.
+ */
 function topLevelBlocks(source, key) {
   const lines = source.split(/\r?\n/u);
   const blocks = [];
@@ -64,12 +90,23 @@ function topLevelBlocks(source, key) {
   return blocks;
 }
 
+/**
+ * 최상위 키가 정확히 한 번 선언되었는지 단언한 뒤 블록을 돌려준다.
+ * @param source - YAML 전체 원문.
+ * @param key - 중복 없이 존재해야 할 키.
+ * @returns 단일 블록의 원문 줄 목록. 없거나 중복이면 테스트 실패.
+ */
 function singleTopLevelBlock(source, key) {
   const blocks = topLevelBlocks(source, key);
   assert.equal(blocks.length, 1, `expected one top-level ${key} block`);
   return blocks[0];
 }
 
+/**
+ * 단순 uses: 선언에서 GitHub Action 참조를 추출한다.
+ * @param lines - 검사할 YAML 줄 목록.
+ * @returns action@SHA 등 선언된 참조 문자열 목록.
+ */
 function actionReferences(lines) {
   return activeLines(lines).flatMap((line) => {
     const match = /^\s*(?:-\s*)?uses:\s+(\S+)$/u.exec(line);
@@ -77,6 +114,12 @@ function actionReferences(lines) {
   });
 }
 
+/**
+ * 주석을 제외한 원문에서 따옴표·흐름식 객체로 쓴 키도 정규식으로 찾는다.
+ * @param source - YAML 원문.
+ * @param key - 내부 테스트가 지정한 키 이름.
+ * @returns 발견된 정규식 일치 목록. 임의 YAML 의미를 해석하지는 않는다.
+ */
 function yamlKeyOccurrences(source, key) {
   const lines = activeLines(source.split(/\r?\n/u));
   const keyPattern = new RegExp(
@@ -86,6 +129,11 @@ function yamlKeyOccurrences(source, key) {
   return lines.flatMap((line) => [...line.matchAll(keyPattern)]);
 }
 
+/**
+ * write와 write-all 권한값 표기를 찾아 읽기 전용 정책을 우회하는 설정을 검사한다.
+ * @param source - YAML 원문.
+ * @returns 주석을 제외한 쓰기 권한값 정규식 일치 목록.
+ */
 function dangerousPermissionValues(source) {
   const valuePattern =
     /(?:^|[\s:{,[])\s*(?:"(?:write|write-all)"|'(?:write|write-all)'|write|write-all)(?=\s*(?:[,}\]]|$))/gu;
@@ -94,6 +142,11 @@ function dangerousPermissionValues(source) {
   ]);
 }
 
+/**
+ * 동적 접근 표기에도 포함되는 secrets 단어를 찾아 저장소 비밀값 참조를 검사한다.
+ * @param source - YAML 원문.
+ * @returns 주석 밖에서 발견한 secrets 토큰 일치 목록.
+ */
 function activeSecretTokens(source) {
   const secretPattern = /(?:^|[^A-Za-z0-9_-])secrets(?=$|[^A-Za-z0-9_-])/gu;
   return activeLines(source.split(/\r?\n/u)).flatMap((line) => [
@@ -101,6 +154,11 @@ function activeSecretTokens(source) {
   ]);
 }
 
+/**
+ * steps: 안에서 두 칸 더 들여쓴 목록 항목을 기준으로 실행 단계들을 나눈다.
+ * @param source - 워크플로 YAML 원문.
+ * @returns 각 단계에 해당하는 원문 줄 배열 목록.
+ */
 function stepBlocks(source) {
   const lines = source.split(/\r?\n/u);
   const blocks = [];
@@ -142,6 +200,12 @@ function stepBlocks(source) {
   return blocks;
 }
 
+/**
+ * 지정한 중첩 키 뒤의 더 깊게 들여쓴 설정 행을 추출한다.
+ * @param block - 단계 등 상위 블록의 줄 목록.
+ * @param key - with 또는 env 같은 중첩 키.
+ * @returns 주석·빈 줄을 제외한 내부 줄. 키가 없으면 테스트 실패.
+ */
 function nestedBlockContent(block, key) {
   const keyIndex = block.findIndex(
     (line) => stripYamlComment(line).trim() === `${key}:`,
@@ -164,6 +228,11 @@ function nestedBlockContent(block, key) {
   return content;
 }
 
+/**
+ * run: >- 뒤의 여러 줄 명령을 공백으로 이어 실행 순서 비교용 문자열로 만든다.
+ * @param block - 검사할 단계의 원문 줄 목록.
+ * @returns 접힌 명령 문자열. 실행하지 않으며 해당 run 선언이 없으면 테스트 실패.
+ */
 function foldedRunCommand(block) {
   const runIndex = block.findIndex(
     (line) => stripYamlComment(line).trim() === "run: >-",
@@ -300,6 +369,11 @@ test("security workflow runs install and every security gate in reviewed order",
 test("database preparation and browser gates use only the disposable server-side database boundary", () => {
   const source = readFileSync(workflowPath, "utf8");
   const steps = stepBlocks(source);
+  /**
+   * 정확한 단일 행 run 명령이 있는 단계를 찾는 지역 헬퍼다.
+   * @param command - 찾을 실행 명령 문자열.
+   * @returns 처음 일치한 단계 또는 undefined. 명령은 실행하지 않는다.
+   */
   const stepFor = (command) => steps.find((block) => activeLines(block).some((line) => line.trim() === `run: ${command}`));
   const database = stepFor("pnpm test:db");
   const preparation = stepFor("pnpm --filter @account-book/database-tests prepare:e2e");

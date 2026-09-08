@@ -5,6 +5,11 @@ import { createApiFastifyAdapter, registerRequestContext } from "./request-conte
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 const verifiedId = "123e4567-e89b-12d3-a456-426614174002";
 
+/**
+ * 등록되는 onSend 훅을 잡아 직접 호출하고 응답 추적 헤더를 관찰한다.
+ * @param request - 정상·잘못된 ID를 담은 요청 대역.
+ * @returns 훅이 설정한 X-Request-Id. 실제 HTTP 응답은 보내지 않는다.
+ */
 function run(request: Record<string, unknown>): string | undefined {
   let hook: ((request: never, reply: never, payload: unknown, done: () => void) => void) | undefined;
   const server = { addHook: vi.fn((_name: string, value: typeof hook) => { hook = value; }) } as unknown as FastifyInstance;

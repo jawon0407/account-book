@@ -24,6 +24,11 @@ const now = 1_800_000_000;
 
 class MemoryReplayStore implements ReplayStore {
   private readonly entries = new Set<string>();
+  /**
+   * 같은 토큰의 두 번째 사용을 막는 최소 메모리 저장소 대역이다.
+   * @param digest - 검증기가 계산한 토큰 ID 해시.
+   * @returns 처음 저장하면 true, 이미 저장했으면 false.
+   */
   public async consume(digest: Uint8Array): Promise<boolean> {
     const value = Buffer.from(digest).toString("hex");
     if (this.entries.has(value)) return false;
@@ -32,6 +37,11 @@ class MemoryReplayStore implements ReplayStore {
   }
 }
 
+/**
+ * 본문 없는 GET 요청과 고정 요청 ID를 묶는 해시를 만든다.
+ * @param target - 테스트할 경로와 쿼리.
+ * @returns JWT rbh 클레임에 넣을 SHA-256 base64url 값.
+ */
 function binding(target: string): string {
   return createHash("sha256").update(canonicalDelegatedRequest({
     method: "GET",
@@ -70,6 +80,12 @@ describe("delegated API authentication boundary", () => {
 
   afterAll(async () => { await app.close(); });
 
+  /**
+   * 현재 사용자 조회 테스트에 사용할 새 토큰 ID의 ES256 JWT를 발급한다.
+   * @param target - 요청 결합 해시에 넣을 경로.
+   * @param rid - 토큰의 rid 클레임. 결합 해시는 별도 고정 requestId를 사용한다.
+   * @returns 테스트 키로 서명한 위임 토큰.
+   */
   async function token(target = "/v1/me", rid = requestId): Promise<string> {
     return new SignJWT({
       aud: "urn:account-book:api", exp: now + 30, iat: now, iss: "urn:account-book:bff",
@@ -167,6 +183,7 @@ describe("delegated API authentication boundary", () => {
     });
     const end = vi.fn(async () => undefined);
     poolConstructor.mockReset();
+    // PoolMock은 실제 DB 연결 없이 종료·쿼리 호출을 관찰할 대역을 생성한다.
     poolConstructor.mockImplementation(function PoolMock() { return { end, query: vi.fn() }; });
     Object.assign(process.env, {
       API_DATABASE_URL: "postgresql://app_api:test-password@127.0.0.1:5432/account_book?sslmode=disable",

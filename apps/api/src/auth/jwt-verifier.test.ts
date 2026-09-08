@@ -42,6 +42,15 @@ beforeAll(async () => {
   ({ privateKey: wrongAlgorithmPrivateKey, publicKey: wrongAlgorithmPublicKey } = await deterministicEcPair("secp384r1", "P-384", "ES384", "0000000000000000000000000000000000000000000000000000000000000001", 48));
 });
 
+/**
+ * 고정 비밀 스칼라로 항상 같은 테스트용 EC 키 쌍을 만든다. 운영 키로 사용하면 안 된다.
+ * @param curve - Node ECDH 곡선 이름.
+ * @param crv - JWK 곡선 이름.
+ * @param algorithm - JOSE 서명 알고리즘.
+ * @param privateScalarHex - 테스트 전용 고정 비밀 스칼라의 16진수 표기.
+ * @param coordinateBytes - 공개키 x/y 좌표의 바이트 길이.
+ * @returns 가져온 개인키와 공개키. 잘못된 암호 설정은 키 생성 오류로 전파된다.
+ */
 async function deterministicEcPair(curve: "prime256v1" | "secp384r1", crv: "P-256" | "P-384", algorithm: "ES256" | "ES384", privateScalarHex: string, coordinateBytes: number): Promise<Readonly<{ privateKey: CryptoKey; publicKey: CryptoKey }>> {
   const scalar = Buffer.from(privateScalarHex, "hex");
   const ecdh = createECDH(curve);
@@ -55,10 +64,20 @@ async function deterministicEcPair(curve: "prime256v1" | "secp384r1", crv: "P-25
   };
 }
 
+/**
+ * 서명 대상과 실제 요청을 비교하기 위한 기본 요청 정보를 만든다.
+ * @param overrides - 메서드·URL·본문·ID 중 바꿀 값.
+ * @returns 덮어쓰기가 적용된 새 요청 정보.
+ */
 function request(overrides: Partial<RequestDescriptor> = {}): RequestDescriptor {
   return { method: "POST", target: "/v1/me?a=1&b=2", contentType: "application/json; charset=utf-8", body: Buffer.from('{"x":1}'), requestId, ...overrides };
 }
 
+/**
+ * 실제 본문 해시를 포함한 정규 요청 문자열의 해시를 계산한다.
+ * @param value - JWT에 묶을 테스트 요청 정보.
+ * @returns rbh 클레임에 넣을 SHA-256 base64url 문자열.
+ */
 function binding(value: RequestDescriptor): string {
   return createHash("sha256").update(canonicalDelegatedRequest({
     method: value.method,
@@ -69,6 +88,15 @@ function binding(value: RequestDescriptor): string {
   })).digest("base64url");
 }
 
+/**
+ * 정상 기본 클레임에 변경값을 적용해 경계 조건용 JWT를 실제 서명한다.
+ * @param value - 요청 결합 해시를 계산할 정보.
+ * @param overrides - 누락·불일치 상황을 만들 클레임 변경값.
+ * @param header - 보호 헤더.
+ * @param signingKey - 서명에 사용할 테스트 개인키.
+ * @param signingOptions - crit 등 JOSE 서명 옵션.
+ * @returns 서명된 JWT 문자열. 서명 불가 입력은 JOSE 오류로 전파된다.
+ */
 async function token(value = request(), overrides: Readonly<Record<string, unknown>> = {}, header: Record<string, unknown> = { alg: "ES256", typ: "at+jwt", kid: "key-1" }, signingKey = privateKey, signingOptions: Readonly<{ crit?: Record<string, boolean> }> = {}): Promise<string> {
   return new SignJWT({
     aud: "urn:account-book:api",
@@ -86,6 +114,12 @@ async function token(value = request(), overrides: Readonly<Record<string, unkno
   }).setProtectedHeader(header).sign(signingKey, signingOptions);
 }
 
+/**
+ * alg 헤더가 없지만 ECDSA 서명 바이트는 유효한 특수 토큰을 만든다.
+ * @param value - 서명에 묶을 요청 정보.
+ * @param overrides - 기본 페이로드에 덮어쓸 클레임.
+ * @returns 정책상 거부되어야 하는 alg 누락 JWT.
+ */
 async function tokenWithoutAlgorithm(value = request(), overrides: Readonly<Record<string, unknown>> = {}): Promise<string> {
   const signed = await token(value, overrides);
   const [, payload] = signed.split(".");
@@ -95,6 +129,13 @@ async function tokenWithoutAlgorithm(value = request(), overrides: Readonly<Reco
   return `${header}.${payload}.${signature}`;
 }
 
+/**
+ * 음성 테스트 토큰도 암호학적 서명 자체는 유효함을 먼저 단언한다.
+ * @param signed - 확인할 서명 토큰.
+ * @param key - 대응하는 공개키.
+ * @param algorithm - 이 확인에서 허용할 알고리즘.
+ * @returns 검증 단언이 끝나면 완료되는 Promise. 유효하지 않으면 테스트가 실패한다.
+ */
 async function expectSignedToken(signed: string, key: CryptoKey, algorithm: "ES256" | "ES384"): Promise<void> {
   await expect(jwtVerify(signed, key, {
     algorithms: [algorithm],
@@ -109,6 +150,11 @@ class MemoryReplayStore implements ReplayStore {
   public calls = 0;
   public failure: Error | undefined;
 
+  /**
+   * 메모리에서 토큰 사용과 호출 횟수를 기록하고 설정된 저장소 장애를 흉내 낸다.
+   * @param digest - 재사용 여부를 구분할 해시 바이트.
+   * @returns 처음이면 true, 이미 기록되었으면 false. failure가 설정되면 해당 오류를 던진다.
+   */
   public async consume(digest: Uint8Array): Promise<boolean> {
     this.calls += 1;
     if (this.failure) throw this.failure;
@@ -119,6 +165,12 @@ class MemoryReplayStore implements ReplayStore {
   }
 }
 
+/**
+ * 고정 시계와 공개키를 넣은 검증기와 관찰용 저장소를 함께 만든다.
+ * @param store - 호출 횟수와 중복을 관찰할 메모리 저장소.
+ * @param options - 중지 스위치·허용 키·키 맵의 테스트 변경값.
+ * @returns 저장소와 검증기를 묶은 객체.
+ */
 function verifier(store = new MemoryReplayStore(), options: Partial<{ authDisabled: boolean; acceptedKids: readonly string[]; keyring: Record<string, CryptoKey> }> = {}) {
   return {
     store,

@@ -136,8 +136,16 @@ test("rejects Reflect.construct with a custom newTarget", () => {
   const customPrototype = {
     cause: { sentinel },
     path: `C:\\sensitive\\${sentinel}`,
+    /**
+     * 위조 prototype이 직렬화로 비밀을 드러내는 상황을 재현한다.
+     * @returns 합성 sentinel 객체. 안전 오류 생성이 이 prototype을 받아들이면 안 된다.
+     */
     toJSON: () => ({ sentinel }),
   };
+  /**
+   * Reflect.construct에 다른 prototype을 제공하는 생성자 대역이다.
+   * @returns 반환값 없음. 빈 본문이며 prototype은 테스트가 별도로 바꾼다.
+   */
   function CustomNewTarget(): void {}
   CustomNewTarget.prototype = customPrototype;
 

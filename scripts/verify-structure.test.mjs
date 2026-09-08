@@ -12,11 +12,10 @@ const cliPath = fileURLToPath(
 );
 
 /**
- * Runs the public structure-verification CLI against an isolated fixture.
- *
- * @param {string} rootDir Fixture directory treated as the repository root.
- * @param {readonly string[]} requiredPaths Contract paths passed to the CLI.
- * @returns {import("node:child_process").SpawnSyncReturns<string>} Process evidence.
+ * 임시 구조를 저장소 루트로 삼아 실제 구조 검증 CLI를 별도 Node 프로세스로 실행한다.
+ * @param {string} rootDir 테스트용 디렉터리.
+ * @param {readonly string[]} requiredPaths CLI에 반복 옵션으로 전달할 필수 경로들.
+ * @returns {import("node:child_process").SpawnSyncReturns<string>} 종료 상태와 출력을 담은 검증 증거.
  */
 function runVerifier(rootDir, requiredPaths) {
   const args = [cliPath, "--root", rootDir];

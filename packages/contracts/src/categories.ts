@@ -24,6 +24,10 @@ export const CreateCategoryInputSchema = z.object({
 }).strict();
 export type CreateCategoryInput = z.infer<typeof CreateCategoryInputSchema>;
 
+/**
+ * 이름 또는 정렬 순서가 실제로 제공된 수정 요청만 허용한다. 두 값 모두 없으면 refine이 거부한다.
+ * sortOrder가 0이면 유효한 변경값이며 undefined와 구분한다. DB 버전 비교는 여기서 하지 않는다.
+ */
 export const UpdateCategoryInputSchema = z.object({
   expectedVersion: ExpectedVersionSchema,
   name: CategoryNameSchema.optional(),
@@ -39,7 +43,7 @@ export const ArchiveCategoryInputSchema = z.object({
 }).strict();
 export type ArchiveCategoryInput = z.infer<typeof ArchiveCategoryInputSchema>;
 
-/** A UUID alone cannot prove ownership; category and transaction kinds require an ownership-scoped lookup. */
+/** 응답 모양만 검사한다. UUID만으로 소유권을 증명할 수 없어 향후 API가 사용자별 조회와 종류 일치를 확인해야 한다. */
 export const CategorySchema = z.object({
   archivedAt: TimestampSchema.nullable(),
   createdAt: TimestampSchema,

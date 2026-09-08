@@ -24,12 +24,11 @@ const userId = "123e4567-e89b-42d3-a456-426614174001";
 const providerRefreshToken = "e2e-provider-refresh-token-must-never-reach-browser";
 
 /**
- * Reads one response body exactly once, then checks raw and decoded credential
- * material before returning parsed data for any structural assertion.
- * @param response - Playwright response whose body belongs to the HTTP project.
- * @param forbidden - Exact synthetic and live secrets known at response time.
- * @param options - Narrow public-email or CSRF-key allowance for this endpoint.
- * @returns Retained text and parsed value, neither of which enters assertion diffs.
+ * 응답 본문을 한 번 읽고 원문·파싱값의 자격증명 누출을 검사한다.
+ * @param response - HTTP 계약 테스트가 소유한 Playwright 응답이다.
+ * @param forbidden - 이미 알고 있는 합성/현재 세션 비밀 문자열 목록이다.
+ * @param options - 공개 이메일 또는 CSRF 키의 제한된 허용 범위다.
+ * @returns {text,value} Promise. assertion에는 원문 대신 검사 boolean만 전달하며 검증 실패는 테스트를 중단한다.
  */
 async function readSafeJson(
   response: APIResponse,
@@ -52,10 +51,11 @@ async function readSafeJson(
 }
 
 /**
- * Re-checks retained parsed/text data when a newly learned selector becomes secret.
- * @param body - Previously read sign-in body retained only inside the test process.
- * @param forbidden - Expanded exact-secret set including the live selector.
- * @param options - Sign-in public-email allowance constrained by decoded JSON path.
+ * 새 selector를 알게 된 뒤 앞서 보관한 응답에 그 값이 없었는지 다시 검사한다.
+ * @param body - 현재 테스트 메모리의 text/value 응답 쌍이다.
+ * @param forbidden - 새 selector까지 포함한 비밀 문자열 목록이다.
+ * @param options - 로그인 공개 이메일의 경로 제한 허용값이다.
+ * @returns 반환값 없음. 누출이 있으면 원문을 diff로 출력하지 않는 boolean assertion이 실패한다.
  */
 function expectLeakFreeRetainedBody(
   body: Readonly<{ text: string; value: unknown }>,
@@ -73,11 +73,11 @@ function expectLeakFreeRetainedBody(
 }
 
 /**
- * Fetches a selector-bound CSRF token into process memory for one immediate mutation.
- * @param api - Isolated Playwright request context that owns its cookie jar.
- * @param forbidden - Exact secrets known before the CSRF response is received.
- * @param context - Optional server-side selector context required by logout.
- * @returns The short-lived CSRF token without logging or persisting it.
+ * 쿠키 문맥에 결속된 CSRF 증표를 가져오고 공개 응답 계약을 검사한다.
+ * @param api - 독립 쿠키 저장소를 가진 요청 context다.
+ * @param forbidden - 응답을 받기 전에 알고 있는 비밀 문자열 목록이다.
+ * @param context - 로그아웃 시 session을 지정한다. 생략하면 일반 증표다.
+ * @returns 검사한 증표 문자열 Promise. HTTP/계약 실패는 전파하며 증표를 출력/영구 저장하지 않는다.
  */
 async function csrfToken(
   api: APIRequestContext,
@@ -94,9 +94,9 @@ async function csrfToken(
 }
 
 /**
- * Builds the exact same-origin Fetch Metadata boundary accepted for JSON mutations.
- * @param token - Fresh CSRF token bound to the request context's current selector.
- * @returns Immutable headers for one authenticated or pre-auth mutation.
+ * 같은 출처 JSON 변경 요청의 Fetch Metadata와 CSRF 헤더를 구성한다.
+ * @param token - 현재 요청 context의 selector에 결속된 새 CSRF 증표다.
+ * @returns 읽기 전용 타입의 헤더 객체. 실제 전송이나 런타임 동결은 하지 않는다.
  */
 function mutationHeaders(token: string): Readonly<Record<string, string>> {
   return {
@@ -110,10 +110,10 @@ function mutationHeaders(token: string): Readonly<Record<string, string>> {
 }
 
 /**
- * Attempts local session revocation during cleanup without replacing the primary test failure.
- * @param api - Request context whose cookie jar may contain an authenticated session.
- * @param forbidden - Exact secrets already known to the interrupted test flow.
- * @returns Resolves after attempting the best-effort revocation without logging session material.
+ * 테스트 정리 중 세션 폐기를 시도하되 원래 테스트 실패를 덮어쓰지 않는다.
+ * @param api - 로그인 쿠키가 남아 있을 수 있는 요청 context다.
+ * @param forbidden - 현재 테스트가 알고 있는 비밀 문자열 목록이다.
+ * @returns 정리 시도 완료 Promise. CSRF 조회와 로그아웃 POST를 하며 실패는 삼킨다.
  */
 async function bestEffortSignOut(api: APIRequestContext, forbidden: readonly string[]): Promise<void> {
   try {

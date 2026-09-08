@@ -34,6 +34,10 @@ it("implements every provider operation only from explicit deterministic results
 const bridgeInput = { email: "verified@example.test", password: "correct horse battery staple" };
 const bridgeUser = { id: "123e4567-e89b-42d3-a456-426614174001", email: bridgeInput.email, emailVerified: true };
 
+/**
+ * 현재보다 1초 전 발급되어 5분 수명을 갖는 정상 테스트 제공자 응답을 만듭니다. 실제 인증 토큰은 아닙니다.
+ * @returns 검증된 사용자 형식과 가짜 토큰을 담은 캐시 금지 JSON Response.
+ */
 function validBridgeResponse(): Response {
   const issuedAtSeconds = Math.floor(Date.now() / 1000) - 1;
   return Response.json({

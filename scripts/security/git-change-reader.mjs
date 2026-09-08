@@ -8,13 +8,12 @@ const MAX_BLOB_BYTES = 5 * 1024 * 1024;
 const SHA_PATTERN = /^[0-9a-f]{40}$/iu;
 
 /**
- * Runs a read-only Git command while keeping Git stderr out of public diagnostics.
- *
- * @param {string} rootDir Repository working directory.
- * @param {string[]} args Git arguments passed without shell interpolation.
- * @param {BufferEncoding|null} [encoding=null] Optional stdout text encoding.
- * @returns {Buffer|string} Captured stdout in the requested representation.
- * @throws {SecurityGateError} When Git fails or exceeds the bounded output buffer.
+ * 읽기용 Git 명령을 동기 실행하고 표준 출력을 수집한다. Git의 원래 오류 출력은 공개하지 않는다.
+ * @param {string} rootDir Git 명령을 실행할 저장소 디렉터리.
+ * @param {string[]} args 셸 해석 없이 배열로 전달할 내부 Git 명령 인자.
+ * @param {BufferEncoding|null} [encoding=null] 텍스트로 읽을 인코딩. null이면 바이트 그대로 읽는다.
+ * @returns {Buffer|string} 요청한 형식의 표준 출력.
+ * @throws {SecurityGateError} Git 실행 실패나 제한된 출력 버퍼 초과 시 GIT_READ_FAILED 오류.
  */
 function runGit(rootDir, args, encoding = null) {
   const result = spawnSync("git", args, {
@@ -33,12 +32,11 @@ function runGit(rootDir, args, encoding = null) {
 }
 
 /**
- * Validates a public range before any value can be interpreted as a Git option/revision.
- *
- * @param {string|null} base Previously remote commit, or null for a new ref.
- * @param {string} head Commit being pushed.
- * @returns {void}
- * @throws {SecurityGateError} When either revision is not a full Git SHA.
+ * 커밋 범위를 Git에 넘기기 전에 40자리 SHA 형식인지 검사해 옵션 문자열 주입을 막는다.
+ * @param {string|null} base 기존 원격 커밋. 새 참조여서 전체 이력을 볼 때는 null.
+ * @param {string} head 푸시할 끝 커밋.
+ * @returns {void} 형식이 유효하면 반환값 없이 종료한다. 커밋 존재 여부는 검사하지 않는다.
+ * @throws {SecurityGateError} 허용되지 않은 SHA 형식이면 INVALID_GIT_RANGE 오류.
  */
 function assertValidRange(base, head) {
   if (!SHA_PATTERN.test(head) || (base !== null && !SHA_PATTERN.test(base))) {
@@ -51,12 +49,10 @@ function assertValidRange(base, head) {
 }
 
 /**
- * Proves that local history is complete before any commit range is inspected.
- *
- * @param {string} rootDir Repository working directory.
- * @returns {void}
- * @throws {SecurityGateError} When the repository is shallow or Git returns an
- * unrecognized shallow-state response.
+ * Git이 이 저장소를 얕은 복제(shallow)로 표시하는지 확인해 생략된 조상 이력을 놓치지 않게 한다.
+ * @param {string} rootDir 확인할 저장소 디렉터리.
+ * @returns {void} Git 응답이 정확히 false일 때만 반환한다. 이력을 내려받지는 않는다.
+ * @throws {SecurityGateError} 얕은 복제, Git 실패 또는 예상하지 못한 응답이면 검사를 중단한다.
  */
 function assertCompleteRepositoryHistory(rootDir) {
   const shallowState = runGit(
@@ -81,13 +77,12 @@ function assertCompleteRepositoryHistory(rootDir) {
 }
 
 /**
- * Enumerates every commit introduced by a range in oldest-first order.
- *
- * @param {string} rootDir Repository working directory.
- * @param {string|null} base Previously remote commit, or null for all head history.
- * @param {string} head Commit being pushed.
- * @returns {string[]} Full object IDs for all introduced commits.
- * @throws {SecurityGateError} When Git cannot enumerate the range or returns malformed IDs.
+ * head에서 도달할 수 있지만 base에서는 도달할 수 없는 커밋을 Git rev-list의 역순으로 열거한다.
+ * @param {string} rootDir 저장소 디렉터리.
+ * @param {string|null} base 제외할 기존 이력의 끝. null이면 head의 전체 도달 가능한 이력.
+ * @param {string} head 푸시할 끝 커밋.
+ * @returns {string[]} 대상 커밋의 전체 객체 ID 목록. 최신순 출력을 뒤집은 순서다.
+ * @throws {SecurityGateError} Git 조회 실패 또는 출력에 잘못된 SHA가 있으면 발생한다.
  */
 function listIntroducedCommits(rootDir, base, head) {
   const args = ["rev-list", "--reverse", head];
@@ -107,12 +102,11 @@ function listIntroducedCommits(rootDir, base, head) {
 }
 
 /**
- * Lists every blob and path in a commit tree without reading blob content.
- *
- * @param {string} rootDir Repository working directory.
- * @param {string} commit Full commit object ID.
- * @returns {Array<{objectId: string, path: string}>} Blob identities and repository paths.
- * @throws {SecurityGateError} When Git fails or returns malformed tree records.
+ * 한 커밋의 전체 파일 트리를 읽어 blob(파일 내용 객체)의 ID와 경로만 모은다. 내용은 아직 읽지 않는다.
+ * @param {string} rootDir 저장소 디렉터리.
+ * @param {string} commit 조회할 전체 커밋 객체 ID.
+ * @returns {Array<{objectId: string, path: string}>} blob 객체 ID와 저장소 내 경로의 목록.
+ * @throws {SecurityGateError} Git 실행 실패나 잘못된 트리 레코드는 건너뛰지 않고 오류로 처리한다.
  */
 function listTreeBlobs(rootDir, commit) {
   const output = runGit(
@@ -141,11 +135,10 @@ function listTreeBlobs(rootDir, commit) {
 }
 
 /**
- * Converts parsed pre-push updates to scan ranges and ignores ref deletions.
- * A new remote ref is represented by a null base so all reachable history is scanned.
- *
- * @param {Array<{localSha: string, remoteSha: string}>} updates Parsed pre-push updates.
- * @returns {Array<{base: string|null, head: string}>} Ranges for non-deletion updates.
+ * pre-push 변경 정보를 검사 범위로 바꾸고 삭제 요청은 제외한다.
+ * 새 원격 참조의 base는 null로 만들어 이후 단계가 전체 이력을 확인하게 한다.
+ * @param {Array<{localSha: string, remoteSha: string}>} updates 앞 단계에서 파싱한 로컬·원격 SHA 목록.
+ * @returns {Array<{base: string|null, head: string}>} 삭제가 아닌 변경의 범위 목록. 여기서는 Git을 실행하지 않는다.
  */
 export function rangesFromPrePushUpdates(updates) {
   return updates
@@ -157,12 +150,10 @@ export function rangesFromPrePushUpdates(updates) {
 }
 
 /**
- * Converts CI base/head values to one scan range after strict SHA validation.
- * A zero base denotes a new ref and becomes null.
- *
- * @param {{base: string, head: string}} options CI-provided full Git SHAs.
- * @returns {{base: string|null, head: string}} Validated range for blob inspection.
- * @throws {SecurityGateError} When base or head is not a full Git SHA.
+ * CI의 시작·끝 SHA를 형식 검사한 뒤 하나의 파일 검사 범위로 바꾼다.
+ * @param {{base: string, head: string}} options CI가 제공한 전체 Git SHA 두 개.
+ * @returns {{base: string|null, head: string}} 검증된 범위. 0만 있는 base는 새 참조를 뜻하는 null로 바꾼다.
+ * @throws {SecurityGateError} base나 head가 전체 SHA 형식이 아니면 INVALID_CI_RANGE 오류.
  */
 export function rangeFromCi({ base, head }) {
   if (!SHA_PATTERN.test(head) || !SHA_PATTERN.test(base)) {
@@ -172,14 +163,11 @@ export function rangeFromCi({ base, head }) {
 }
 
 /**
- * Reads tree blobs from every commit introduced by the pushed ranges.
- * Blob size/content reads are deduplicated by Git object ID, while each distinct
- * path/object pairing is retained so findings identify every affected path.
- *
- * @param {{rootDir: string, ranges: Array<{base: string|null, head: string}>}} options Repository and pushed ranges.
- * @returns {Array<{path: string, content: Buffer}>} Exact blob bytes paired with repository paths.
- * @throws {SecurityGateError} When the repository is shallow, a range is invalid, Git
- * inspection fails, tree data is malformed, or any blob exceeds the 5 MiB automatic scan limit.
+ * 푸시에 포함되는 각 커밋의 전체 파일 트리를 읽어 중간 커밋에서만 존재했던 비밀값도 검사 대상으로 모은다.
+ * 같은 내용은 객체 ID로 한 번만 읽되, 경로가 다르면 각 경로와 내용의 조합을 결과에 유지한다.
+ * @param {{rootDir: string, ranges: Array<{base: string|null, head: string}>}} options 저장소 루트와 푸시할 커밋 범위들.
+ * @returns {Array<{path: string, content: Buffer}>} 저장소 경로와 정확한 blob 바이트 목록. 작업 파일이나 Git 이력은 바꾸지 않는다.
+ * @throws {SecurityGateError} 얕은 복제, 잘못된 범위·트리, Git 실패, 잘못된 크기 또는 5 MiB 초과 파일이면 검사를 중단한다.
  */
 export function readChangedBlobs({ rootDir, ranges }) {
   assertCompleteRepositoryHistory(rootDir);

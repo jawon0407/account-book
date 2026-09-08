@@ -5,6 +5,12 @@ const module = await import("./route-adapter.js").catch(() => ({} as Record<stri
 const handleAuthRoute = module.handleAuthRoute as ((operation: string, request: Request, context: unknown, factory: () => unknown) => Promise<Response>) | undefined;
 const unsupportedAuthRoute = module.unsupportedAuthRoute as ((request: Request) => Promise<Response> | Response) | undefined;
 
+/**
+ * 응답에 세 가지 인증 캐시 방지 헤더가 모두 정확히 있는지 검사합니다.
+ * @param response 검사할 라우트 응답.
+ * @returns 검증 후 값 없음.
+ * @throws 헤더가 다르면 테스트 실패.
+ */
 function expectNoStore(response: Response): void {
   expect(response.headers.get("Cache-Control")).toBe("private, no-store");
   expect(response.headers.get("Pragma")).toBe("no-cache");
@@ -14,7 +20,15 @@ function expectNoStore(response: Response): void {
 describe("route adapter", () => {
   it("builds a fresh container for every request and forwards only request parameters", async () => {
     expect(handleAuthRoute).toBeTypeOf("function");
+    /**
+     * 컨트롤러 호출을 기록하고 204 응답을 돌려주는 라우트 위임 대상 대역입니다.
+     * @returns 본문 없는 204 Response.
+     */
     const handled = vi.fn(async () => new Response(null, { status: 204 }));
+    /**
+     * 컨테이너 생성 횟수를 기록하고 OAuth 시작 메서드를 포함한 최소 컨테이너를 반환합니다.
+     * @returns 기록용 oauthStart가 있는 컨트롤러 대역.
+     */
     const factory = vi.fn(() => ({ authController: { oauthStart: handled } }));
     const context = { params: Promise.resolve({ provider: "google" }) };
     const first = new Request("https://app.example.test/api/auth/oauth/google/start", { method: "POST" });

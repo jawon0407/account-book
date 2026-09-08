@@ -23,6 +23,11 @@ const loaded: Record<string, unknown> = await import("./postgres-replay-store.js
 const PostgresReplayStore = loaded.PostgresReplayStore as ReplayStoreConstructor | undefined;
 const expiresAt = new Date("2026-07-23T00:00:45.000Z");
 
+/**
+ * 저장소 생성자가 존재하는지 확인하고 DB 대역을 주입한다.
+ * @param database - 쿼리 결과·종료 호출을 통제할 DB 대역.
+ * @returns 테스트할 PostgreSQL 재사용 차단 저장소.
+ */
 function createStore(database: ReplayDatabase): ReplayStoreInstance {
   expect(PostgresReplayStore).toBeTypeOf("function");
   return new PostgresReplayStore!(database);

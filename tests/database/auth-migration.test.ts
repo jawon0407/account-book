@@ -24,10 +24,21 @@ const privateTables = [
   "auth_rate_limits",
 ] as const;
 const browserRoles = ["anon", "authenticated", "service_role"] as const;
+/**
+ * 같은 바이트를 반복한 PostgreSQL bytea 테스트 문자열을 만든다.
+ * @param byte - 두 자리 16진수 바이트 문자열을 가정한다. 자체 검증은 없다.
+ * @returns 접두사 뒤 byte를 32회 반복한 문자열. 실제 해시 계산은 아니다.
+ */
 const hash = (byte: string) => `\\x${byte.repeat(32)}`;
 const uuid = "11111111-1111-4111-8111-111111111111";
 const uuidTwo = "22222222-2222-4222-8222-222222222222";
 
+/**
+ * 연결 역할을 바꿔 권한 검사를 실행한 뒤 복원한다.
+ * @param role - 테스트에서 고정한 DB 역할 이름이다. 외부 입력을 넣지 않는다.
+ * @param operation - 해당 역할로 실행할 비동기 DB 작업이다.
+ * @returns 완료 Promise. 작업/복원 실패는 전파하며 역할 변경 후에는 finally로 reset한다.
+ */
 async function asRole(role: string, operation: () => Promise<void>): Promise<void> {
   await admin.query(`set role ${role}`);
   try {
@@ -38,10 +49,9 @@ async function asRole(role: string, operation: () => Promise<void>): Promise<voi
 }
 
 /**
- * Runs one live privilege assertion with `app_api` as the actual session authority.
- * @param operation - Database operation that must be authorized as `app_api`, not the postgres session user.
- * @returns Nothing after the operation and mandatory session-authorization reset complete.
- * @throws Propagates setup, operation, or reset failures after always attempting reset once authorization changed.
+ * 실제 세션 권한을 app_api로 바꿔 권한 상승 가능성을 검사한다.
+ * @param operation - app_api 세션 주체로 실행할 비동기 작업이다.
+ * @returns 완료 Promise. 변경 이후 finally에서 session authorization을 복원하고 실패를 전파한다.
  */
 async function asAppApiSessionAuthorization(operation: () => Promise<void>): Promise<void> {
   await admin.query("set session authorization app_api");
@@ -52,12 +62,22 @@ async function asAppApiSessionAuthorization(operation: () => Promise<void>): Pro
   }
 }
 
+/**
+ * 해당 역할의 인증 테이블 조회가 permission denied인지 검사한다.
+ * @param role - 고정 테스트 역할이다.
+ * @param table - privateTables 목록의 인증 테이블 이름이다.
+ * @returns 완료 Promise. DB 역할을 잠시 바꾸며 예상과 다르면 assertion 실패다.
+ */
 async function expectRoleDenied(role: string, table: (typeof privateTables)[number]): Promise<void> {
   await asRole(role, async () => {
     await expect(admin.query(`select * from app_private.${table}`)).rejects.toThrow(/permission denied/u);
   });
 }
 
+/**
+ * 파괴적 테스트 준비 전에 현재 DB 사용자가 postgres인지 확인한다.
+ * @returns 확인 완료 Promise. 다른 사용자 또는 조회 실패는 예외로 중단한다.
+ */
 async function verifyPostgresOwner(): Promise<void> {
   const result = await admin.query<{ current_user: string }>("select current_user");
   if (result.rows[0]?.current_user !== "postgres") {

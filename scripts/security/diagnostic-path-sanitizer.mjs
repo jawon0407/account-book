@@ -15,13 +15,11 @@ export const SECRET_RULES = Object.freeze([
 ]);
 
 /**
- * Redacts supported credential signatures and makes Unicode format controls visible.
- * This function assumes its input is an untrusted repository path and therefore never
- * throws for an unexpected value; non-string paths return a stable safe placeholder.
- *
- * @param {unknown} path Repository-controlled path intended for a public diagnostic.
- * @returns {string} Deterministic path text with credentials replaced by rule labels and
- * Unicode format controls represented as literal Unicode escape text.
+ * 파일 경로 안의 지원하는 비밀값 패턴을 가리고 눈에 안 보이는 Unicode 서식 문자를 표시한다.
+ * 경로도 저장소 작성자가 조작할 수 있으므로 오류 메시지에 넣기 전에 이 처리를 거친다.
+ * @param {unknown} path 터미널이나 CI 로그에 표시할 신뢰하지 않는 경로.
+ * @returns {string} 비밀값은 규칙 이름으로 대체하고 서식 제어문자는 Unicode 이스케이프 글자로 표시한 문자열. 문자열이 아니면 [INVALID_PATH].
+ * @remarks 원본 경로나 파일을 바꾸지 않으며 등록된 규칙 밖의 모든 비밀값을 탐지한다는 보장은 없다.
  */
 export function sanitizeDiagnosticPath(path) {
   if (typeof path !== "string") return "[INVALID_PATH]";

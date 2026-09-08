@@ -13,12 +13,16 @@ if (process.env.DATABASE_URL !== undefined && process.env.DATABASE_URL !== datab
 
 const baseURL = "https://127.0.0.1:4512";
 const workspaceRoot = fileURLToPath(new URL("../..", import.meta.url));
+/**
+ * 한 E2E 실행에서 사용할 무작위 32바이트 키를 생성한다.
+ * @returns base64url 문자열. 파일에 저장하지 않으며 암호학적 난수 생성 실패는 전파한다.
+ */
 const testKey = () => randomBytes(32).toString("base64url");
 
 /**
- * Creates a one-run P-256 trust boundary: the BFF receives only PKCS8 private DER,
- * while the API receives only SPKI public DER. These values remain process-local and
- * disappear when the Playwright config process exits.
+ * 한 실행에 사용할 P-256 위임 서명 키 쌍을 생성한다.
+ * @returns privateKey는 PKCS8 DER, publicKey는 SPKI DER를 base64url로 표현한 객체다.
+ * @remarks 키는 프로세스 메모리에만 만든다. 암호화 라이브러리 실패는 전파한다.
  */
 function createDelegatedJwtKeys(): Readonly<{ privateKey: string; publicKey: string }> {
   const keyPair = generateKeyPairSync("ec", { namedCurve: "P-256" });

@@ -6,7 +6,11 @@ import { responseRequestId } from "./request-context.js";
 
 const FASTIFY_BODY_TOO_LARGE_MESSAGE = "Request body is too large";
 
-/** Allows only Nest's exact wrapper for Fastify's parser limit error to retain status 413. */
+/**
+ * Fastify 본문 크기 초과를 감싼 정확한 Nest 오류만 특별한 413 응답 대상으로 인정한다.
+ * @param exception - 신뢰하지 않는 예외 값.
+ * @returns 생성자·이름·메시지·상태·응답·원인까지 기대한 형태와 일치하면 true.
+ */
 function isFastifyBodyTooLargeError(exception: unknown): boolean {
   return exception instanceof HttpException
     && exception.constructor === HttpException
@@ -25,10 +29,10 @@ function isFastifyBodyTooLargeError(exception: unknown): boolean {
 @Catch()
 export class ApiErrorFilter implements ExceptionFilter {
   /**
-   * Sends a no-store authentication or fixed operational error.
-   * @param exception - Untrusted thrown value used only for safe failure classification.
-   * @param host - Nest HTTP host containing the Fastify request and response.
-   * @returns Nothing after sending a status-only 413 or one strict `ApiError` response.
+   * 예외를 안전한 고정 응답으로 바꾸고 브라우저 캐시를 금지한다.
+   * @param exception - 분류에만 사용할 예외. 원문이나 스택은 응답에 넣지 않는다.
+   * @param host - Fastify 요청과 응답이 들어 있는 Nest HTTP 문맥.
+   * @returns 반환값 없음. 본문 없는 413, 인증 실패 401, 그 외 503 응답을 직접 전송한다.
    */
   public catch(exception: unknown, host: ArgumentsHost): void {
     const http = host.switchToHttp();

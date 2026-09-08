@@ -20,6 +20,12 @@ export interface AuthUi {
   assertNoAuthorizationHeaders(): Promise<void>;
 }
 
+/**
+ * UI 검증 단계를 실행하고 원본 예외를 고정 코드로 교체한다.
+ * @param code - 이 단계 실패를 나타낼 허용된 공개 코드다.
+ * @param operation - 비동기 UI 조작/검사 함수다.
+ * @returns 완료 Promise. 실패 시 SafeAuthUiError를 던져 원본 오류 노출을 막는다.
+ */
 async function runStep(
   code: SafeAuthUiErrorCode,
   operation: () => Promise<void>,
@@ -31,6 +37,12 @@ async function runStep(
   }
 }
 
+/**
+ * Playwright 객체를 감춘 동결된 인증 UI 기능 객체를 만든다.
+ * @param input - page는 화면 조작, context는 쿠키 검사에 사용한다.
+ * @returns AuthUi. 요청 이벤트를 등록해 Authorization 헤더 존재 여부만 수집한다.
+ * @throws 이벤트 등록 실패 시 AUTH_UI_UNEXPECTED_FAILURE. 각 메서드는 고정 단계 오류로 실패한다.
+ */
 export function createAuthUi(input: Readonly<{
   page: Page;
   context: BrowserContext;
@@ -38,6 +50,11 @@ export function createAuthUi(input: Readonly<{
   const { page, context } = input;
   const authorizationPresence: Array<Promise<boolean>> = [];
   try {
+    /**
+     * 각 요청의 Authorization 헤더 존재 여부만 Promise로 기록한다.
+     * @param request - Playwright 요청 객체. 헤더 원문은 저장하지 않는다.
+     * @returns 반환값 없음. 읽기 실패도 존재함으로 취급하여 안전하게 실패시킨다.
+     */
     page.on("request", function authorizationRecorder(request) {
       try {
         authorizationPresence.push(
@@ -55,12 +72,20 @@ export function createAuthUi(input: Readonly<{
   }
 
   const authUi = Object.assign(Object.create(null) as AuthUi, {
+    /**
+     * 로그인 페이지로 이동한다.
+     * @returns 이동 완료 Promise. 실패는 AUTH_UI_LOGIN_NOT_READY로 바꾼다.
+     */
     async openLogin(): Promise<void> {
       await runStep("AUTH_UI_LOGIN_NOT_READY", async () => {
         await page.goto("/login");
       });
     },
 
+    /**
+     * 입력/레이블 표시, Tab 포커스, 가로 넘침과 axe 접근성을 검사한다.
+     * @returns 검사 완료 Promise. 화면 조작이 발생하며 레이아웃/접근성 실패를 고정 코드로 전달한다.
+     */
     async assertLoginUsable(): Promise<void> {
       await runStep("AUTH_UI_LAYOUT_FAILED", async () => {
         const emailInput = page.locator("#sign-in-email");
@@ -103,6 +128,11 @@ export function createAuthUi(input: Readonly<{
       });
     },
 
+    /**
+     * 합성 자격증명을 입력하고 첫 제출 버튼을 누른다.
+     * @param credentials - 테스트용 email/password 문자열 객체다.
+     * @returns 클릭 완료 Promise. 실제 로그인 요청이 시작될 수 있으며 실패는 고정 준비 오류다.
+     */
     async submit(credentials: TestCredentials): Promise<void> {
       await runStep("AUTH_UI_LOGIN_NOT_READY", async () => {
         await page.locator("#sign-in-email").fill(credentials.email);
@@ -111,6 +141,10 @@ export function createAuthUi(input: Readonly<{
       });
     },
 
+    /**
+     * 고정 거부 문구, 로그인 URL 유지, 세션 쿠키 부재를 확인한다.
+     * @returns 검사 완료 Promise. 불일치 시 AUTH_UI_REJECTION_FAILED이며 원본 내용은 출력하지 않는다.
+     */
     async assertRejected(): Promise<void> {
       await runStep("AUTH_UI_REJECTION_FAILED", async () => {
         const alert = page.locator('.auth-status[role="alert"]');
@@ -127,6 +161,11 @@ export function createAuthUi(input: Readonly<{
       });
     },
 
+    /**
+     * /app 이동과 세션 쿠키 개수·HttpOnly·Secure·SameSite·selector 형식을 확인한다.
+     * @returns 검사 완료 Promise. 불일치는 AUTH_UI_SESSION_POLICY_FAILED다.
+     * @remarks /app 화면 내용이나 가계부 구현 여부를 검사하는 함수는 아니다.
+     */
     async assertAuthenticated(): Promise<void> {
       await runStep("AUTH_UI_SESSION_POLICY_FAILED", async () => {
         await page.waitForURL("**/app");
@@ -147,9 +186,19 @@ export function createAuthUi(input: Readonly<{
       });
     },
 
+    /**
+     * 페이지 문맥에서 브라우저 저장소가 허용된 테스트 상태인지 검사한다.
+     * @returns 완료 Promise. localStorage는 비어야 하고 sessionStorage는 안전한 Next 디버그 키만 허용한다.
+     * @throws 민감 문자열·허용 밖 키 또는 실행 오류는 AUTH_UI_BROWSER_CREDENTIAL_DETECTED다.
+     */
     async assertNoBrowserCredentials(): Promise<void> {
       await runStep("AUTH_UI_BROWSER_CREDENTIAL_DETECTED", async () => {
         const storageIsSafe = await page.evaluate(() => {
+          /**
+           * 저장소 문자열에 합성 refresh 표식·토큰 이름·JWT 모양이 있는지 검사한다.
+           * @param value - 저장소 키 또는 값 문자열이다.
+           * @returns 민감 문자열이 의심되면 true. 외부 전송이나 저장은 없다.
+           */
           const containsCredentialMaterial = (value: string): boolean =>
             value.includes(
               "e2e-provider-refresh-token-must-never-reach-browser",
@@ -178,6 +227,10 @@ export function createAuthUi(input: Readonly<{
       });
     },
 
+    /**
+     * 누적된 요청 헤더 존재 여부를 배치로 기다리며 추가된 요청도 확인한다.
+     * @returns 완료 Promise. 존재하거나 읽기 실패한 요청이 있으면 고정 헤더 탐지 오류를 던진다.
+     */
     async assertNoAuthorizationHeaders(): Promise<void> {
       await runStep("AUTH_UI_AUTHORIZATION_HEADER_DETECTED", async () => {
         let cursor = 0;

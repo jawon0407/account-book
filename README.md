@@ -6,9 +6,9 @@ PC와 모바일에서 사용할 수 있는 보안 우선 동기화형 개인 가
 
 인증·보안 기반의 로컬 구현과 disposable CI 검증까지 완료되었습니다. server-side 인증 도메인, PostgreSQL opaque session 저장소, server-owned PKCE·password recovery, 14개 same-origin Next.js BFF route, 반응형 인증 UI, BFF가 요청마다 발급하는 30초 ES256 delegated JWT, NestJS/Fastify의 static public-key 검증·request binding·PostgreSQL one-time replay 방어가 포함됩니다.
 
-현재 구현 SHA `51a9667511058395c4f72e4af42e2e4c25b243dc`는 동일 SHA의 GitHub `security-gate` [push run](https://github.com/jawon0407/account-book/actions/runs/32158792436)과 [PR run](https://github.com/jawon0407/account-book/actions/runs/32158800903)에서 disposable PostgreSQL과 실제 Chromium 인증 E2E를 포함해 통과했습니다. 로컬 `pnpm verify`도 829/829 tests, 6/6 typecheck와 production build를 통과했고 `pnpm audit --prod`는 알려진 production vulnerability 0건을 보고했습니다.
+2026-09-08에 확인한 기준 SHA `5cc94601c74a1e08f848a0cbc0bde191e7a47f81`의 [push CI](https://github.com/jawon0407/account-book/actions/runs/34194021876)와 [PR CI](https://github.com/jawon0407/account-book/actions/runs/34194024929)는 성공했습니다. 테스트 증거는 일반·workspace·preflight 867개, disposable PostgreSQL 22개, Chromium 10개로 총 899개입니다. 이는 해당 SHA의 기록이며 이후 로컬 변경을 자동으로 검증한 것으로 간주하지 않습니다.
 
-전체 `pnpm audit`에는 개발 의존성 경로의 7건(High 3, Moderate 4)이 남아 있습니다. GitHub Dependabot은 기본 브랜치에서 9건(High 4, Moderate 5)을 보고하므로, 개발 도구 공급망 patch는 병합 전 보안 차단 조건입니다.
+같은 날 전체·production 의존성 audit는 알려진 취약점 0건이었습니다. 별도로 Impeccable live 개발 도구에서 발견된 보안 문제는 미해결이므로 해당 도구를 실행하지 않습니다. 공개 장부 UUID 대소문자 정규화 수정은 로컬 contracts 66개·typecheck·lint로 검증했으며 아직 위 SHA에 포함되지 않은 작업입니다.
 
 현재 제품 전체로는 5개 milestone 중 1단계의 로컬 코드·CI가 완료됐고 hosted 운영 gate는 미완료입니다. 금융 변경 요청의 보안 계약과 검증 경계는 구현됐지만 거래·계정·분류·대시보드 같은 운영 장부 기능과 별도 모바일 앱은 아직 구현 전입니다. 실제 Vercel·Heroku·Supabase 배포, 최소 권한 role의 hosted 검증, persistent rate limit, Google·Kakao·Naver live OAuth, backup·복구·key rotation·kill-switch 훈련은 베타 출시 전 차단 조건으로 남아 있습니다.
 
@@ -25,6 +25,9 @@ The approved target is a separate PC web and native mobile app, not an installab
 
 ## Documentation
 
+- [문서 전체 지도와 최신 상태](docs/README.md)
+- [초급 개발자용 코드 읽기: 역할·매개변수·실제 호출 흐름](docs/guides/code-reading.ko.md)
+- [프론트엔드 구현 설명](docs/architecture/frontend.ko.md)
 - [Development progress snapshot (한국어, 2026-08-24)](docs/status/2026-08-24-development-progress.ko.md)
 - [Product principles](PRODUCT.md)
 - [Design system](DESIGN.md)
@@ -39,7 +42,8 @@ The approved target is a separate PC web and native mobile app, not an installab
 - [M2.1 public ledger contract implementation plan](docs/superpowers/plans/2026-08-26-ledger-public-contracts.md)
 - [Public API contract inventory (한국어)](docs/api/README.md)
 - [Contracts package boundary (한국어)](packages/contracts/README.md)
-- [Approved application specification](docs/superpowers/specs/2026-07-16-account-book-app-design.md)
+- [최신 승인 제품 설계: 웹 + 별도 네이티브 앱](docs/superpowers/specs/2026-07-27-web-native-mobile-shared-ledger-design.md)
+- [초기 제품 설계 — PWA 방향을 포함한 과거 기록](docs/superpowers/specs/2026-07-16-account-book-app-design.md)
 - [Testing guide](docs/guides/testing.md)
 - [Changelog](CHANGELOG.md)
 

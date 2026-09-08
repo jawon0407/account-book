@@ -59,6 +59,11 @@ const expectedWorkspaceOverrides = {
   "fast-uri@4.1.2": "4.1.4",
 };
 
+/**
+ * 디렉터리를 재귀 탐색해 tsconfig 이름 패턴에 맞는 파일을 모은다.
+ * @param directory - 탐색할 시작 디렉터리.
+ * @returns 일치한 파일 경로 목록. 읽기 실패는 파일 시스템 오류로 전파된다.
+ */
 function tsconfigFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
@@ -69,15 +74,18 @@ function tsconfigFiles(directory) {
   });
 }
 
+/**
+ * apps·packages·tests 아래의 TypeScript 설정을 모두 모아 우회 설정을 검사할 준비를 한다.
+ * @returns 저장소 하위 tsconfig 파일 경로 목록.
+ */
 function workspaceTsconfigFiles() {
   return ["apps", "packages", "tests"].flatMap((directory) => tsconfigFiles(join(rootDir, directory)));
 }
 
 /**
- * Extracts the top-level scalar entries from the workspace `overrides` map.
- *
- * @param {string} workspace The pnpm workspace YAML source to inspect.
- * @returns {Record<string, string>} The exact quoted selector-to-value entries in `overrides`.
+ * overrides 블록의 따옴표로 둘러싼 단순 키·값을 읽어 의존성 강제 버전을 비교한다.
+ * @param {string} workspace 검사할 pnpm 워크스페이스 YAML 원문.
+ * @returns {Record<string, string>} 선택자와 강제값의 맵. 블록 누락이나 예상 밖 문법은 테스트 실패.
  */
 function workspaceScalarOverrides(workspace) {
   const overrideBlock = workspace.match(/^overrides:\r?\n((?: {2}[^\r\n]+\r?\n?)*)/mu)?.[1];
@@ -96,11 +104,9 @@ function workspaceScalarOverrides(workspace) {
 }
 
 /**
- * Verifies that both lockfile graphs resolve the production dependencies to
- * reviewed patch versions and retain no package entry for the vulnerable versions.
- *
- * @param {string} lockfile The generated pnpm lockfile source.
- * @returns {void}
+ * lockfile의 packages·snapshots 양쪽에서 검토한 패치 버전이 있고 취약 버전 표기가 없는지 단언한다.
+ * @param {string} lockfile 생성된 pnpm lockfile 원문. 이 함수는 파일을 변경하지 않는다.
+ * @returns {void} 일치하면 반환값 없이 종료한다. 섹션 누락·버전 불일치는 테스트 실패.
  */
 function assertPatchedProductionResolutions(lockfile) {
   const packagesStart = lockfile.indexOf("packages:");

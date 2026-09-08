@@ -2,6 +2,8 @@
 
 Local development, testing, secure configuration, deployment, recovery, and user operation guides belong here.
 
+- [처음 읽는 코드·구현 흐름](code-reading.ko.md): 파일 역할, 함수 매개변수, 실제 인증 흐름과 장부 계약 예제를 설명합니다.
+
 - [인증 백엔드 운영 가이드](backend-auth-operations.ko.md): BFF 환경 변수·14개 route·production build·deterministic gate와 disposable PostgreSQL 운영 절차를 안내합니다.
 - [플랫폼·OAuth 준비 가이드](platform-and-oauth-onboarding.ko.md): 관리자 MFA, 결제·project 생성, canonical origin, callback, provider 심사, secret 주입, 국외 이전 고지와 지인 베타 승인 순서를 안내합니다.
 - [인증 환경 변수 가이드](auth-environment.md): BFF·API secret의 이름, 형식, 역할 분리와 Git 저장소 경계를 설명합니다.

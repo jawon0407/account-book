@@ -1,10 +1,12 @@
-<!-- SEED: re-run $impeccable document once there's code to capture the actual tokens and components. -->
+<!-- 2026-09-08: 인증 화면의 실제 토큰과 향후 금융 UI 요구사항을 구분한다. -->
 ---
 name: Account Book
 description: 모든 자산과 소비 흐름을 명확하게 보여주는 반응형 개인 가계부
 ---
 
 # Design System: Account Book
+
+> 현재 구현은 웹 인증 화면 5개다. 대시보드·표·차트·모바일 네이티브 화면은 아래 원칙을 적용할 후속 대상이며 아직 구현되지 않았다. 실제 코드 위치와 컴포넌트 설명은 [프론트엔드 문서](docs/architecture/frontend.ko.md)를 참고한다.
 
 ## 1. Overview
 
@@ -29,18 +31,18 @@ description: 모든 자산과 소비 흐름을 명확하게 보여주는 반응�
 
 ### Primary
 
-- **Instrument Indigo** ([구현 단계에서 OKLCH 값 확정]): 기본 행동, 현재 내비게이션, 선택 상태, 핵심 데이터 시리즈에만 사용한다.
+- **Instrument Indigo** (`--accent: oklch(0.52 0.18 270)`, hover `oklch(0.46 0.18 270)`): 현재 인증 화면의 주요 행동에 사용한다. 향후 선택 상태·핵심 데이터 시리즈에도 제한적으로 사용한다.
 
 ### Secondary
 
-- **Measured Violet** ([구현 단계에서 OKLCH 값 확정]): 보조 데이터 시리즈와 비교 상태에 제한적으로 사용한다.
+- **Measured Violet** (향후 제안, 현재 별도 토큰 없음): 차트 구현 시 보조 데이터 비교에 필요한지 검토한다.
 
 ### Neutral
 
 - **Clear Canvas** (`#F7F7F5`): 푸른 기운을 배제한 중립 오프화이트 배경으로 장시간 사용 시 시각적 피로를 줄인다.
 - **Structured Surface** (`#FAFAF8`): 인증 패널과 입력 표면을 Canvas에서 미세하게 분리한다. 데이터 판독성이 최우선인 평면 영역은 `#FFFFFF`를 사용한다.
-- **Ledger Ink** ([구현 단계에서 OKLCH 값 확정]): 본문과 핵심 수치에 사용하며 배경 대비 7:1 이상을 목표로 한다.
-- **Quiet Label** ([구현 단계에서 OKLCH 값 확정]): 보조 설명에 사용하되 일반 텍스트 대비 4.5:1 이상을 유지한다.
+- **Ledger Ink** (`--ink: oklch(0.22 0.02 260)`): 본문과 핵심 수치에 사용하며 배경 대비 7:1 이상을 목표로 한다.
+- **Quiet Label** (`--muted: oklch(0.43 0.025 260)`): 보조 설명에 사용하며 일반 텍스트 대비 4.5:1 이상을 목표로 한다. 수치는 토큰 정의이며 모든 조합의 접근성 통과 증거를 뜻하지 않는다.
 
 **The Signal-Only Rule.** 강조색은 행동, 선택, 상태, 데이터 구분에만 사용한다. 장식용 색상 면적은 금지한다.
 
@@ -48,11 +50,11 @@ description: 모든 자산과 소비 흐름을 명확하게 보여주는 반응�
 
 ## 3. Typography
 
-**Display Font:** 단일 산세리프 ([구현 단계에서 선택])
+**Display Font:** 시스템 산세리프 (`system-ui`, `-apple-system`, `BlinkMacSystemFont`, `Segoe UI`, `sans-serif`)
 
-**Body Font:** 단일 산세리프 ([구현 단계에서 선택])
+**Body Font:** 같은 시스템 산세리프
 
-**Label/Mono Font:** 숫자용 모노스페이스 ([구현 단계에서 선택])
+**Label/Mono Font:** 현재 별도 모노스페이스 글꼴 없이 `tabular-nums` 숫자 폭 정렬을 사용한다.
 
 **Character:** UI 텍스트는 과장 없이 빠르게 읽히고, 금액과 통계는 고정폭 숫자와 `tabular-nums`로 열과 자릿수의 정렬을 유지한다. 디스플레이용 장식 글꼴은 사용하지 않는다.
 
@@ -82,9 +84,11 @@ description: 모든 자산과 소비 흐름을 명확하게 보여주는 반응�
 
 ## 5. Components
 
-인증 화면에는 Canvas, Surface, Raised, Soft, Inset 토큰이 구현되어 있다. 대시보드와 금융 데이터 컴포넌트가 구현된 뒤 `$impeccable document`를 다시 실행해 데이터 표, 차트 범례, 동기화 상태, 스켈레톤 로딩의 실제 토큰과 상태를 확장한다.
+인증 화면에는 Canvas, Surface, Raised, Soft, Inset 토큰이 구현되어 있다. 데이터 표·차트·동기화 상태·스켈레톤은 구현 후 실제 코드에 맞춰 이 문서를 갱신한다. Impeccable live 개발 도구는 미해결 보안 문제 때문에 현재 실행하지 않는다.
 
-모든 상호작용 컴포넌트는 기본, hover, focus-visible, active, disabled, loading, error 상태를 갖는다. 일반 전환은 150~250ms의 ease-out 계열을 사용하고, `prefers-reduced-motion`에서는 교차 페이드 또는 즉시 전환으로 축소한다.
+웹 인증 컨텐츠 너비는 뷰포트 1080~1920px에서 `60vw`, 1921px 이상에서 `1080px`다. 좁은 화면은 여백을 둔 단일 열이다. 이는 웹 CSS 규칙이며 Expo 앱에 자동 적용되지 않는다.
+
+상호작용 컴포넌트는 필요한 기본, hover, focus-visible, active, disabled, loading, error 상태를 제공해야 한다. 현재 인증 CSS의 일반 전환은 180ms이며 제품 목표 범위는 150~250ms다. `prefers-reduced-motion`에서는 모션을 축소한다. 금융 컴포넌트의 상태 구현과 검증은 후속 작업이다.
 
 민감한 행동에는 별도의 보안 상태를 둔다. 로그인 수단 연결·해제, 전체 데이터 내보내기, 계정 삭제는 최근 재인증을 요구하고 행동의 범위와 결과를 확인시킨다. 세션 만료와 권한 거부는 일반 네트워크 오류처럼 표현하지 않는다. 화면 알림과 오류 메시지에는 토큰, 내부 경로, SQL, 공급자 원문 오류, 거래 메모를 노출하지 않는다.
 

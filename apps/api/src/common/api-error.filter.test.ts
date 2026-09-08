@@ -6,13 +6,23 @@ import { AccessTokenVerificationUnavailableError, InvalidAccessTokenError } from
 import { ApiErrorFilter } from "./api-error.filter.js";
 import { registerRequestContext } from "./request-context.js";
 
+/**
+ * 응답 대역에 오류 필터를 실행해 상태·본문·헤더를 관찰한다.
+ * @param exception - 필터에 넘길 예외 후보.
+ * @param requestId - 서버 요청 ID 후보.
+ * @param principal - 검증된 사용자 정보가 있다고 가정할 선택적 추적 ID.
+ * @returns 필터가 기록한 응답값과 헤더.
+ */
 function run(exception: unknown, requestId = "unsafe\r\ninbound", principal?: { requestId: string }) {
   const headers = new Map<string, string>();
   let status = 0;
   let body: unknown;
   const reply = {
+    /** 헤더를 소문자 키로 기록한다. @param name - 헤더명. @param value - 헤더값. */
     header(name: string, value: string) { headers.set(name.toLowerCase(), value); return this; },
+    /** 상태 코드를 관찰용 변수에 기록한다. @param value - 응답 상태 코드. */
     status(value: number) { status = value; return this; },
+    /** 본문을 관찰용 변수에 기록한다. @param value - 필터가 보낸 응답값. */
     send(value: unknown) { body = value; return this; },
   };
   const host = {
@@ -23,9 +33,16 @@ function run(exception: unknown, requestId = "unsafe\r\ninbound", principal?: { 
   } as unknown as ArgumentsHost;
 
   new ApiErrorFilter().catch(exception, host);
-  return { get body() { return body; }, get status() { return status; }, headers };
+  return { /** @returns 응답 대역의 send가 마지막으로 받은 본문. */ get body() { return body; }, /** @returns 응답 대역의 status가 마지막으로 받은 상태 코드. */ get status() { return status; }, headers };
 }
 
+/**
+ * 스키마 파싱 전에 오류 응답 원문이 고정 정책과 일치하는지 단언한다.
+ * @param response - 응답 대역이 수집한 결과.
+ * @param code - 기대한 공개 오류 코드.
+ * @param retryable - 기대한 재시도 가능 여부.
+ * @returns 반환값 없음. 불일치는 테스트 실패로 보고한다.
+ */
 function assertRawEnvelope(response: ReturnType<typeof run>, code: keyof typeof PublicErrorMessages, retryable: boolean): void {
   const body = response.body as { code: string; message: string; requestId: string; retryable: boolean; fieldErrors: unknown[] };
   expect(body.code).toBe(code);
@@ -112,8 +129,11 @@ describe("ApiErrorFilter", () => {
     let body: unknown;
     const request = { id: "unsafe", principal: { requestId: "also-unsafe" } };
     const reply = {
+      /** 응답 훅이 덮어쓴 헤더도 관찰한다. @param name - 헤더명. @param value - 값. */
       header(name: string, value: string) { headers.set(name.toLowerCase(), value); return this; },
+      /** 이 테스트는 상태가 아닌 추적 ID만 보므로 체이닝만 유지한다. @returns 같은 응답 대역. */
       status() { return this; },
+      /** 추적 ID 비교를 위해 오류 본문을 저장한다. @param value - 오류 응답. */
       send(value: unknown) { body = value; return this; },
     };
     const host = {

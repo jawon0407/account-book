@@ -10,10 +10,10 @@ import { InvalidAccessTokenError } from "../auth/jwt-verifier.js";
 @UseGuards(AuthGuard)
 export class MeController {
   /**
-   * Builds the shared current-user response from the verified principal.
-   * @param request - Fastify request populated only after the JWT guard succeeds.
-   * @returns Public identity data with no arbitrary JWT profile claims.
-   * @throws A fixed authentication failure if the guard invariant is ever absent.
+   * 인증 가드가 검증한 사용자 ID로 최소한의 현재 사용자 응답을 만든다. DB나 제공자 조회는 하지 않는다.
+   * @param request - JWT 검증과 재사용 차단이 끝나 principal이 붙은 Fastify 요청.
+   * @returns 사용자 ID와 고정값 email: null, emailVerified: true를 담은 응답.
+   * @throws principal이 없으면 InvalidAccessTokenError. 임의의 JWT 프로필 값은 사용하지 않는다.
    */
   @All()
   @RequireDelegatedScope("me:read")

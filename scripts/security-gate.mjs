@@ -16,6 +16,10 @@ const VALUE_OPTIONS = new Map([
   ["--remote-url", { key: "remoteUrl", modes: ["pre-push"] }],
 ]);
 
+/**
+ * 잘못된 CLI 입력값을 출력하지 않도록 고정된 인자 오류를 만든다.
+ * @returns {SecurityGateError} 호출자가 throw할 수 있는 INVALID_ARGUMENT 오류 객체.
+ */
 function invalidArguments() {
   return new SecurityGateError(
     "INVALID_ARGUMENT",
@@ -24,12 +28,11 @@ function invalidArguments() {
 }
 
 /**
- * Parses public CLI options without including untrusted values in diagnostics.
- *
- * @param {string[]} args Process arguments after the script path.
- * @returns {{mode: "pre-push"|"ci", rootDir: string, eventName?: string, targetRef?: string, base?: string, head?: string, remoteName?: string, remoteUrl?: string}} Common root/mode values; CI-only event/range values; and optional pre-push-only remote metadata.
- * @throws {SecurityGateError} With fixed text for duplicates, unsupported options,
- * missing values, mode-incompatible options, invalid mode, or incomplete CI input.
+ * CLI 인자를 옵션·값 쌍으로 읽고 실행 모드별로 허용되는 옵션인지 검사한다.
+ * 루트 경로는 절대 경로로 바꾸지만 Git이나 보안 검사는 아직 실행하지 않는다.
+ * @param {string[]} args 스크립트 경로 뒤에 전달된 명령줄 인자 목록.
+ * @returns {{mode: "pre-push"|"ci", rootDir: string, eventName?: string, targetRef?: string, base?: string, head?: string, remoteName?: string, remoteUrl?: string}} 검증한 모드·루트와 해당 모드에 필요한 이벤트·커밋 범위·원격 메타데이터.
+ * @throws {SecurityGateError} 중복·미지원 옵션, 값 누락, 잘못된 모드, 모드와 맞지 않는 옵션, CI 필수값 누락이면 발생한다. 오류에 입력값은 담지 않는다.
  */
 function parseArguments(args) {
   const options = { rootDir: process.cwd() };

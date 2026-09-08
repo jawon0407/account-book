@@ -8,6 +8,11 @@ import {
 
 type TransportName = typeof transportGlobalNames[number];
 
+/**
+ * 전송 차단 오류가 고정 타입·이름·코드이고 cause가 없는지 검사한다.
+ * @param error - 차단 동작에서 받은 임의 실패다.
+ * @returns 조건을 모두 만족하면 true다.
+ */
 function isTransportBlocked(error: unknown): boolean {
   return error instanceof SafeAuthUiError
     && error.name === "SafeAuthUiError"
@@ -16,6 +21,11 @@ function isTransportBlocked(error: unknown): boolean {
     && !("cause" in error);
 }
 
+/**
+ * 일반 실패가 고정 안전 오류이며 cause/stack이 없는지 검사한다.
+ * @param error - 정규화된 오류 후보다.
+ * @returns 안전한 일반 실패 형태이면 true다.
+ */
 function isUnexpectedFailure(error: unknown): boolean {
   return error instanceof SafeAuthUiError
     && error.name === "SafeAuthUiError"
@@ -25,6 +35,10 @@ function isUnexpectedFailure(error: unknown): boolean {
     && !("stack" in error);
 }
 
+/**
+ * 서로 다른 데이터/접근자 descriptor를 가진 전송 API 대역을 만든다.
+ * @returns originals 함수 모음과 target. 복원 전후 참조·플래그 비교에 사용한다.
+ */
 function makeDescriptorTarget(): {
   originals: Record<TransportName, () => string>;
   target: object;
@@ -35,6 +49,11 @@ function makeDescriptorTarget(): {
       () => `original:${name}`,
     ]),
   ) as Record<TransportName, () => string>;
+  /**
+   * 접근자 setter의 동일성 복원을 검사할 무동작 함수를 제공한다.
+   * @param value - 의도적으로 버리는 대입값이다.
+   * @returns 반환값 없음. 어떤 상태도 변경하지 않는다.
+   */
   const requestSetter = (value: unknown): void => {
     void value;
   };
@@ -81,6 +100,11 @@ function makeDescriptorTarget(): {
   return { originals, target };
 }
 
+/**
+ * 대상의 모든 전송 API 호출이 고정 차단 오류를 던지는지 검사한다.
+ * @param target - tripwire가 설치된 객체다.
+ * @returns 반환값 없음. Reflect.apply로 각 대역을 실제 호출하고 차단되지 않으면 assertion 실패다.
+ */
 function assertAllTransportsBlocked(target: object): void {
   for (const name of transportGlobalNames) {
     assert.throws(
@@ -163,6 +187,10 @@ test("normalizes an unknown synchronous callback throw without disclosing its fi
     enumerable: true,
     value: `C:\\sensitive\\${sentinel}`,
   });
+  /**
+   * 비동기 타입을 가졌지만 동기적으로 원본 오류를 던지는 분기를 재현한다.
+   * @returns 정상 반환 없이 합성 민감 필드가 있는 original 오류를 던진다.
+   */
   const operation = (() => {
     throw original;
   }) as () => Promise<void>;
@@ -185,6 +213,10 @@ test("normalizes an unknown asynchronous callback rejection", async () => {
   const proxyError = new Proxy(
     new SafeAuthUiError("AUTH_UI_LAYOUT_FAILED"),
     {
+      /**
+       * Proxy 오류 속성을 읽으면 추가 비밀 오류가 발생하는 적대적 대역이다.
+       * @returns 정상 반환 없이 sentinel 오류를 던진다. 정규화가 이 trap을 읽지 않아야 한다.
+       */
       get() {
         throw new Error(sentinel);
       },
@@ -385,6 +417,13 @@ test("keeps active during restoration for nested same-target and different-targe
 
   Object.defineProperty(Reflect, "defineProperty", {
     ...reflectDefinePropertyDescriptor,
+    /**
+     * 복원 시점의 Reflect.defineProperty를 관찰하여 중첩 차단이 유지되는지 시험한다.
+     * @param instrumentedTarget - 속성을 정의할 대상이다.
+     * @param propertyKey - 정의할 속성 키다.
+     * @param attributes - 설치/복원할 descriptor다.
+     * @returns 원래 Reflect.defineProperty 결과. 첫 fetch 복원 때 같은/다른 대상 중첩 실행을 시도한다.
+     */
     value(
       instrumentedTarget: object,
       propertyKey: PropertyKey,
@@ -462,6 +501,10 @@ test("blocks each transport as both a function call and a constructor", async ()
 });
 
 test("blocks and removes absent transports on an ordinary function target", async () => {
+  /**
+   * 함수도 전송 속성 설치 대상이 될 수 있는지 확인할 빈 함수다.
+   * @returns 반환값 없음. 함수 본문은 아무 동작도 하지 않는다.
+   */
   function target(): void {}
 
   for (const name of transportGlobalNames) {
@@ -520,7 +563,12 @@ test("rejects a runtime non-object target before callback execution", async () =
 
 const proxyTrapFixtures = [
   {
+    /** descriptor 조회가 원본 오류를 던지는 Proxy 대역을 만든다.
+     * @param countTrap - trap이 실행되었음을 기록할 callback이다.
+     * @returns 해당 실패/무동작 trap을 가진 ProxyHandler다. 생성만으로 trap은 실행하지 않는다.
+     */
     handler: (countTrap: () => void): ProxyHandler<object> => ({
+      /** descriptor 접근 횟수를 기록하고 합성 오류를 던진다. 인자는 사용하지 않으며 원본 대상도 조작하지 않는다. */
       getOwnPropertyDescriptor() {
         countTrap();
         throw new Error("descriptor-trap-must-not-escape");
@@ -529,7 +577,12 @@ const proxyTrapFixtures = [
     name: "descriptor-throwing",
   },
   {
+    /** 속성 정의가 오류를 던지는 Proxy 대역을 만든다.
+     * @param countTrap - trap이 실행되었음을 기록할 callback이다.
+     * @returns 해당 실패/무동작 trap을 가진 ProxyHandler다. 생성만으로 trap은 실행하지 않는다.
+     */
     handler: (countTrap: () => void): ProxyHandler<object> => ({
+      /** 정의 trap 실행을 기록하고 합성 오류를 던진다. 인자는 사용하지 않으며 원본 대상도 조작하지 않는다. */
       defineProperty() {
         countTrap();
         throw new Error("define-trap-must-not-escape");
@@ -538,7 +591,12 @@ const proxyTrapFixtures = [
     name: "define-throwing",
   },
   {
+    /** 속성 정의가 false로 거부되는 Proxy 대역을 만든다.
+     * @param countTrap - trap이 실행되었음을 기록할 callback이다.
+     * @returns 해당 실패/무동작 trap을 가진 ProxyHandler다. 생성만으로 trap은 실행하지 않는다.
+     */
     handler: (countTrap: () => void): ProxyHandler<object> => ({
+      /** 정의 trap 실행을 기록하고 false로 거부한다. 인자는 사용하지 않으며 원본 대상도 조작하지 않는다. */
       defineProperty() {
         countTrap();
         return false;
@@ -547,7 +605,12 @@ const proxyTrapFixtures = [
     name: "define-false",
   },
   {
+    /** 정의가 성공했다고만 응답하는 무동작 Proxy 대역을 만든다.
+     * @param countTrap - trap이 실행되었음을 기록할 callback이다.
+     * @returns 해당 실패/무동작 trap을 가진 ProxyHandler다. 생성만으로 trap은 실행하지 않는다.
+     */
     handler: (countTrap: () => void): ProxyHandler<object> => ({
+      /** 정의 trap 실행을 기록하고 실제 속성 변경 없이 true를 반환한다. 인자는 사용하지 않으며 원본 대상도 조작하지 않는다. */
       defineProperty() {
         countTrap();
         return true;
@@ -556,7 +619,12 @@ const proxyTrapFixtures = [
     name: "define-no-op",
   },
   {
+    /** 속성 삭제가 오류를 던지는 Proxy 대역을 만든다.
+     * @param countTrap - trap이 실행되었음을 기록할 callback이다.
+     * @returns 해당 실패/무동작 trap을 가진 ProxyHandler다. 생성만으로 trap은 실행하지 않는다.
+     */
     handler: (countTrap: () => void): ProxyHandler<object> => ({
+      /** 삭제 trap 실행을 기록하고 합성 오류를 던진다. 인자는 사용하지 않으며 원본 대상도 조작하지 않는다. */
       deleteProperty() {
         countTrap();
         throw new Error("delete-trap-must-not-escape");
@@ -565,7 +633,12 @@ const proxyTrapFixtures = [
     name: "delete-throwing",
   },
   {
+    /** 속성 삭제가 false로 거부되는 Proxy 대역을 만든다.
+     * @param countTrap - trap이 실행되었음을 기록할 callback이다.
+     * @returns 해당 실패/무동작 trap을 가진 ProxyHandler다. 생성만으로 trap은 실행하지 않는다.
+     */
     handler: (countTrap: () => void): ProxyHandler<object> => ({
+      /** 삭제 trap 실행을 기록하고 false로 거부한다. 인자는 사용하지 않으며 원본 대상도 조작하지 않는다. */
       deleteProperty() {
         countTrap();
         return false;
@@ -574,7 +647,12 @@ const proxyTrapFixtures = [
     name: "delete-false",
   },
   {
+    /** 삭제가 성공했다고만 응답하는 무동작 Proxy 대역을 만든다.
+     * @param countTrap - trap이 실행되었음을 기록할 callback이다.
+     * @returns 해당 실패/무동작 trap을 가진 ProxyHandler다. 생성만으로 trap은 실행하지 않는다.
+     */
     handler: (countTrap: () => void): ProxyHandler<object> => ({
+      /** 삭제 trap 실행을 기록하고 실제 삭제 없이 true를 반환한다. 인자는 사용하지 않으며 원본 대상도 조작하지 않는다. */
       deleteProperty() {
         countTrap();
         return true;

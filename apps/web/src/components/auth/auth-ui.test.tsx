@@ -13,19 +13,27 @@ type PasswordInput = Readonly<{ password: string }>;
 type Provider = "google" | "kakao" | "naver";
 
 type CredentialsFormProps = Readonly<{
+  /** @param input 폼이 검증한 이메일·비밀번호. 테스트 대역에 전달한다. @returns 제출 완료 Promise. */
   submit(input: Credentials): Promise<unknown>;
+  /** 제출 성공 후 실행할 테스트 콜백. 인수·반환값은 없다. */
   onSuccess?(): void;
 }>;
 type EmailFormProps = Readonly<{
+  /** @param input 재설정 메일 요청용 이메일. @returns 요청 완료 Promise. */
   submit(input: EmailInput): Promise<unknown>;
+  /** 메일 요청 수락 후 호출하는 선택 콜백. 계정 존재를 뜻하지 않는다. */
   onSuccess?(): void;
 }>;
 type PasswordFormProps = Readonly<{
+  /** @param input 폼이 검증한 새 비밀번호. @returns 변경 요청 완료 Promise. */
   submit(input: PasswordInput): Promise<unknown>;
+  /** 변경 성공 후 호출하는 선택 콜백. 인수·반환값은 없다. */
   onSuccess?(): void;
 }>;
 type ProviderButtonsProps = Readonly<{
+  /** @param provider 선택한 허용 공급자 이름. @returns BFF의 같은 출처 계속 경로 Promise. */
   start(provider: Provider): Promise<Readonly<{ authorizationPath: string }>>;
+  /** @param path 검증된 같은 출처 계속 경로. 테스트에서는 실제 이동 대신 호출을 기록한다. */
   navigate?(path: string): void;
 }>;
 type AuthShellProps = Readonly<{
@@ -47,6 +55,13 @@ const AuthShell = shells.AuthShell as ComponentType<AuthShellProps> | undefined;
 
 afterEach(cleanup);
 
+/**
+ * OKLCH 토큰을 선형 RGB 휘도로 변환해 흰색과의 대비를 계산한다.
+ * @param css 테스트가 읽은 CSS 원문. 이 함수가 파일을 읽지는 않는다.
+ * @param token `--`를 제외한 색상 변수 이름. 숫자 OKLCH 선언을 찾는다.
+ * @returns 흰색 대비 비율. 모든 배경·상태의 접근성을 보장하는 값은 아니다.
+ * @throws 해당 토큰 선언이 없으면 테스트를 실패시키는 오류.
+ */
 function contrastWithWhite(css: string, token: string): number {
   const match = css.match(new RegExp(`--${token}:\\s*oklch\\(([\\d.]+)\\s+([\\d.]+)\\s+([\\d.]+)\\)`, "u"));
   if (match === null) throw new Error(`Missing OKLCH token: ${token}`);

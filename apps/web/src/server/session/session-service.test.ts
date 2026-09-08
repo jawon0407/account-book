@@ -66,6 +66,11 @@ const id = "123e4567-e89b-12d3-a456-426614174000";
 const userId = "123e4567-e89b-12d3-a456-426614174001";
 const providerSessionId = "123e4567-e89b-12d3-a456-426614174002";
 
+/**
+ * 정상 제공자 토큰 쌍을 기준으로 필요한 필드만 덮어써 성공·실패 사례를 만듭니다.
+ * @param overrides 바꿀 토큰·사용자·시각 필드.
+ * @returns 테스트 토큰 쌍.
+ */
 function tokenPair(overrides: Partial<TokenPair> = {}): TokenPair {
   return {
     accessToken: "provider-access-token",
@@ -78,6 +83,11 @@ function tokenPair(overrides: Partial<TokenPair> = {}): TokenPair {
   };
 }
 
+/**
+ * 테스트 저장소의 외부 변경 영향을 줄이기 위해 해시와 날짜를 복사합니다. 암호문 객체는 원래 참조를 유지합니다.
+ * @param record 복사할 세션 레코드.
+ * @returns 해시·날짜를 복사한 레코드.
+ */
 function copyRecord(record: SessionRecord): SessionRecord {
   return {
     ...record,
@@ -98,12 +108,25 @@ class TestRepository {
   public fail = false;
   public failRotate = false;
 
+  /**
+   * 이전 저장 경로 호출을 계수해 새 createSession 경계가 사용되는지 검사하기 위한 대역입니다.
+   * @param input 메모리에 보관할 세션.
+   * @returns 복사 저장 후 값 없음.
+   * @throws fail 설정 시 DB 실패를 모사합니다.
+   */
   public async create(input: SessionRecord): Promise<void> {
     this.calls.legacyCreate += 1;
     if (this.fail) throw new Error("database-secret");
     this.record = copyRecord(input);
   }
 
+  /**
+   * 호출 수를 기록하고 최소 허용 발급 시각 이상인 토큰만 세션으로 저장합니다.
+   * @param input 저장할 세션 레코드.
+   * @param providerIssuedAtSeconds 제공자 토큰 발급 초.
+   * @returns 저장하면 true, 오래된 토큰이면 false.
+   * @throws fail 설정 시 DB 실패.
+   */
   public async createSession(input: SessionRecord, providerIssuedAtSeconds: number): Promise<boolean> {
     this.calls.createSession += 1;
     if (this.fail) throw new Error("database-secret");
@@ -112,6 +135,12 @@ class TestRepository {
     return true;
   }
 
+  /**
+   * 조회 횟수를 기록하고 해시가 일치하는 레코드 복사본을 반환합니다. 이 대역은 만료를 걸러내지 않아 서비스 자체 검증을 시험할 수 있습니다.
+   * @param hash 기대하는 브라우저 식별자 해시.
+   * @returns 일치하는 레코드 또는 null.
+   * @throws fail 설정 시 DB 실패.
+   */
   public async findActiveBySelectorHash(hash: Uint8Array): Promise<SessionRecord | null> {
     this.calls.find += 1;
     if (this.fail) throw new Error("database-secret");
@@ -119,6 +148,12 @@ class TestRepository {
     return copyRecord(this.record);
   }
 
+  /**
+   * 세션 ID·버전·제공자 세션·미폐기 조건을 확인해 토큰을 교체하고 버전을 올리는 메모리 CAS 대역입니다.
+   * @param input 기대 비교값·교체 암호문·시각.
+   * @returns 비교가 맞아 갱신하면 true, 아니면 false.
+   * @throws fail 또는 failRotate 설정 시 DB 실패.
+   */
   public async rotate(input: RotateInput): Promise<boolean> {
     this.calls.rotate += 1;
     if (this.fail || this.failRotate) throw new Error("database-secret");
@@ -144,6 +179,11 @@ class TestRepository {
     return true;
   }
 
+  /**
+   * 호출 수를 기록하고 저장된 미폐기 레코드를 고정 테스트 시각에 폐기합니다. 입력 해시는 이 대역에서 사용하지 않습니다.
+   * @returns 폐기한 레코드가 있으면 true.
+   * @throws fail 설정 시 DB 실패.
+   */
   public async revokeBySelectorHash(): Promise<boolean> {
     this.calls.revoke += 1;
     if (this.fail) throw new Error("database-secret");
@@ -152,6 +192,12 @@ class TestRepository {
     return true;
   }
 
+  /**
+   * 지정 사용자와 일치하는 하나의 메모리 레코드를 폐기하며 전체 폐기 호출을 계수합니다.
+   * @param user 폐기 대상 사용자 ID.
+   * @returns 폐기한 개수 0 또는 1.
+   * @throws fail 설정 시 DB 실패.
+   */
   public async revokeAllForUser(user: string): Promise<number> {
     this.calls.revokeAll += 1;
     if (this.fail) throw new Error("database-secret");
@@ -160,6 +206,11 @@ class TestRepository {
     return 1;
   }
 
+  /**
+   * 외부 폐기 보류 요청 횟수만 기록합니다. 레코드의 보류 시각 자체는 변경하지 않는 대역입니다.
+   * @returns 기록 후 값 없음.
+   * @throws fail 설정 시 DB 실패.
+   */
   public async markRevocationPending(): Promise<void> {
     this.calls.pending += 1;
     if (this.fail) throw new Error("database-secret");
@@ -170,6 +221,11 @@ class SerializedSecurityRepository extends TestRepository {
   private tail: Promise<void> = Promise.resolve();
   private readonly pauses: Partial<Record<"session" | "recovery", { reached: () => void; release: Promise<void> }>> = {};
 
+  /**
+   * 다음 세션 생성 또는 복구 처리 중간에서 멈출 수 있는 제어 신호를 준비합니다.
+   * @param kind 멈출 작업 종류 session 또는 recovery.
+   * @returns 멈춤 도달을 기다릴 reached와 진행을 재개할 release 함수.
+   */
   public pauseNext(kind: "session" | "recovery"): Readonly<{ reached: Promise<void>; release: () => void }> {
     let reached!: () => void;
     let release!: () => void;
@@ -179,6 +235,13 @@ class SerializedSecurityRepository extends TestRepository {
     return { reached: reachedPromise, release };
   }
 
+  /**
+   * 세션 생성을 직렬 실행 큐에 넣고 지정된 중간 멈춤 지점을 거친 뒤 부모 저장 대역을 호출합니다.
+   * @param input 저장할 세션.
+   * @param providerIssuedAtSeconds 제공자 토큰 발급 초.
+   * @returns 발급 기준에 따른 저장 성공 여부.
+   * @throws 부모 저장 대역 오류.
+   */
   public override async createSession(input: SessionRecord, providerIssuedAtSeconds: number): Promise<boolean> {
     return this.exclusive(async () => {
       await this.pauseAt("session");
@@ -186,6 +249,12 @@ class SerializedSecurityRepository extends TestRepository {
     });
   }
 
+  /**
+   * 직렬화된 복구 작업으로 최소 허용 발급 초를 올리고 같은 사용자의 기존 세션을 폐기합니다.
+   * @param user 복구를 완료한 사용자 ID.
+   * @param completedAt 복구 완료 시각.
+   * @returns 보안 상태 변경 후 값 없음.
+   */
   public async completeRecovery(user: string, completedAt: Date): Promise<void> {
     await this.exclusive(async () => {
       await this.pauseAt("recovery");
@@ -194,6 +263,12 @@ class SerializedSecurityRepository extends TestRepository {
     });
   }
 
+  /**
+   * 앞선 작업의 완료를 기다려 전달 작업을 하나씩 실행합니다. 성공·실패 모두 다음 작업의 대기를 해제합니다.
+   * @param operation 배타적으로 실행할 비동기 작업.
+   * @returns 전달 작업의 결과.
+   * @throws 전달 작업의 오류.
+   */
   private async exclusive<T>(operation: () => Promise<T>): Promise<T> {
     const previous = this.tail;
     let release!: () => void;
@@ -202,6 +277,11 @@ class SerializedSecurityRepository extends TestRepository {
     try { return await operation(); } finally { release(); }
   }
 
+  /**
+   * 예약된 멈춤 지점이 있으면 한 번 소비하고 도달 신호를 보낸 뒤 재개 신호를 기다립니다.
+   * @param kind 확인할 작업 종류.
+   * @returns 예약이 없으면 즉시, 있으면 재개 후 값 없이 완료합니다.
+   */
   private async pauseAt(kind: "session" | "recovery"): Promise<void> {
     const pause = this.pauses[kind];
     if (pause === undefined) return;
@@ -211,17 +291,37 @@ class SerializedSecurityRepository extends TestRepository {
   }
 }
 
+/**
+ * 메모리 저장소·암호화 키·고정 ID·시계를 연결해 테스트할 세션 서비스를 만듭니다.
+ * @param repository 사용할 저장소 대역.
+ * @param refresher 제공자 토큰 갱신 대역.
+ * @param clock 제공자 완료 시각을 제어할 시계.
+ * @returns 서비스와 저장소·갱신 대역.
+ */
 function service(repository = new TestRepository(), refresher = vi.fn(async () => tokenPair({ accessToken: "new-access", refreshToken: "new-refresh" })), clock: () => Date = () => new Date(now)) {
   expect(SessionService).toBeTypeOf("function");
   return { repository, refresher, service: new SessionService!(repository, keyring, refresher, () => id, clock) };
 }
 
+/**
+ * 기본 토큰으로 실제 서비스의 생성 경로를 실행해 후속 테스트의 저장 세션을 준비합니다.
+ * @param repository 세션을 저장할 대역.
+ * @returns 테스트 환경과 생성 결과.
+ * @throws 세션 생성 실패.
+ */
 async function createSession(repository = new TestRepository()) {
   const setup = service(repository);
   const created = await setup.service.create(tokenPair(), now);
   return { ...setup, created };
 }
 
+/**
+ * 비동기 작업이 세션 오류로 실패하고 지정된 비밀값이 메시지에 없는지 확인합니다.
+ * @param action 실패해야 하는 비동기 작업.
+ * @param secrets 메시지에 없어야 할 테스트 문자열 목록.
+ * @returns 검증 완료를 기다리는 Promise.
+ * @throws 기대한 오류 타입·비노출 조건이 다르면 테스트 실패.
+ */
 function expectSafeFailure(action: () => Promise<unknown>, ...secrets: string[]): Promise<void> {
   expect(SessionOperationError).toBeTypeOf("function");
   return expect(action()).rejects.toSatisfy((error: unknown) => {
@@ -230,6 +330,14 @@ function expectSafeFailure(action: () => Promise<unknown>, ...secrets: string[])
   });
 }
 
+/**
+ * 비동기 작업의 고정 세션 오류 메시지·사유·비밀값 비노출을 함께 검사합니다.
+ * @param action 실패해야 하는 비동기 작업.
+ * @param reason 기대 실패 분류.
+ * @param secrets 메시지에 없어야 할 문자열 목록.
+ * @returns 검증 완료 Promise.
+ * @throws 예상 오류와 다르면 테스트 실패.
+ */
 function expectFailureReason(action: () => Promise<unknown>, reason: SessionFailureReason, ...secrets: string[]): Promise<void> {
   expect(SessionOperationError).toBeTypeOf("function");
   return expect(action()).rejects.toSatisfy((error: unknown) => {

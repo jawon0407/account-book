@@ -7,7 +7,12 @@ type AuthShellProps = Readonly<{
   footer: ReactNode;
 }>;
 
-/** Shared authentication frame with one stable heading and a responsive context panel. */
+/**
+ * 인증 화면들의 제목·입력 영역·하단 링크·서비스 안내를 같은 틀에 배치한다.
+ * 고정 제목 ID와 aria-labelledby를 연결하고 실제 배치는 공통 CSS에 맡긴다.
+ * @param props - title은 제목, description은 설명, children은 폼/상태 UI, footer는 하단 링크다.
+ * @returns 반응형 인증 화면 틀. 인증 처리나 데이터 저장 부작용은 없다.
+ */
 export function AuthShell({ title, description, children, footer }: AuthShellProps) {
   return (
     <div className="auth-shell">

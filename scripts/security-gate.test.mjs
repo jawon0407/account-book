@@ -25,9 +25,9 @@ const shellPath = process.platform === "win32"
   : "sh";
 
 /**
- * Executes the public CLI with controlled stdin.
- *
- * @param {{args: string[], input?: string}} options CLI arguments and pre-push input.
+ * 통제한 표준 입력으로 실제 보안 게이트 CLI를 별도 프로세스에서 실행한다.
+ * @param {{args: string[], input?: string}} options 모드별 CLI 인자와 Git pre-push 입력.
+ * @returns 종료 상태·stdout·stderr가 담긴 결과. 실제 push는 실행하지 않는다.
  */
 function runCli({ args, input = "" }) {
   return spawnSync(process.execPath, [cliPath, ...args], {

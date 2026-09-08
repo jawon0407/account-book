@@ -28,7 +28,12 @@ type GuardRequest = Readonly<{
   requestId: string;
 }>;
 
-/** Reads raw header pairs once, rejecting duplicate evidence before framework normalization. */
+/**
+ * 프레임워크가 합치기 전의 원시 HTTP 헤더를 읽어 소문자 이름으로 묶는다.
+ * @param request - Node 원시 헤더 배열이 있는 Fastify 요청.
+ * @returns 중복 이름이 없는 헤더 맵. 요청 자체는 변경하지 않는다.
+ * @throws 배열 구조가 잘못되거나 헤더 이름이 중복되면 InvalidAccessTokenError.
+ */
 function rawHeaderMap(request: FastifyRequest): ReadonlyMap<string, string> {
   const rawHeaders = request.raw.rawHeaders;
   if (!Array.isArray(rawHeaders) || rawHeaders.length % 2 !== 0) throw new InvalidAccessTokenError();
@@ -44,6 +49,12 @@ function rawHeaderMap(request: FastifyRequest): ReadonlyMap<string, string> {
   return headers;
 }
 
+/**
+ * Authorization에서 정확한 Bearer 형식의 JWT만 꺼낸다. 아직 서명을 신뢰하지 않는다.
+ * @param headers - 중복 검사가 끝난 소문자 헤더 맵.
+ * @returns Bearer 접두사를 제외한 토큰 문자열.
+ * @throws 헤더 누락, 크기 초과, 제어문자, 형식 오류이면 InvalidAccessTokenError.
+ */
 function bearerToken(headers: ReadonlyMap<string, string>): string {
   const value = headers.get("authorization");
   if (
@@ -59,7 +70,14 @@ function bearerToken(headers: ReadonlyMap<string, string>): string {
   return match[1];
 }
 
-/** Builds the exact request descriptor from raw Fastify evidence, rejecting ambiguous framing. */
+/**
+ * 요청 ID, 메서드, 본문 길이와 콘텐츠 유형을 검사해 JWT와 비교할 요청 정보를 만든다.
+ * GET은 본문과 Content-Type을 금지하며 변경 요청은 제한 크기 안의 JSON 본문을 요구한다.
+ * @param request - 원시 URL과 검증용 본문 바이트를 가진 요청.
+ * @param headers - 중복 검사를 통과한 원시 헤더 맵.
+ * @returns 서명에 묶일 요청 정보. 본문 해시는 다음 검증 단계에서 계산한다.
+ * @throws 전송 방식이나 길이가 모호하거나 허용되지 않은 메서드이면 InvalidAccessTokenError.
+ */
 function requestIdAndFraming(request: FastifyRequest, headers: ReadonlyMap<string, string>): GuardRequest {
   const requestId = headers.get("x-request-id");
   if (requestId === undefined || !CANONICAL_UUID.test(requestId)) throw new InvalidAccessTokenError();
@@ -98,7 +116,13 @@ function requestIdAndFraming(request: FastifyRequest, headers: ReadonlyMap<strin
   return { method: request.method, target, contentType: "application/json", body, requestId };
 }
 
-/** Resolves only a contract-valid route capability, failing closed for missing metadata. */
+/**
+ * 컨트롤러·메서드 메타데이터에서 해당 경로에 필요한 위임 권한을 읽는다.
+ * @param reflector - Nest 메타데이터 조회기.
+ * @param context - 실행할 메서드와 컨트롤러 정보.
+ * @returns 공유 계약에 정의된 권한 이름 하나.
+ * @throws 권한 선언이 없거나 잘못되면 기본 권한을 주지 않고 InvalidAccessTokenError.
+ */
 function routeScope(reflector: Reflector, context: ExecutionContext): DelegatedScope {
   const scope = reflector.getAllAndOverride<unknown>(DELEGATED_SCOPE, [context.getHandler(), context.getClass()]);
   const parsed = DelegatedScopeSchema.safeParse(scope);
@@ -107,23 +131,26 @@ function routeScope(reflector: Reflector, context: ExecutionContext): DelegatedS
 }
 
 /**
- * Establishes the request principal from exactly one canonical Bearer JWT.
- * Header cardinality, byte/control checks, and syntax checks run before cryptographic verification;
- * the request remains unauthenticated on every failure.
+ * 헤더 구조와 본문을 먼저 검사하고 JWT 검증이 모두 끝난 뒤에만 사용자 정보를 요청에 붙인다.
+ * 이 가드는 사용자 식별 경계이며 금융 자원의 소유권 조회를 구현하지는 않는다.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
-  /** @param verifier - The sole authority allowed to derive an authenticated principal. */
+  /**
+   * 요청 검증기와 경로 권한 조회기를 주입받는다. 생성 시 인증이나 DB 쓰기는 하지 않는다.
+   * @param verifier - 검증된 사용자 정보를 만들어 낼 유일한 검증기.
+   * @param reflector - 경로에 선언된 위임 권한을 읽는 Nest 도구.
+   */
   public constructor(
     @Inject(ACCESS_TOKEN_VERIFIER) private readonly verifier: AccessTokenVerifier,
     private readonly reflector: Reflector,
   ) {}
 
   /**
-   * Validates the raw Authorization header before attaching a verified principal.
-   * @param context - Nest HTTP execution context containing the Fastify request.
-   * @returns `true` only after the verifier has returned a valid principal.
-   * @throws A fixed failure for malformed or invalid input; no partial principal is attached.
+   * 원시 헤더, 요청 형태, 경로 권한을 확인하고 토큰 검증 결과를 request.principal에 저장한다.
+   * @param context - Fastify 요청이 들어 있는 Nest HTTP 실행 문맥.
+   * @returns 모든 검사와 재사용 차단 저장이 성공했을 때만 true.
+   * @throws 잘못된 인증 입력 또는 검증기 운영 오류. 실패한 검증 결과는 요청에 저장하지 않는다.
    */
   public async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<FastifyRequest>();

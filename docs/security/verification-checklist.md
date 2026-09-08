@@ -4,6 +4,8 @@
 
 체크 표시는 증거가 있을 때만 한다. “프레임워크가 알아서 처리한다”, “ID를 추측하기 어렵다”, “UI에서 숨겼다”는 증거가 아니다. PR 작성자는 증거를 제공하고 검토자는 실패 경로를 확인한다.
 
+2026-09-08 현재 아래 표는 출시 목표 요구사항이다. 모든 도구·금융 기능·모바일 검증이 구현됐다는 뜻은 아니다. 현재 CI는 lint/typecheck/unit/build·의존성 audit·자체 Git blob 비밀 패턴 검사·disposable DB·인증 Chromium 체인을 포함한다. 별도 SAST/SBOM/스테이징 DAST와 운영 rate limit·RLS·복구는 실제 증거를 추가해야 한다. 보류한 침투·실제 기기 테스트를 완료로 표시하지 않는다.
+
 ## 2. 설계 시작 전
 
 - [ ] 처리하는 자산과 데이터 등급을 식별했다.
@@ -43,7 +45,7 @@
 - [ ] SQL 값은 매개변수화하고 동적 식별자는 허용 목록을 사용한다.
 - [ ] 사용자 입력을 HTML, 명령, 경로, URL로 직접 연결하지 않는다.
 - [ ] 상태 변경에 안전한 HTTP 메서드와 CSRF 방어를 사용한다.
-- [ ] CORS는 정확한 origin만 허용한다.
+- [ ] 브라우저는 same-origin BFF만 호출하고 Heroku API는 브라우저 CORS를 허용하지 않으며 JWT·abuse 방어를 별도로 강제한다.
 - [ ] 오류 응답에 스택, SQL, 내부 경로, 공급자 원문이 없다.
 - [ ] 보안 헤더와 CSP가 테스트된다.
 
@@ -59,11 +61,11 @@
 - [ ] 구조화 로그는 `requestId`, `jti`, principal/route/result를 남기되 JWT, 원문 body, cookie, key material 또는 body 재구성값을 남기지 않는다.
 - [ ] API owner가 인증 principal + route를 rate-limit key로 구현하고, 신뢰 가능한 platform IP는 보조 signal로만 사용한다. 기한은 **최초 hosted delegated mutation release 전**이며, rate-limit backend·route/scope·trusted platform IP 의미 변경 전 재검토한다.
 
-### 오프라인·파일·동기화
+### 클라이언트 저장·파일·동기화
 
-- [ ] IndexedDB에 토큰과 불필요한 개인정보가 없다.
-- [ ] 로그아웃·계정 전환·탈퇴 시 로컬 데이터가 제거된다.
-- [ ] 서버가 오프라인 데이터의 인증·소유권·버전을 다시 검증한다.
+- [ ] IndexedDB·localStorage·서비스워커에 금융 데이터와 오프라인 쓰기 큐를 영구 저장하지 않는다.
+- [ ] 로그아웃·계정 전환·탈퇴 시 이전 사용자 메모리와 모바일 credential이 정책에 맞게 정리된다.
+- [ ] 서버가 재시도·기기 전환 요청의 인증·소유권·버전을 매번 검증한다.
 - [ ] idempotency key 재전송이 중복 거래를 만들지 않는다.
 - [ ] 오래된 version과 충돌을 조용히 덮어쓰지 않는다.
 - [ ] CSV 수식, 잘못된 인코딩, 초과 행, 큰 파일을 안전하게 처리한다.
@@ -80,6 +82,8 @@
 ## 4. PR 필수 자동 게이트
 
 권장 CI 순서는 다음과 같다.
+
+이 절은 추가 구축할 목표 gate도 포함한다. 현재 실행 항목은 실제 workflow와 위 상태 안내를 확인한다. 아래 도구가 설치·강제됐다고 추정해서 체크하지 않는다.
 
 ```text
 format

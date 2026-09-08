@@ -13,11 +13,21 @@ const now = new Date("2040-01-01T00:00:00.000Z");
 const context = { selector };
 const nonCanonical32ByteBase64url = `${selector.slice(0, -1)}${selector.endsWith("A") ? "B" : "A"}`;
 
+/**
+ * 발급 함수가 존재하는지 확인하고 고정 컨텍스트·시각·키로 테스트 CSRF 토큰을 만듭니다.
+ * @returns 발급된 토큰 문자열.
+ */
 function issuedToken(): string {
   expect(issueCsrfToken).toBeTypeOf("function");
   return issueCsrfToken?.(context, now, key) ?? "";
 }
 
+/**
+ * 검증 작업이 정해진 오류 타입과 메시지로 거부되는지 확인합니다. 작업은 각 assertion에서 다시 실행됩니다.
+ * @param action 실패해야 하는 동기 검증 작업.
+ * @returns 검증 후 값 없이 종료합니다.
+ * @throws 기대한 거부와 다르면 테스트 실패.
+ */
 function expectRejected(action: () => void): void {
   expect(AuthRequestRejectedError).toBeTypeOf("function");
   expect(action).toThrow(AuthRequestRejectedError);
@@ -82,6 +92,11 @@ describe("CSRF tokens", () => {
 
   it("rejects tampered expiry, nonce, and signature before accepting a token", () => {
     const [version, expiry, nonce, signature] = issuedToken().split(".") as [string, string, string, string];
+    /**
+     * 문자열 마지막 문자를 A/B로 바꾸어 nonce 또는 서명 변조 사례를 만듭니다.
+     * @param value 변조할 토큰 구성요소.
+     * @returns 끝 한 글자가 달라진 문자열.
+     */
     const tamper = (value: string): string => `${value.slice(0, -1)}${value.endsWith("A") ? "B" : "A"}`;
     for (const token of [
       `${version}.${Number(expiry) + 1}.${nonce}.${signature}`,

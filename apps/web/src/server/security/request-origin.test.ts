@@ -12,19 +12,40 @@ const now = new Date("2040-01-01T00:00:00.000Z");
 const context = { selector };
 const policy = { now, key, allowedOrigins: new Set(["https://app.example.test"]) };
 
+/**
+ * 실제 Headers 정규화를 사용하는 검증용 요청 모양을 만듭니다.
+ * @param headers 테스트 헤더 이름과 값.
+ * @param method 테스트 HTTP 메서드; 기본 POST.
+ * @returns 메서드와 Headers를 가진 요청 객체.
+ */
 function request(headers: Record<string, string>, method = "POST"): { method: string; headers: Headers } {
   return { method, headers: new Headers(headers) };
 }
 
+/**
+ * Headers가 제어문자를 먼저 거부하지 않도록 원문을 그대로 조회하는 대역을 만듭니다. get은 이름을 그대로 비교하고 없으면 null을 줍니다.
+ * @param headers 정규화하지 않을 원문 헤더.
+ * @param method 테스트 HTTP 메서드; 기본 POST.
+ * @returns 메서드와 단순 get 접근자를 가진 요청.
+ */
 function rawRequest(headers: Record<string, string>, method = "POST"): { method: string; headers: { get(name: string): string | null } } {
   return { method, headers: { get: (name) => headers[name] ?? null } };
 }
 
+/**
+ * 고정 브라우저·시각·키로 출처 검증에 사용할 유효 CSRF 토큰을 발급합니다.
+ * @returns 정상 테스트 토큰 문자열.
+ */
 function validToken(): string {
   expect(issueCsrfToken).toBeTypeOf("function");
   return issueCsrfToken?.(context, now, key) ?? "";
 }
 
+/**
+ * JSON·같은 출처·CSRF 조건을 충족하는 기본 헤더 묶음을 만듭니다.
+ * @param token 사용할 CSRF 토큰; 생략 시 새 정상 토큰.
+ * @returns 기본 성공 사례의 헤더 객체.
+ */
 function validHeaders(token = validToken()): Record<string, string> {
   return {
     "Content-Type": "application/json; charset=utf-8",
@@ -34,6 +55,14 @@ function validHeaders(token = validToken()): Record<string, string> {
   };
 }
 
+/**
+ * 요청 검증이 고정 CSRF 오류로 실패하고 입력 원문이 메시지에 포함되지 않는지 확인합니다.
+ * @param input 거부되어야 할 요청.
+ * @param supplied 오류에 노출되면 안 되는 문자열.
+ * @param activePolicy 시험할 출처·키·시각 정책.
+ * @returns 검증 후 값 없이 종료합니다.
+ * @throws 거부 타입·메시지·비노출 조건이 다르면 테스트 실패.
+ */
 function expectRejected(input: unknown, supplied = "", activePolicy: unknown = policy): void {
   expect(AuthRequestRejectedError).toBeTypeOf("function");
   expect(() => verifyCsrfRequest?.(input, context, activePolicy)).toThrow(AuthRequestRejectedError);
