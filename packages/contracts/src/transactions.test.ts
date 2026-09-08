@@ -60,6 +60,32 @@ describe("transaction command schemas", () => {
 });
 
 describe("transfer and transaction response schemas", () => {
+  it("rejects a same-account transfer even when UUID casing differs", () => {
+    expect(() => CreateTransferInputSchema.parse({
+      amountKrw: 100,
+      fromAccountId: accountId,
+      toAccountId: accountId.toUpperCase(),
+      idempotencyKey,
+      occurredOn: "2026-08-26",
+    })).toThrow("TRANSFER_ACCOUNTS_MUST_DIFFER");
+  });
+
+  it.each(["id", "accountId"] as const)("rejects transfer results with duplicate %s in different casing", (field) => {
+    const debit = { ...baseTransaction, kind: "transfer_out", categoryId: null, transferId };
+    const credit = { ...baseTransaction, id: categoryId, accountId: categoryId, kind: "transfer_in", categoryId: null, transferId, [field]: accountId.toUpperCase() };
+    expect(() => CreateTransferResultSchema.parse({ debit, credit, transferId })).toThrow("TRANSFER_RESULT_FIELDS_MISMATCH");
+  });
+
+  it("accepts matching transfer references with different UUID casing", () => {
+    const debit = { ...baseTransaction, kind: "transfer_out", categoryId: null, transferId: transferId.toUpperCase() };
+    const credit = { ...baseTransaction, id: categoryId.toUpperCase(), accountId: categoryId.toUpperCase(), kind: "transfer_in", categoryId: null, transferId };
+    expect(CreateTransferResultSchema.parse({ debit, credit, transferId })).toMatchObject({
+      transferId,
+      debit: { transferId },
+      credit: { id: categoryId, accountId: categoryId, transferId },
+    });
+  });
+
   it("validates transfer commands and atomic result kinds", () => {
     expect(CreateTransferInputSchema.parse({ amountKrw: 100, fromAccountId: accountId, idempotencyKey, occurredOn: "2026-08-26", toAccountId: categoryId })).toMatchObject({ amountKrw: 100 });
     expect(() => CreateTransferInputSchema.parse({ amountKrw: 100, fromAccountId: accountId, idempotencyKey, occurredOn: "2026-08-26", toAccountId: accountId })).toThrow();

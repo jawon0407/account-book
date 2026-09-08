@@ -17,6 +17,11 @@ const uuid = "123e4567-e89b-42d3-a456-426614174000";
 const uuidV4 = "123e4567-e89b-42d3-a456-426614174000";
 
 describe("ledger identifiers", () => {
+  it("canonicalizes resource UUIDs before consumers compare identity", () => {
+    expect(LedgerIdSchema.parse("123E4567-E89B-42D3-A456-426614174000")).toBe(uuid);
+    expect(LedgerIdSchema.parse("123e4567-E89b-42D3-a456-426614174000")).toBe(uuid);
+  });
+
   it("accepts resource UUIDs and requires UUID v4 idempotency keys", () => {
     expect(LedgerIdSchema.parse(uuid)).toBe(uuid);
     expect(IdempotencyKeySchema.parse(uuidV4)).toBe(uuidV4);
