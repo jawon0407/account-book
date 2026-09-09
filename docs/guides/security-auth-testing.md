@@ -1,5 +1,30 @@
 # 인증 보안 테스트 가이드
 
+## 최신 보안 의존성 검증: 2026-09-09
+
+이 절은 아래 과거 SHA별 기록보다 최신이다. 기준 `a36f719`에서 분기한 `hotfix/next-security-20260909`의 미커밋 작업 트리를 검사했다. 사용자 승인에 따라 Next 16.2.11 → 16.3.3, baseline-browser-mapping 2.10.43 → 2.11.0을 적용했다. 실제 운영 배포 증거는 아니다.
+
+- 기존 보안 정책: sharp optional 의존성 제외, PostCSS 8.5.23 및 다른 override 유지. React/Nest/Fastify·인증/DB 로직·디자인은 변경하지 않았다.
+- RED: 정책 테스트 수정 후 4개 중 2개 실패. 기존 Next 버전과 새 lock resolution 누락을 탐지했다. Next만 갱신한 중간 단계에는 baseline 취약 버전 잔존으로 1개가 실패했다.
+- GREEN: scoped baseline override 적용 후 정책 테스트 4/4 통과. 실패 로그에는 신규 테스트가 잠금파일 전체 대신 고정 안내와 boolean 결과를 출력한다.
+- 설치: Node 22.15.1/pnpm 11.9.0, `pnpm install --lockfile-only` 및 `pnpm install --frozen-lockfile` 종료 코드 0. 새 install script 허용은 추가하지 않았다.
+- Next build는 추적 중인 `apps/web/next-env.d.ts`에 생성 타입 `root-params.d.ts` import 1줄을 추가했다. 자동 생성 변경으로 파일 지도에 추가했으며 수동 인증 로직 변경은 없다.
+- `pnpm verify` 종료 코드 0: lint, 6 workspace 타입 검사, API/웹 production build, 테스트 873개(legacy/security 54 + contracts 66 + database unit 12 + API 147 + web 509 + E2E preflight 85).
+- `pnpm audit --prod --json` 종료 코드 0: 알려진 취약점 0건. 업데이트 전 Critical 2·Moderate 1건과 구분한다. 개발 의존성 전체 audit이나 모든 보안 결함 부재를 뜻하지 않는다.
+- `pnpm why`: Next 16.3.3, baseline-browser-mapping 2.11.0 확인. sharp 연결 없음.
+- 독립 변경분 리뷰: 차단 결함·무관한 의존성 변경 없음. 정책 테스트의 peer-qualified snapshot 개별 검사 강화는 선택적 개선으로 남겼다. frozen-lockfile 설치와 전체 검증이 실제 일치 여부를 추가 확인했다.
+- 공개 화면: 루프백 production 서버에서 5페이지/15개 화면 조합 HTTP 200, 가로 넘침 0·axe 위반 0·pageerror 0. 로그인 빈 입력 오류와 이메일 포커스, 공개 링크 이동 4회·콘솔 오류 0을 확인했다. UI 캡처에는 실제 계정·인증정보를 넣지 않았다.
+- FCP: 데스크톱 Chromium 149 화면 폭별 7회. 390px 중앙값/p75 32/32ms, 1440px 52/56ms. 이전 p75 36/40ms와 단순 비교할 수 있으나 warm loopback·CPU/네트워크 무제한 소수 표본이므로 회귀/개선을 단정하지 않는다. 실제 한국망·모바일 측정은 아니다.
+- 로컬 원시 결과: Git 제외 `output/playwright/next-security-20260909/browser-results.json` 및 같은 폴더 캡처. 이전 검사 소스를 재사용했고 별도 검사 의존성이나 테스트 파일은 추가하지 않았다.
+- 폐기용 PostgreSQL 5432 listener가 없어 `test:db`, `prepare:e2e`, 전체 인증 E2E는 미실행. preflight 통과를 그 대체 증거로 사용하지 않는다. 후속 요청으로 커밋/푸시가 승인됐으며 동일 SHA CI 결과를 별도로 확인해야 한다.
+- 전송 전 재검증: `pnpm verify` 및 `pnpm audit --prod --json`을 다시 실행해 종료 코드 0을 확인했다. 독립 전송 준비 리뷰에서 차단 결함은 발견되지 않았다. PR 생성·병합·배포와 리전 이전 구현은 이번 전송 승인에 포함하지 않는다.
+
+### 업데이트에서 새로 확인한 배포 전 검토 항목
+
+Next build가 `preferredRegion` route segment config deprecated 경고를 냈다. 공식 문서는 route export 제거를 안내하지만, 현재 `iad1` 지역 배치 정책의 대체 위치·실제 Vercel 동작을 검증하지 않았으므로 이번 작업에서 설정을 제거하지 않았다. 리전 설정 변경은 별도 계획·승인 후 수행하고, 이 경고와 hosted 검증 미완료 상태를 배포 전에 해소해야 한다. [공식 안내](https://nextjs.org/docs/messages/preferred-region-deprecated)
+
+검증과 잔여 작업의 상세 순서는 [승인된 실행 계획](../superpowers/plans/2026-09-09-next-security-update.md)에 기록했다.
+
 최종 인증·delegated-JWT 구현 SHA는 `93737d3c8278f92242670b403c30cb3beb05b0e2`다. 최종 evidence와 CI check는 `git rev-parse HEAD`의 동일 SHA여야 한다.
 
 GitHub `security-gate` [run 15](https://github.com/jawon0407/account-book/actions/runs/30214338261)는 이 SHA에서 disposable PostgreSQL migration·privilege·replay 검증, Chromium 인증 E2E, pinned Node 22, 전체 verify와 production audit를 통과했다. 같은 tree의 로컬 `pnpm test`도 legacy 53, contracts 22, database 12, API 113, web 479, E2E preflight 2 tests로 종료 코드 `0`이었다.

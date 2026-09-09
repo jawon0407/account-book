@@ -50,8 +50,9 @@ const approvedPackageLocalSkipLibCheck = [
 ];
 
 const expectedWorkspaceOverrides = {
-  "next@16.2.11>sharp": "-",
-  "next@16.2.11>postcss": "8.5.23",
+  "next@16.3.3>sharp": "-",
+  "next@16.3.3>postcss": "8.5.23",
+  "next@16.3.3>baseline-browser-mapping": "2.11.0",
   "nanoid@3.3.16": "3.3.18",
   "find-my-way@9.6.0": "9.7.0",
   "@nestjs/platform-fastify@11.1.28>fastify": "5.12.3",
@@ -158,7 +159,7 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
 
   assert.deepEqual(pkg.devDependencies, expectedDevDependencies);
   assert.equal(apiPackage.dependencies.fastify, "5.12.3");
-  assert.equal(webPackage.dependencies.next, "16.2.11");
+  assert.equal(webPackage.dependencies.next, "16.3.3");
   assert.equal(
     e2ePackage.scripts["test:preflight"],
     "tsx --test production-fake-startup.test.ts playwright-environment.test.ts playwright-config.test.ts auth-response-policy.test.ts ui-facade-boundary.test.ts support/safe-ui-error.test.ts support/transport-tripwire.test.ts support/safe-ui-test.test.ts",
@@ -214,7 +215,7 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
       }),
   );
   assert.deepEqual(allowBuilds, { esbuild: true });
-  // Next 16.2.11 pulls sharp 0.34.5 only as an optional image optimizer.
+  // Next 16.3.3 declares sharp only as an optional image optimizer.
   // The app has no next/image usage, so keep that unused native dependency absent.
   // Its production PostCSS dependency and Fastify stack are pinned to patched releases.
   assert.deepEqual(workspaceScalarOverrides(workspace), expectedWorkspaceOverrides);
@@ -233,6 +234,16 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
   assert.doesNotMatch(eslintConfig, /\.\.\.tseslint\.configs\.recommended,\s/);
   assert.equal(existsSync(join(rootDir, "packages", "config", "package.json")), false);
   assert.match(readFileSync(configReadmePath, "utf8"), /non-package placeholder/i);
+});
+
+test("Next security update excludes audited vulnerable resolutions", () => {
+  // 생성된 잠금파일을 검사해 승인 버전 누락·취약 버전 또는 불필요한 이미지 의존성 재유입을 막는다.
+  // 콜백 매개변수는 없으며 파일 읽기 외에 설치나 네트워크 부작용은 없다.
+  const lockfile = readFileSync(lockfilePath, "utf8");
+  assert.equal(/^ {2}next@16\.3\.3:/mu.test(lockfile), true, "patched Next resolution must exist");
+  assert.equal(/^ {2}next@16\.2\.11:/mu.test(lockfile), false, "audited vulnerable Next must be absent");
+  assert.equal(/^ {2}baseline-browser-mapping@2\.10\.43:/mu.test(lockfile), false, "audited vulnerable browser mapping must be absent");
+  assert.equal(/^ {2}sharp@/mu.test(lockfile), false, "unused native image optimizer must remain absent");
 });
 
 test("workspace policy detects unapproved local TypeScript config overrides", () => {

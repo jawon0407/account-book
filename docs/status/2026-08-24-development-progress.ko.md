@@ -1,5 +1,9 @@
 # Account Book 개발 진행 현황
 
+> **전송 준비 추가 (2026-09-09):** 아래 미커밋 기록 이후 사용자가 커밋·푸시를 승인했다. 전송 전 verify·운영 audit 재검증은 종료 코드 0이다. 실제 전송/CI 상태는 해당 브랜치 HEAD로 확인하며, PR 생성·병합·배포는 수행 범위가 아니다. 다음 리전 설정 대안·후보 22파일·검증 순서는 [계획서 8절](../superpowers/plans/2026-09-09-next-security-update.md#8-다음-작업-사전-검토--구현-승인-대기)에 기록했다. 다음 제품 코드 변경은 승인 대기다.
+
+> **최신 추가 (2026-09-09):** 사용자 승인 후 `hotfix/next-security-20260909`에서 Next 16.3.3·baseline-browser-mapping 2.11.0으로 보안 업데이트했다. 기준 커밋은 `a36f719`이고 수정은 아직 미커밋이다. 로컬 verify(873 tests·lint·타입·API/웹 빌드), 운영 audit 0건, 공개 인증 화면 15조합 검증을 통과했다. 실제 DB/인증 전체 E2E·새 CI·배포는 미실행이다. `preferredRegion` 사용 중단 경고의 배포 정책 검토를 별도 승인 과제로 추가했다. [검증 기록](../guides/security-auth-testing.md), [실행 계획](../superpowers/plans/2026-09-09-next-security-update.md), [상시 작업 승인 절차](../guides/change-workflow.ko.md)를 참고한다. 아래 9월 8일 안내와 1~13절은 과거 기록이다.
+
 > **최신 안내 (2026-09-08):** 이 파일의 1~13절은 8월 24일 스냅샷이며 PR 번호·미해결 의존성 수치·다음 작업 순서는 당시 기록입니다. 현재 분야별 상태는 [문서 지도](../README.md), 최근 코드 변경은 아래 날짜별 기록을 우선합니다. 현재 작업 브랜치는 `feature/ledger-public-contracts`, 기준 HEAD는 `5cc94601c74a1e08f848a0cbc0bde191e7a47f81`입니다. PR #9 보안 패치는 병합됐고 PR #8의 해당 SHA CI가 통과했습니다. 로컬 UUID 수정과 이번 주석·문서 변경은 그 CI 이후 작업입니다.
 
 > - 기준일: 2026-08-24
