@@ -10,5 +10,17 @@ import * as schema from "./schema/auth.js";
  */
 export function createDatabaseClient(connectionString: string) {
   if (!connectionString.trim()) throw new Error("connectionString must not be blank");
-  return drizzle({ connection: connectionString, schema });
+  const database = drizzle({ connection: connectionString, schema });
+  let reportedIdleError = false;
+  // 유휴 연결 오류를 풀별 최초 한 번의 고정 진단으로 바꾼다. 오류와 client 인수는 비밀 노출을 막기 위해 사용하지 않는다.
+  database.$client.on("error", () => {
+    if (reportedIdleError) return;
+    reportedIdleError = true;
+    try {
+      console.error("DB_POOL_IDLE_ERROR source=bff");
+    } catch {
+      // 진단 출력 실패가 DB 이벤트를 다시 처리되지 않은 예외로 만들지 않게 한다.
+    }
+  });
+  return database;
 }

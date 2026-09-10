@@ -1,5 +1,20 @@
 # 인증 백엔드 아키텍처
 
+## DB 연결 오류 경계 — 2026-09-09 A안
+
+DB 연결 풀은 여러 요청이 사용할 연결을 보관하고 재사용한다. BFF의 [`createDatabaseClient`](../../packages/database/src/client.ts)는 Drizzle이 만든 node-postgres 풀을 감싸며, API의 [`MeModule`](../../apps/api/src/me/me.module.ts)은 Nest DI에 API 전용 풀을 제공한다. 이번 A안은 두 생성 지점의 유휴 오류 수신을 보완한다. 실행·검증 상태는 [상세 계획](../superpowers/plans/2026-09-09-database-pool-error-boundary.md)의 기록을 따른다.
+
+쿼리 실패와 유휴 연결 오류는 서로 다른 경로다.
+
+1. **쿼리 중 실패:** 요청을 처리하던 코드가 reject된 Promise를 받아 기존 오류 응답으로 바꾼다. API replay 저장소는 상세 정보를 버린 `ReplayStoreUnavailableError`를 발생시켜 인증을 실패 차단한다.
+2. **유휴 연결의 오류:** 사용하지 않는 연결도 DB 재시작·네트워크 단절로 실패할 수 있다. 이때 풀의 `error` 이벤트를 별도로 받아야 한다. 요청 함수의 try/catch만으로는 이 이벤트를 처리할 수 없다.
+
+두 생성 지점의 수신 함수는 오류와 client 인수를 읽지 않고, **풀마다 최초 한 번만** `DB_POOL_IDLE_ERROR source=bff` 또는 `DB_POOL_IDLE_ERROR source=api`를 서버의 표준 오류 출력에 남긴다. 출력 전에 인스턴스별 플래그를 설정해 반복·중첩 이벤트의 로그 폭주를 막는다. 로그 출력 자체가 동기적으로 실패하더라도 그 예외를 다시 이벤트 밖으로 전파하지 않는다. 오류 원문·stack·SQL·연결 문자열·사용자 데이터는 진단에 포함하지 않는다.
+
+이는 완전한 장애 모니터링이 아니다. 같은 풀에서 두 번째 이후 장애는 별도 출력하지 않으므로 이 메시지 수를 장애 횟수로 계산하면 안 된다. 여러 프로세스/인스턴스는 각각 최초 진단을 낼 수 있고, 출력 계층 자체가 실패하면 기록이 남지 않을 수 있다. 배포 시 이 고정 이벤트와 플랫폼 로그·가용성 경보를 연결하는 작업은 별도다.
+
+오류 수신은 DB 복구나 쿼리 재실행을 뜻하지 않는다. 손상된 유휴 연결 제거는 pg 드라이버의 기존 책임이며, 앱은 자동 재시도·전역 예외 무시·인증 성공 우회를 추가하지 않는다. API의 최대 5개 연결·연결 대기 2초·유휴 10초 설정, BFF의 프로세스 내 클라이언트 재사용, replay 저장소의 종료 1회 책임은 유지한다. 전체 인스턴스 연결 예산과 실제 Supabase 요청 시간 제한은 이번 변경과 별개다.
+
 > 2026-09-08 갱신: 이 문서의 SHA별 테스트·Task 기록은 당시 증거로 보존한다. 최신 HEAD `5cc94601c74a1e08f848a0cbc0bde191e7a47f81` CI는 899개 테스트 기록이며 로컬 UUID 보완은 contracts 66개로 별도 검증했다. 현재 금융 CRUD·원장 DB·`/app`·모바일은 미구현이다. 입문자는 [코드 읽기](../guides/code-reading.ko.md), 전체 상태는 [문서 지도](../README.md)를 먼저 읽는다. live Supabase 미검증과 disposable PostgreSQL CI 성공은 서로 다른 상태다.
 
 > **English Summary:** The implemented authentication boundary now includes 14 same-origin Next.js BFF routes, always-Secure opaque cookies, selector-bound CSRF, server-owned OAuth redirect handoff, request-scoped services over a shared database client, encrypted provider credentials, responsive accessible authentication screens, and a NestJS/Fastify API that independently verifies JWT signatures and claims before creating a request principal. Rate-limit use cases and live Supabase/PostgreSQL verification remain unfinished.
@@ -323,7 +338,7 @@ provider boundary가 허용하는 오류 코드는 다음 다섯 개다.
 
 브라우저는 Vercel same-origin BFF의 HttpOnly opaque cookie만 사용한다. BFF는 세션을 확인한 뒤 Heroku API 요청마다 ES256 delegated JWT를 발급하며, Heroku는 PostgreSQL에서 원자적으로 one-time replay를 consume한다. JWT는 30초 TTL, exact issuer/audience, route scope, request binding, `jti`를 요구한다. Heroku는 static public-key allowlist만 신뢰하고 `BFF_AUTH_DISABLED` kill switch로 BFF를 독립적으로 fail-closed 할 수 있다.
 
-모든 BFF route는 Node.js, `iad1`, dynamic, 10초 maxDuration 정책을 명시한다. E2E는 프로세스 수명의 ephemeral P-256 key pair로 private BFF signing key와 public API verification key를 분리한다. secret, key material, JWT, selector, request-binding hash, DB 연결 문자열은 문서·로그·trace·snapshot에 기록하지 않는다.
+모든 BFF route는 Node.js, dynamic, 10초 maxDuration 정책을 명시한다. 단일 `iad1` 실행 지역은 `apps/web/vercel.json`으로 통합했으며 향후 Vercel Root Directory는 `apps/web`이다. 실제 프로젝트 생성과 hosted 배치 확인은 아직 미완료다. 이 변경은 Heroku API 리전·DB credential·JWT 신뢰 경계를 바꾸지 않는다. E2E는 프로세스 수명의 ephemeral P-256 key pair로 private BFF signing key와 public API verification key를 분리한다. secret, key material, JWT, selector, request-binding hash, DB 연결 문자열은 문서·로그·trace·snapshot에 기록하지 않는다.
 
 Task 7 code-fix commit은 `357f8412dcb19b004a0a0e45f08449682fc23f75`, 최종 검증 SHA는 `93737d3c8278f92242670b403c30cb3beb05b0e2`다. focused route-wiring GREEN은 25 files/479 tests였고, 최종 로컬 `pnpm test`는 legacy 53, contracts 22, database 12, API 113, web 479, E2E preflight 2 tests로 exit 0이었다. child process는 OS/toolchain 변수만 상속하고 Windows case-insensitive API/BFF/auth/database boundary 변수를 explicit allowlist 전 삭제한다. 개발 PC의 PostgreSQL listener 부재로 guarded DB preparation과 browser E2E는 로컬에서 실행하지 않았지만, 같은 최종 SHA의 GitHub `security-gate` [run 15](https://github.com/jawon0407/account-book/actions/runs/30214338261)가 pinned Node 22, disposable PostgreSQL, Chromium E2E와 production audit를 통과했다. Hosted Supabase role·pooler·cron, provider별 live OAuth, key rotation 제거와 kill-switch evidence는 출시 전 책임자가 별도로 수집해야 하는 차단 조건이다.
 

@@ -1,5 +1,34 @@
 # 인증 보안 테스트 가이드
 
+## DB 유휴 연결 오류 경계: 2026-09-09
+
+사용자 승인 A안으로 BFF의 Drizzle 풀과 API의 Nest DI 풀에 유휴 `error` 이벤트 수신을 추가했다. 기준 HEAD는 `afacc4c0f50cd6214bf7231065fa039240e6df9b`이며 검증 대상은 기존 리전 이전도 포함한 **미커밋 작업 트리**다. [상세 계획과 완료 상태](../superpowers/plans/2026-09-09-database-pool-error-boundary.md)
+
+- Baseline: database 12/12, API controller/replay-store 23/23 통과.
+- RED: 새 DB 테스트 3/3이 처리되지 않은 오류 이벤트로 실패했다. API는 테스트 생성자 대역의 비구성 가능 함수 오류를 먼저 수정한 후, 제품 누락에 의해 2개 실패·7개 통과를 확인했다. 대역 작성 오류는 제품 결함으로 계산하지 않는다.
+- GREEN: database 전체 15/15, API controller/replay-store 24/24, 종료 코드 0. 실제 lazy pg.Pool을 사용하되 쿼리·connect를 호출하지 않고 이벤트를 발생시켰다. 실제 네트워크 단절 실험은 아니다.
+- 검사 내용: 최초·반복·중첩 오류 수신, 풀별 독립 진단, 오류/client의 가짜 비밀값 비출력, console.error의 동기 실패 비전파, 기존 API 풀 설정·종료 1회 계약. 테스트 환경변수·spy·module/pool은 정리한다.
+- 전체 `pnpm verify` 종료 코드 0: **878 tests**(legacy/security 54 + contracts 66 + database 15 + API 148 + web 510 + E2E preflight 85), lint·6 workspace 타입 검사·API/웹 build 통과. Node 22.15.1/pnpm 11.9.0 사용.
+- 이번 작업의 DB 스키마·의존성·lockfile·UI 변경 없음. audit 재실행, 실제 DB 재시작/단절, 전체 DB-backed 인증 E2E, 브라우저/FCP, hosted OAuth, 새 CI·배포는 미실행이다. preflight는 실제 E2E의 대체 증거가 아니다.
+- 원시 출력: Git 제외 `output/database-pool-error-verify.log`. 커밋·푸시·PR·병합은 수행하지 않았다.
+- 독립 코드·최종 통합 리뷰에서 Critical·Important 없음. API 테스트 종료 자체가 reject할 경우 뒤의 spy/env 복구가 건너뛰어질 수 있다는 Minor 개선은 후속으로 남겼다. 연결 없는 lazy Pool 테스트에서 재현된 실패는 아니다.
+
+진단은 `DB_POOL_IDLE_ERROR source=bff` 또는 `DB_POOL_IDLE_ERROR source=api`만 풀마다 최초 1회 출력한다. 장애 원문과 client 인수는 읽지 않으며, 반복 로그를 세지 않으므로 장애 횟수 측정 수단으로 사용할 수 없다. 쿼리 실패 차단은 유지하고 자동 재시도·DB 복구 성공을 보장하지 않는다.
+
+## 리전 설정 이전: 2026-09-09
+
+사용자 A안 승인 및 Vercel 프로젝트 미생성 확인 후 향후 Root Directory를 `apps/web`으로 정했다. `feature/vercel-region-policy`에서 단일 `iad1`을 `apps/web/vercel.json`으로 옮기며 Node/dynamic/10초 route 정책과 HTTP·인증 계약은 유지한다. [상세 실행 계획](../superpowers/plans/2026-09-09-vercel-region-policy.md)
+
+이전 보안 업데이트 커밋 `afacc4c0f50cd6214bf7231065fa039240e6df9b`의 [security-gate](https://github.com/jawon0407/account-book/actions/runs/34307677601)는 성공했다. 이 결과는 해당 SHA의 폐기용 DB·인증 E2E·audit 증거이며 이번 미커밋 리전 변경의 CI 증거가 아니다. 아래 보안 업데이트 절에서 CI 확인을 남겨 둔 기록은 이 결과로 보충한다.
+
+리전 이전의 로컬 검증 결과:
+
+- RED: 새 JSON 설정 존재 검증 1개 실패, 기존 focused 테스트 15개 통과. 설정 추가 뒤에도 계획의 상대 경로 오류로 한 차례 실패했으며 실제 웹 루트를 가리키도록 정정했다. 이 중간 실패는 제품 결함으로 계산하지 않는다.
+- GREEN: focused 16/16, `pnpm verify` 종료 코드 0. 전체 874 tests(54 + 66 + 12 + 147 + 510 + 85), lint·6 workspace 타입 검사·API/웹 build 통과. `preferredRegion` deprecated 경고 없음.
+- 14 routes의 Node/dynamic/10초 정책과 기존 지원하지 않는 메서드의 405·no-store 응답 테스트를 유지했다. 신규 검사는 Vercel에 전달할 JSON 정책을 확인하며 hosted 실행을 모의하지 않는다.
+- 패키지·DB·UI 변경 없음. 이번 작업의 브라우저 UI/FCP·DB/전체 인증 E2E·audit 재실행은 하지 않았다. 실제 Vercel 배치, 실제 공급자 OAuth 및 한국망 응답 시간은 아직 검증하지 않았다.
+- 로컬 출력: Git 제외 `output/vercel-region-verify.log`. 새 변경의 커밋·푸시·CI·배포는 하지 않았다.
+
 ## 최신 보안 의존성 검증: 2026-09-09
 
 이 절은 아래 과거 SHA별 기록보다 최신이다. 기준 `a36f719`에서 분기한 `hotfix/next-security-20260909`의 미커밋 작업 트리를 검사했다. 사용자 승인에 따라 Next 16.2.11 → 16.3.3, baseline-browser-mapping 2.10.43 → 2.11.0을 적용했다. 실제 운영 배포 증거는 아니다.
