@@ -1,5 +1,9 @@
 # Account Book 개발 진행 현황
 
+> **R1 전송 승인 (2026-09-10):** 사용자가 R1 변경의 커밋·푸시를 승인했다. 역할 분리 제품·테스트·설정 11파일과 관련 문서 7파일만 커밋 대상으로 삼으며 기존 `.gitignore` 수정은 제외한다. 전송 전 전체 `pnpm verify`와 저장소 보안 게이트를 다시 확인한다. 새 기능 브랜치의 이력에는 기존 리전 설정 `92e54e2`·DB 오류 처리 `66a2319`도 포함된다. 아래 미커밋·미푸시 표현은 당시 기록이며 실제 전송 성공 여부는 로컬 HEAD와 원격 브랜치 SHA 일치로 확인한다. PR 생성·병합·배포·다음 개발은 이번 범위에서 제외한다.
+
+> **R1 역할별 분리 완료 (2026-09-10):** `66a2319`에서 만든 `feature/auth-adapter-role-split`에서 Supabase 어댑터625→248줄 및 검증·세션 파싱·오류 변환·HTTP·SDK 생성의5모듈 분리를 마쳤다. 로그인 동작·DB·UI·의존성은 유지했다. 원본64개 인증 사례/24개 테스트 블록을 보존했고 마지막 주석 복원 후 전체 `pnpm verify`878tests·lint·6 workspace 타입·API/웹build가 종료코드0이다. 선택적 branches는91.73%→91.86%로 여전히 기존100% 기준 미달이다. 독립 task/전체리뷰 및 주석 보완 재리뷰를 마쳤고 미해결 지적은 없다. [파일 지도·실행 결과](../superpowers/plans/2026-09-10-auth-adapter-role-split.md), [한국어 코드 흐름](../architecture/backend-authentication.ko.md), [테스트 기록](../guides/security-auth-testing.md)을 갱신했다. 리전 `92e54e2`와 DB 오류 처리 `66a2319`는 로컬 커밋이며 R1은 미커밋이다. 푸시·새 CI·실제 IdP/DB 전체E2E·배포는 하지 않았다. R2 이후와 인증 시간 제한은 별도 착수 범위다.
+
 > **로컬 커밋 정리·다음 작업 검토 (2026-09-10):** 사용자가 커밋 생성을 승인했다. 커밋 전 전체 `pnpm verify`를 재실행해 878 tests·lint·타입·API/웹 build 통과(종료 코드 0)를 확인했다. 리전 설정은 `92e54e2`로 저장했고 DB 오류 처리·공통 결과 문서는 별도 커밋 단위로 정리한다. 아래 미커밋 표현은 당시 이력이며 최신 상태는 Git 커밋을 따른다. 푸시·새 CI·배포는 하지 않는다. 다음 개발은 [실제 Supabase 인증 요청 시간 제한 검토](2026-09-10-auth-deadline-next-work.ko.md)의 A안 승인 대기다. 새 제품 코드는 수정하지 않았다.
 
 > **DB 유휴 오류 경계 추가 (2026-09-09):** 승인된 A안으로 BFF/API 풀 생성 지점 2곳에 오류 수신과 풀별 최초 1회 고정 진단을 추가했다. 원문·SQL·연결 문자열은 출력하지 않고 기존 연결 한도·인증 실패 차단·종료 책임은 유지한다. RED 재현 후 focused database 15/15·API 24/24, 전체 `pnpm verify` 878 tests·lint·타입·빌드가 통과했다. 실제 DB 단절·hosted 인증·새 CI·배포는 미검증이며 리전 변경과 함께 미커밋 상태다. 다음 후보는 실제 Supabase 요청 시간 제한이며 별도 계획·승인 후 진행한다. [이번 실행 계획](../superpowers/plans/2026-09-09-database-pool-error-boundary.md), [검증 기록](../guides/security-auth-testing.md).

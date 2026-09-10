@@ -1,5 +1,30 @@
 # 인증 백엔드 아키텍처
 
+## Supabase 인증 어댑터의 역할 분리 — 2026-09-10 R1
+
+이 절은 승인된 R1 구조를 설명한다. 구현·검증의 완료 여부는 [실행 계획](../superpowers/plans/2026-09-10-auth-adapter-role-split.md)과 [테스트 기록](../guides/security-auth-testing.md#supabase-어댑터-역할-분리-2026-09-10-r1)을 따른다. 인증 기능을 새로 만드는 작업이 아니라 기존 625줄 파일의 책임을 나누는 작업이다.
+
+어댑터(adapter)는 앱이 쓰는 인증 인터페이스를 외부 Supabase 호출로 바꿔 주는 연결부다. 서비스는 여전히 `SupabaseAuthAdapter`만 호출하고 내부 파일 배치에 의존하지 않는다. 파일이 늘어도 외부 공개 API와 사용자 로그인 절차는 같아야 한다.
+
+| 파일 (`apps/web/src/server/auth/` 기준) | 책임과 입력 → 출력 | 수정하는 상황 |
+| --- | --- | --- |
+| `supabase-auth-adapter.ts` | 로그인·가입·복구 등의 작업 입력 → 검증된 인증 결과. 어떤 검사를 먼저 하고 어떤 통신을 호출할지 조합 | 인증 작업의 순서를 검토할 때 |
+| `supabase/validation.ts` | URL·문자열·UUID·PKCE 후보 → 허용된 입력 또는 고정 오류 | 입력 형식/설정 정책을 변경할 때 |
+| `supabase/session-parser.ts` | 외부 SDK/HTTP 응답 → 내부 토큰 쌍. 사용자·메일 확인·발급/만료 시각 일치 검사 | 외부 응답 계약을 검토할 때 |
+| `supabase/error-mapper.ts` | 원시 오류·HTTP 상태 → 허용된 앱 오류/계정 존재 은폐 판단 | 오류 정책을 검토할 때 |
+| `supabase/http-client.ts` | 서버 설정·fetch 함수·URL·JSON 객체 → HTTP 상태와 읽은 본문 | 직접 HTTP 전송/JSON 처리를 검토할 때 |
+| `supabase/sdk-client.ts` | URL·anon 키·비영속 옵션 → 새 SDK 클라이언트 | SDK 초기화/서버 저장 금지 정책을 검토할 때 |
+
+입문자는 공개 어댑터의 `signInWithPassword`를 먼저 읽고, `sdk-client` → `session-parser` → `validation` → `error-mapper` 순서로 따라가면 된다. 로그인은 이메일·비밀번호를 검사한 후 작업 전용 SDK로 요청하고, SDK의 오류를 먼저 확인한 다음 세션의 사용자·토큰·시각을 검사한다. 외부 호출만 성공했다고 앱의 세션이 자동 생성되는 것은 아니다. 검증된 결과를 받은 상위 서비스가 서버 세션 저장을 맡는다.
+
+메일 확인/OAuth/복구 코드 교환은 다른 경로다. 서버 보유 PKCE verifier와 코드를 검사하고 `http-client`로 직접 POST한다. SDK에 PKCE 저장을 맡기지 않는다. `error-mapper`는 직접 HTTP의 실제 상태를 우선하므로, 본문 안에 가짜 status가 있어도 이를 대신 사용하지 않는다. 가입 중 이미 존재하는 계정, 복구 중 없는 계정을 숨기는 허용 상태·오류 코드 조합도 기존 정책 그대로다.
+
+`session-parser`의 JWT 처리는 **구문과 클레임의 일관성 검사이지 암호학적 서명 검증이 아니다**. Heroku API의 delegated JWT 서명 검증과 혼동하면 안 된다. 또한 파일 분리는 새 timeout·재시도·레이트리밋·보안 기능을 추가하지 않는다.
+
+서버 전용 경계는 모든 제품 모듈의 `server-only` 표식으로 유지한다. 의존 방향은 어댑터 → 통신/파서 → 검증/오류이며, 오류 모듈이 검증 모듈을 역참조하지 않는다. `SupabaseServerConfig`, `SupabaseClientFactory`, `SupabaseFetch`는 기존 어댑터 경로에서도 타입으로 사용할 수 있어 호출부를 바꿀 필요가 없다. 테스트 대역은 `test-fixtures.ts`에만 두고 제품 코드에서는 사용하지 않는다.
+
+파일을 역할별로 나누는 것은 브라우저에서 필요한 JavaScript만 내려받는 동적 코드 분할과 다르다. 이번 변경으로 FCP나 서버 응답 시간이 개선됐다고 주장하지 않는다. 이득은 다음 수정 때 읽고 검토해야 할 책임의 범위가 명확해지는 것이다.
+
 ## DB 연결 오류 경계 — 2026-09-09 A안
 
 DB 연결 풀은 여러 요청이 사용할 연결을 보관하고 재사용한다. BFF의 [`createDatabaseClient`](../../packages/database/src/client.ts)는 Drizzle이 만든 node-postgres 풀을 감싸며, API의 [`MeModule`](../../apps/api/src/me/me.module.ts)은 Nest DI에 API 전용 풀을 제공한다. 이번 A안은 두 생성 지점의 유휴 오류 수신을 보완한다. 실행·검증 상태는 [상세 계획](../superpowers/plans/2026-09-09-database-pool-error-boundary.md)의 기록을 따른다.

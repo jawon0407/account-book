@@ -1,5 +1,37 @@
 # 인증 보안 테스트 가이드
 
+## Supabase 어댑터 역할 분리: 2026-09-10 R1
+
+기준 `66a2319`, 기능 브랜치 `feature/auth-adapter-role-split`. 사용자 승인 범위는 인증 동작을 유지한 파일 분리이며 timeout·인증 정책·DB·UI 변경은 포함하지 않는다. [실행 계획](../superpowers/plans/2026-09-10-auth-adapter-role-split.md)
+
+이번에는 기존 동작이 이미 구현돼 있으므로 GREEN(기존 테스트 통과) → 코드 이동 → GREEN(같은 동작 유지) 순서로 검사한다. 실패를 만들기 위해 정상 코드를 일부러 망가뜨리거나, 이동한 함수를 새로운 기능처럼 RED/GREEN으로 표시하지 않는다. 새 기능/결함 수정에는 기존 TDD 원칙을 그대로 적용한다.
+
+- 변경 전: Node 22.15.1/pnpm 11.9.0, web **26파일·510개 테스트 통과**.
+- 선택적 coverage 기준값: branches **733/799 = 91.73%**, 기존 100% threshold 미달로 명령 종료 코드 1. 이는 테스트 실패와 구분되는 기존 품질 격차다.
+- 기록: `output/r1-baseline.log`, `output/r1-baseline-tests.json`, `output/r1-baseline-coverage/coverage-final.json`(Git 제외).
+- 변경 후 최종 focused: 공개 어댑터/파서/오류/포트 4파일 **68/68 통과**, 웹 `tsc --noEmit` 종료 코드 0.
+- 변경 후 최종 web/coverage: **28파일·510/510 통과**. branches **734/799 = 91.86%**, statements 760/809, functions 163/169, lines 631/645. coverage 명령은 여전히 100% threshold 미달로 종료 코드 1이다. 기준값보다 branch 비율이 높아졌지만 테스트를 추가한 결과가 아니므로 보안 향상으로 해석하지 않는다.
+- 기존 어댑터의 24개 최상위 테스트 블록을 최종 TypeScript AST 프린터로 비교해 실행 구문이 모두 동일함을 확인했다. 확장된 64개 테스트 제목도 이동 전후 일치하며, 9개 연결 계약 + 34개 세션 검증 + 21개 오류 정책으로 나뉜다.
+- 공개 생성자/10메서드 시그니처와 이동한 기존 함수 21개의 본문이 구문상 동일하다. 모든 제품 6모듈의 server-only 및 모듈 사이 runtime 순환 참조 없음도 확인했다.
+- 최종 전체 `pnpm verify` 종료 코드0: **878 tests**(legacy54 + contracts66 + database15 + API148 + web510 + E2E preflight85), lint·6 workspace 타입 검사·API/웹 build 통과. 독립 리뷰 결과는 실행 계획에 기록한다. `output/r1-final-verify.log`, `output/r1-final-coverage.log`, `output/r1-final-tests.json`, `output/r1-final-coverage/coverage-final.json`은 Git 제외 로컬 증거다.
+
+기본 SDK 팩토리의 실호출 등 기존 테스트가 실행하지 않던 경로와 나머지 인증/저장소의 미검증 분기는 남아 있다. 파일이 분리됐다고 이 격차가 사라진 것은 아니다. 다음 품질 작업에서는 실제 SDK 전송 경계와 누락 분기를 별도 테스트 계획으로 다룬다. 이번에는 측정 대상을 삭제하거나 threshold를 낮춰 통과시키지 않았다.
+
+독립 task review와 최종 전체 review에서 Critical/Important는 없었다. 최종 리뷰의 Minor 1건은 fixture의 한계·입력/반환 주석이 축약된 부분이다. 한국어 JSDoc 11블록을 복원했고, 주석 제거 후 생성한 실행 코드가 동일하며 focused68/68이 다시 통과했다. 독립 재리뷰에서 해당 지적 해결과 새 결함 없음을 확인했다. 이는 실제 침투 테스트 통과나 보안 결함이 전혀 없다는 보증이 아니다.
+
+주석 복원까지 포함한 인계 대상 전체 `pnpm verify`도878tests·lint·타입·API/웹build 종료코드0을 확인했다. 최종 인계 로그는 `output/r1-handoff-verify.log`다. coverage 수치는 실행 코드가 같은 주석 복원 직전 측정이며, 주석 복원 후 전체 테스트도 그대로 통과했다. R1의 커밋·새 CI·배포 증거는 아직 없다.
+
+테스트의 읽기 순서는 다음과 같다.
+
+1. `supabase-auth-adapter.test.ts`: 공개 메서드의 URL·HTTP 본문/헤더·SDK 생성 옵션·입력 거부와 성공 흐름.
+2. `supabase/session-parser.test.ts`: 잘못된 JWT/사용자/만료값을 어댑터와 실제 이메일 서비스 경로에서 거부하고, 잘못된 응답에 앱 세션을 만들지 않는지 검사.
+3. `supabase/error-mapper.test.ts`: 제공자 오류 비노출, HTTP 상태 우선, 계정 존재 여부 은폐.
+4. `supabase/test-fixtures.ts`: 외부 네트워크 대신 정해진 SDK/HTTP 응답을 공급하는 준비물. JWT 모양 문자열은 실제 서명된 자격 증명이 아니다.
+
+각 테스트의 이름과 단언을 이동 전후 대조한다. 같은 개수라는 사실만으로 의미 보존을 단정하지 않는다. 커버리지에는 새 제품 모듈 5개도 포함하며 fixture만 제외한다. 파일 분리와 함수 추출은 계측 분모를 바꿀 수 있으므로 퍼센트뿐 아니라 빠진 조건과 테스트 시나리오를 함께 본다.
+
+로컬 모의 응답 검증은 실제 Google·Kakao·Naver 로그인, Supabase role/pooler/TLS, 폐기용 PostgreSQL 전체 인증 E2E 또는 침투 테스트의 대체물이 아니다. 이번 작업에서 해당 외부 환경 검증을 새로 수행했다고 표시하지 않는다.
+
 ## DB 유휴 연결 오류 경계: 2026-09-09
 
 사용자 승인 A안으로 BFF의 Drizzle 풀과 API의 Nest DI 풀에 유휴 `error` 이벤트 수신을 추가했다. 기준 HEAD는 `afacc4c0f50cd6214bf7231065fa039240e6df9b`이며 검증 대상은 기존 리전 이전도 포함한 **미커밋 작업 트리**다. [상세 계획과 완료 상태](../superpowers/plans/2026-09-09-database-pool-error-boundary.md)
