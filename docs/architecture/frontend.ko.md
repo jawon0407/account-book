@@ -164,7 +164,9 @@ OAuth는 외부 계정으로 로그인하는 절차다. `ProviderButtons.begin(p
 | POST `/api/auth/password/update` | `passwordUpdate` |
 | GET `/api/me` | `me` |
 
-각 모듈은 Node.js runtime, `preferredRegion: "iad1"`, `force-dynamic`, `maxDuration: 10`을 선언한다. 지원하지 않는 HTTP 메서드는 `unsupportedAuthRoute`를 재수출해 405로 처리한다. 인증 처리 예외는 어댑터에서 안전한 503 응답으로 바뀐다.
+각 모듈은 Node.js runtime, `force-dynamic`, `maxDuration: 10`을 선언한다. 함수 실행 지역은 각 route가 아니라 [웹 배포 설정](../../apps/web/vercel.json)의 `regions: ["iad1"]`로 통합한다. 향후 Vercel Root Directory는 `apps/web`이며 실제 프로젝트는 아직 생성하지 않았다. 지원하지 않는 HTTP 메서드는 `unsupportedAuthRoute`를 재수출해 405로 처리한다. 인증 처리 예외는 어댑터에서 안전한 503 응답으로 바뀐다.
+
+설정 파일 통합은 서버 실행 위치를 지정하는 입력을 한 곳에서 관리하기 위한 변경이다. 인증 함수의 매개변수나 응답, 쿠키·CSRF·JWT·DB 권한은 바뀌지 않는다. `route-wiring.test.ts`는 배포 설정 JSON과 기존 어댑터/HTTP 정책을 검사하며, Vercel 실제 실행 지역까지 증명하지는 않는다. 배포 후 확인 방법은 [플랫폼 안내](../guides/platform-and-oauth-onboarding.ko.md#42-리전-설정의-의미와-배포-확인)를 참고한다.
 
 동적 라우트의 `context`는 `{ params: Promise<{ provider: string }> }` 형태다. 예를 들어 Next.js가 google 경로를 선택했다면 params를 기다린 결과는 `{ provider: "google" }`다. TypeScript의 string 선언만으로 공급자가 허용된 것은 아니며 서버가 별도로 검사한다.
 

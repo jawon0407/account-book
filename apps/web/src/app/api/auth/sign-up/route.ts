@@ -2,7 +2,6 @@ import { handleAuthRoute } from "../../../../server/http/route-adapter.js";
 export { unsupportedAuthRoute as GET, unsupportedAuthRoute as PUT, unsupportedAuthRoute as PATCH, unsupportedAuthRoute as DELETE, unsupportedAuthRoute as HEAD, unsupportedAuthRoute as OPTIONS } from "../../../../server/http/route-adapter.js";
 
 export const runtime = "nodejs";
-export const preferredRegion = "iad1";
 export const dynamic = "force-dynamic";
 export const maxDuration = 10;
 /** 이메일 가입 요청을 인증 컨트롤러에 전달한다. 고정 operation으로 handleAuthRoute에 위임한다.

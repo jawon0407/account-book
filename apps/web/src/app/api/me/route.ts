@@ -2,7 +2,6 @@ import { handleAuthRoute } from "../../../server/http/route-adapter.js";
 export { unsupportedAuthRoute as POST, unsupportedAuthRoute as PUT, unsupportedAuthRoute as PATCH, unsupportedAuthRoute as DELETE, unsupportedAuthRoute as HEAD, unsupportedAuthRoute as OPTIONS } from "../../../server/http/route-adapter.js";
 
 export const runtime = "nodejs";
-export const preferredRegion = "iad1";
 export const dynamic = "force-dynamic";
 export const maxDuration = 10;
 /** 쿠키로 식별한 현재 사용자의 공개 정보를 조회한다. 고정 operation으로 handleAuthRoute에 위임한다.

@@ -170,6 +170,14 @@ test("Next security update excludes audited vulnerable resolutions", () => {
 
 이번 후속 요청에서는 문서만 보강한다. 아래 설정·route·테스트는 아직 변경하지 않는다.
 
+### 2026-09-09 후속 승인 및 선행 조건 점검
+
+- 사용자가 A안을 승인했다. 단일 `iad1` 설정을 배포 설정 파일로 이전하는 방향은 확정됐으며 대안 선택을 다시 요청하지 않는다.
+- 기준 HEAD는 `afacc4c0f50cd6214bf7231065fa039240e6df9b`다. 기존 `.gitignore` 변경을 보존했고 제품 파일은 아직 변경하지 않았다.
+- 실제 Vercel Root Directory 확인은 아직 미완료다. 저장소와 웹 앱에 `.vercel` 연결 메타데이터 및 추적된 `vercel.json`이 없고, 사용 가능한 Vercel 전용 연결 도구도 없다. 온보딩 문서는 `apps/web` 대상 계획만 명시하며 실제 관리자 설정 검증은 배포 PR로 남겼다.
+- 따라서 `apps/web/vercel.json` 생성 및 14개 route의 기존 리전 선언 제거 전에 사용자에게 실제 Root Directory 값 또는 프로젝트 미생성 여부를 확인한다. 프로젝트가 없다면 `apps/web`을 향후 배포 루트로 확정한 뒤 로컬 설정 구현과 hosted 검증 미완료를 구분한다.
+- 후속 확인: 사용자가 Vercel 프로젝트를 아직 생성하지 않았다고 답했다. 향후 Root Directory를 `apps/web`으로 두는 로컬 설정 구현을 진행한다. 기존 프로젝트 설정을 검증했다고 표현하지 않는다. 상세 실행·검증 상태는 [리전 이전 계획](2026-09-09-vercel-region-policy.md)을 따른다. 배포·관리자 설정 변경·추가 커밋/푸시는 이번 범위가 아니다.
+
 ### 8.1 우선 과제: BFF 실행 리전 설정 이전
 
 리전은 서버 함수가 실행되는 지역이다. 현재 14개 BFF route가 `preferredRegion = "iad1"`을 선언하고 `apps/web/src/app/api/route-wiring.test.ts`가 이를 검사한다. Next 16.3.3 빌드는 이 선언에 deprecated 경고를 낸다. 현재 추적된 `vercel.json`은 없다. 배포 안내는 `apps/web`을 대상으로 하되 실제 Vercel Root Directory·외부 workspace 소스 포함 설정은 배포 PR에서 검증하도록 남겨 두었다.
