@@ -19,8 +19,8 @@ const eslintConfigPath = join(rootDir, "eslint.config.mjs");
 
 const expectedDevDependencies = {
   typescript: "6.0.3",
-  vitest: "4.1.10",
-  "@vitest/coverage-v8": "4.1.10",
+  vitest: "4.1.11",
+  "@vitest/coverage-v8": "4.1.11",
   eslint: "10.7.0",
   "@eslint/js": "10.0.1",
   "typescript-eslint": "8.64.0",

@@ -1,5 +1,27 @@
 # 인증 보안 테스트 가이드
 
+## 테스트 도구 보안 패치: 2026-09-14
+
+기준 `f7ba1e5`, 브랜치 `hotfix/vitest-security-20260914`. [실행 계획](../superpowers/plans/2026-09-14-vitest-security-patch.md)에 따라 Vitest와 coverage-v8의 `4.1.10`을 `4.1.11`로 함께 올린다. [공식 공지](https://github.com/vitest-dev/vitest/security/advisories/GHSA-82fw-gwwq-j7x9)의 개발 서버 파일 접근 취약점이 대상이며, 운영 금융 데이터 유출을 재현했다는 의미가 아니다.
+
+### 초급 개발자를 위한 변경 원리
+
+`package.json`은 프로젝트가 요구하는 도구와 버전을 선언한다. `pnpm-lock.yaml`은 그 도구가 필요로 하는 간접 패키지 버전과 다운로드 무결성도 고정한다. 따라서 선언만 바꾸지 않고 pnpm으로 lockfile을 함께 갱신해야 한다. coverage-v8은 테스트 실행기의 측정 플러그인이므로 Vitest와 같은 버전으로 맞춘다. 저장소 정책 테스트의 기대 버전도 동기화하되 검사 자체는 유지한다.
+
+설치 시 `--ignore-scripts`는 의존성 설치 스크립트 실행을 막는다. `--frozen-lockfile`은 선언과 lockfile이 어긋나면 실패하게 해 설치 재현성을 확인한다. `pnpm audit`은 개발 의존성까지 포함한 알려진 취약점을, `--prod`는 운영 의존성 범위를 검사한다. 감사 결과 0건은 알려진 공지와 현재 의존성 그래프 기준이지 모든 보안 결함이 없다는 보증이 아니다.
+
+### 실제 검증 기록
+
+- 패치 전 `pnpm test`: 종료 코드 0, 878개(legacy 54 + contracts 66 + database 15 + API 148 + web 510 + E2E preflight 85). `output/vitest-patch-baseline.log`.
+- 패치 전 전체 audit: 종료 코드 1, moderate 2건. 서로 다른 공격 2종이 아니라 같은 공지가 vitest/mocker 두 패키지에 잡힌 결과다. `output/vitest-patch-audit-before.json`.
+- 패치 후 전체 audit 및 운영 audit: 종료 코드 0, 알려진 취약점 0건. `output/vitest-patch-audit-after.json`, `output/vitest-patch-audit-prod.log`.
+- 패치 후 coverage: 웹 510개 테스트 통과, statements 760/809=93.94%, branches 734/799=91.86%, functions 163/169=96.44%, lines 631/645=97.82%. 이전 값과 같으며 branches 임계값 100% 미달로 **종료 코드 1**이다. `output/vitest-patch-coverage.log`. 기준값을 낮추거나 측정 대상을 제외하지 않았다.
+- 정책 테스트는 변경 전 실패를 먼저 실행하지 못했다. 대신 변경 후 이전 커밋의 테스트를 메모리에서 현재 저장소에 연결해 실행했고, 과거 기대값 4.1.10과 실제 4.1.11 불일치로 3개 통과/1개 실패·종료 코드 1을 확인했다. 동기화된 현재 테스트는 4개 통과·종료 코드 0이다. `output/vitest-patch-policy-old-expectation.log`, `output/vitest-patch-policy-green.log`. 이는 **사후 회귀 확인이지 test-first RED가 아니다**. 제품 코드 수정 없이 누락된 실행 순서를 문서화했다.
+- 전체 verify 최초 실행은 `route-wiring.test.ts:52`의 동적 import를 포함한 테스트가 기본 5초 제한을 넘겨 실패했다(웹 509/510). 같은 파일을 단독 실행하면 16/16 통과, 전체 1.71초였다. 코드·timeout 설정은 바꾸지 않았으며 일시적 부하 또는 cold import 지연 가설을 확정 원인으로 표시하지 않는다. `output/vitest-patch-verify.log`, `output/vitest-patch-route-focused.log`.
+- 동일 설정의 **최종 전체 `pnpm verify`는 종료 코드 0**이다. 878개 테스트(54+66+15+148+510+85), lint·6 workspace 타입 검사·API/웹 빌드가 통과했다. `output/vitest-patch-verify-final.log`. 첫 실패를 없던 일로 취급하지 않으며 재발 시 route 동적 import 지연을 별도 분석한다.
+
+위 로그는 Git 제외 경로에 보관한다. 새 제품 함수는 없으며 기존 한국어 함수·매개변수 주석도 변경하지 않는다. 실제 IdP·운영 DB·브라우저 전체 E2E·침투 테스트·배포 후 성능은 이번 검증 범위가 아니다.
+
 ## Supabase 어댑터 역할 분리: 2026-09-10 R1
 
 기준 `66a2319`, 기능 브랜치 `feature/auth-adapter-role-split`. 사용자 승인 범위는 인증 동작을 유지한 파일 분리이며 timeout·인증 정책·DB·UI 변경은 포함하지 않는다. [실행 계획](../superpowers/plans/2026-09-10-auth-adapter-role-split.md)
