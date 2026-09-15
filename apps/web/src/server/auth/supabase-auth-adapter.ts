@@ -30,6 +30,7 @@ import {
   rethrowProviderError,
 } from "./supabase/error-mapper.js";
 import { postSupabaseAuth, requestSupabaseAuth, type SupabaseFetch } from "./supabase/http-client.js";
+import { runProviderOperation } from "./supabase/provider-operation.js";
 import { accepted, dataOf, rawTokenPair, tokenPair } from "./supabase/session-parser.js";
 import { AUTH_OPTIONS, defaultSupabaseClientFactory, type SupabaseClient, type SupabaseClientFactory } from "./supabase/sdk-client.js";
 import { challenge, code, config, safeUrl, token, uuid, verifier, type SupabaseServerConfig } from "./supabase/validation.js";
@@ -77,18 +78,19 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
       const parsed = SignUpInputSchema.safeParse(input);
       if (!parsed.success) return fail("AUTH_INVALID_CREDENTIALS");
       const callback = safeUrl(redirectUrl, true);
-      const result = await postSupabaseAuth(
-        this.config,
-        this.fetcher,
-        "signup",
-        { email: parsed.data.email, password: parsed.data.password, code_challenge: challenge(codeChallenge), code_challenge_method: "s256" },
-        callback,
-      );
-      if (!result.ok) {
-        if (isSignupExistenceResponse(result.body, result.status)) return { status: "verification_required" };
-        throw mappedProviderError(result.body, result.status);
-      }
-      return { status: "verification_required" };
+      const body = {
+        email: parsed.data.email,
+        password: parsed.data.password,
+        code_challenge: challenge(codeChallenge),
+        code_challenge_method: "s256",
+      };
+      return await runProviderOperation<EmailAuthResult>(this.fetcher, async (operation) => {
+        const result = await postSupabaseAuth(this.config, operation.fetch, "signup", body, callback);
+        if (!result.ok && !isSignupExistenceResponse(result.body, result.status)) {
+          throw mappedProviderError(result.body, result.status);
+        }
+        return { status: "verification_required" };
+      });
     } catch (error) { return rethrowProviderError(error); }
   }
 
@@ -102,7 +104,8 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
     try {
       const parsed = SignInInputSchema.safeParse(input);
       if (!parsed.success) return fail("AUTH_INVALID_CREDENTIALS");
-      return tokenPair(dataOf(await this.client().auth.signInWithPassword(parsed.data)).session);
+      return await runProviderOperation(this.fetcher, async (operation) =>
+        tokenPair(dataOf(await this.client(operation.fetch).auth.signInWithPassword(parsed.data)).session));
     } catch (error) { return rethrowProviderError(error); }
   }
 
@@ -152,7 +155,11 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
    * @throws 자격 증명·요청 제한·가용성 오류.
    */
   public async refresh(refreshToken: string): Promise<AuthTokenPair> {
-    try { return tokenPair(dataOf(await this.client().auth.refreshSession({ refresh_token: token(refreshToken) })).session); } catch (error) { return rethrowProviderError(error); }
+    try {
+      const refresh = token(refreshToken);
+      return await runProviderOperation(this.fetcher, async (operation) =>
+        tokenPair(dataOf(await this.client(operation.fetch).auth.refreshSession({ refresh_token: refresh })).session));
+    } catch (error) { return rethrowProviderError(error); }
   }
 
   /**
@@ -164,9 +171,13 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
    */
   public async signOut(accessToken: string, refreshToken: string): Promise<void> {
     try {
-      const client = this.client();
-      dataOf(await client.auth.setSession({ access_token: token(accessToken), refresh_token: token(refreshToken) }));
-      accepted(await client.auth.signOut());
+      const tokens = { access_token: token(accessToken), refresh_token: token(refreshToken) };
+      return await runProviderOperation(this.fetcher, async (operation) => {
+        const client = this.client(operation.fetch);
+        dataOf(await client.auth.setSession(tokens));
+        operation.assertActive();
+        accepted(await client.auth.signOut());
+      });
     } catch (error) { return rethrowProviderError(error); }
   }
 
@@ -182,14 +193,18 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
     try {
       const parsed = PasswordResetRequestInputSchema.safeParse({ email });
       if (!parsed.success) return fail("AUTH_INVALID_CREDENTIALS");
-      const result = await postSupabaseAuth(
-        this.config,
-        this.fetcher,
-        "recover",
-        { email: parsed.data.email, code_challenge: challenge(codeChallenge), code_challenge_method: "s256" },
-        safeUrl(redirectUrl, true),
-      );
-      if (!result.ok && !isResetAbsenceResponse(result.body, result.status)) throw mappedProviderError(result.body, result.status);
+      const callback = safeUrl(redirectUrl, true);
+      const body = {
+        email: parsed.data.email,
+        code_challenge: challenge(codeChallenge),
+        code_challenge_method: "s256",
+      };
+      return await runProviderOperation(this.fetcher, async (operation) => {
+        const result = await postSupabaseAuth(this.config, operation.fetch, "recover", body, callback);
+        if (!result.ok && !isResetAbsenceResponse(result.body, result.status)) {
+          throw mappedProviderError(result.body, result.status);
+        }
+      });
     } catch (error) { return rethrowProviderError(error); }
   }
 
@@ -215,10 +230,17 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
       const password = PasswordUpdateInputSchema.safeParse({ password: input?.password });
       if (!password.success) return fail("AUTH_INVALID_CREDENTIALS");
       const expectedUserId = uuid(input?.userId);
-      const client = this.client();
-      const pair = tokenPair(dataOf(await client.auth.setSession({ access_token: token(input?.accessToken), refresh_token: token(input?.refreshToken) })).session);
-      if (pair.userId !== expectedUserId) return fail("AUTH_OAUTH_TRANSACTION_INVALID");
-      accepted(await client.auth.updateUser({ password: password.data.password }));
+      const tokens = {
+        access_token: token(input?.accessToken),
+        refresh_token: token(input?.refreshToken),
+      };
+      return await runProviderOperation(this.fetcher, async (operation) => {
+        const client = this.client(operation.fetch);
+        const pair = tokenPair(dataOf(await client.auth.setSession(tokens)).session);
+        if (pair.userId !== expectedUserId) return fail("AUTH_OAUTH_TRANSACTION_INVALID");
+        operation.assertActive();
+        accepted(await client.auth.updateUser({ password: password.data.password }));
+      });
     } catch (error) { return rethrowProviderError(error); }
   }
 
@@ -233,16 +255,22 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
     try {
       const url = new URL("auth/v1/token", this.config.url);
       url.searchParams.set("grant_type", "pkce");
-      const result = await requestSupabaseAuth(this.config, this.fetcher, url, { auth_code: code(authCode), code_verifier: verifier(codeVerifier) });
-      if (!result.ok) throw mappedProviderError(result.body, result.status, true);
-      return rawTokenPair(result.body);
+      const body = { auth_code: code(authCode), code_verifier: verifier(codeVerifier) };
+      return await runProviderOperation(this.fetcher, async (operation) => {
+        const result = await requestSupabaseAuth(this.config, operation.fetch, url, body);
+        if (!result.ok) throw mappedProviderError(result.body, result.status, true);
+        return rawTokenPair(result.body);
+      });
     } catch (error) { return rethrowProviderError(error); }
   }
 
   /**
-   * 브라우저 저장이나 자동 갱신을 하지 않는 새 서버용 SDK 클라이언트를 생성합니다.
+   * 작업 전용 fetch를 연결해 브라우저 저장이나 자동 갱신을 하지 않는 새 서버용 SDK 클라이언트를 생성합니다.
+   * @param fetcher 같은 작업의 마감·취소·전송 오류 차단을 적용한 fetch.
    * @returns 현재 작업 전용 Supabase 클라이언트.
    * @throws 주입된 팩토리의 생성 오류.
    */
-  private client(): SupabaseClient { return this.factory(this.config.url, this.config.anonKey, AUTH_OPTIONS); }
+  private client(fetcher: SupabaseFetch): SupabaseClient {
+    return this.factory(this.config.url, this.config.anonKey, AUTH_OPTIONS, fetcher);
+  }
 }

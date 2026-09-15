@@ -37,14 +37,21 @@ export type SupabaseClient = Readonly<{ auth: {
 } }>;
 
 /** 각 비-PKCE 작업에 새 비영속 Supabase 클라이언트를 만드는 테스트 seam입니다. */
-export type SupabaseClientFactory = (url: string, anonKey: string, auth: typeof AUTH_OPTIONS) => SupabaseClient;
+export type SupabaseClientFactory = (
+  url: string,
+  anonKey: string,
+  auth: typeof AUTH_OPTIONS,
+  fetcher?: typeof fetch,
+) => SupabaseClient;
 
 /**
  * 브라우저 저장이나 자동 갱신을 하지 않는 새 서버용 SDK 클라이언트를 생성합니다.
  * @param url 검증된 Supabase 기본 URL.
  * @param anonKey 공개 anon 키.
  * @param auth 고정 비영속 PKCE 옵션.
+ * @param fetcher 작업 마감·취소와 원시 전송 오류 차단을 적용한 SDK 전용 fetch.
  * @returns 현재 작업 전용 Supabase 클라이언트.
+ * @throws SDK 클라이언트 구성에 실패하면 호출자에게 오류를 전달합니다.
  */
-export const defaultSupabaseClientFactory: SupabaseClientFactory = (url, anonKey, auth) =>
-  createClient(url, anonKey, { auth }) as unknown as SupabaseClient;
+export const defaultSupabaseClientFactory: SupabaseClientFactory = (url, anonKey, auth, fetcher = fetch) =>
+  createClient(url, anonKey, { auth, global: { fetch: fetcher } }) as unknown as SupabaseClient;

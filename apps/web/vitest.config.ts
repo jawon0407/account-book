@@ -17,6 +17,8 @@ export default defineConfig({
         "src/server/auth/supabase-auth-adapter.ts",
         "src/server/auth/supabase/error-mapper.ts",
         "src/server/auth/supabase/http-client.ts",
+        "src/server/auth/supabase/provider-request-deadline.ts",
+        "src/server/auth/supabase/provider-operation.ts",
         "src/server/auth/supabase/sdk-client.ts",
         "src/server/auth/supabase/session-parser.ts",
         "src/server/auth/supabase/validation.ts",

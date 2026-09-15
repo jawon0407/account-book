@@ -92,7 +92,12 @@ describe("SupabaseAuthAdapter explicit server PKCE boundary", () => {
 
     expect(setup.factory).toHaveBeenCalledTimes(4);
     for (const call of setup.factory.mock.calls) {
-      expect(call).toEqual(["https://project.supabase.co/", "anon-key", { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false, flowType: "pkce" }]);
+      expect(call).toEqual([
+        "https://project.supabase.co/",
+        "anon-key",
+        { autoRefreshToken: false, persistSession: false, detectSessionInUrl: false, flowType: "pkce" },
+        expect.any(Function),
+      ]);
     }
   });
 
