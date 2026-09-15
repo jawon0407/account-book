@@ -302,3 +302,43 @@ matrix는 BFF signer와 API verifier의 real classes, deterministic P-256 key/cl
 rate limit은 browser IP만을 principal로 쓰지 않는다. 인증 principal + route를 기본 key로 하고, 신뢰 가능한 platform-provided IP는 보조 신호로만 사용한다. 이 persistent rate-limit use case는 아직 구현되지 않았다. 담당자는 API owner이고, 기한은 **최초 hosted delegated mutation release 전** abuse test와 운영 관측을 추가하는 것이다. 재검토 조건은 rate-limit backend, route/scope, 또는 trusted platform IP 의미 변경이며 배포 전에 다시 검토한다. BFF 침해 시에도 이미 허용된 scope로 30초 이내 요청이 가능하다는 잔여 위험은 least-privilege scope, one-time replay, key rotation/kill switch, 이 rate-limit 설계로 줄일 뿐 제거하지 못한다.
 
 Fastify body-too-large 413 복구 allowlist는 Fastify `5.10.0`의 고정 message와 Nest `11.1.28` wrapper 동작에 결합돼 있다. 담당자는 API owner이며, 두 dependency 중 하나를 업그레이드하거나 parser/filter 동작을 바꾸기 **전** matrix의 oversized 413·forged 413 fail-closed regression을 다시 실행하고 allowlist를 재검토해야 한다. 이 조건이 충족되기 전 dependency upgrade를 배포하지 않는다.
+
+## 인증 제공자 작업당 5초 제한: 2026-09-15 로컬 증거
+
+이 절의 명령은 Node 22.15.1·pnpm 11.9.0을 PATH 앞에 고정한 동일 작업 트리에서 실행했다. RED에서는 설치된 Supabase SDK를 mock하지 않았고 외부 통신 대신, 주입 대상 fetch와 서로 다른 통제 전역 fallback을 두었다. 따라서 잘못된 팩토리가 실제 인터넷을 사용하지 않으면서도 어느 전송 경로를 선택했는지 구분했다.
+
+| 단계 | 시각(KST)·명령 | 실제 결과 |
+| --- | --- | --- |
+| Task 1 기준 | 구현자 focused deadline/operation, typecheck, lint | 19 tests 통과, 각 종료 코드 0; 요구사항·품질 리뷰 Approved |
+| Task 2 RED | 10:51, `pnpm --filter @account-book/web exec vitest run src/server/auth/supabase/provider-sdk-deadline.test.ts src/server/auth/supabase-auth-adapter-deadline.test.ts` | 2 files, 16 tests 중 15 failed·1 passed, exit 1. 주입 fetch는 0회이고 통제 fallback만 호출돼 SDK 주입 누락을 재현했으며 외부망 요청은 없었다. |
+| Task 2 GREEN | 10:53, RED와 동일 명령 | 2 files, 16/16 passed, exit 0 |
+| 통합·상위 정책 | 10:53, Supabase 디렉터리·adapter·deadline·email/password/session·controller focused 실행 | 11 files, 193/193 passed, exit 0 |
+| 정적 검사 | 10:54, web typecheck / workspace lint | 각각 exit 0 |
+| 전체 verify — 리뷰 round 1 전 | 컨트롤러 실행 | `pnpm verify` exit 0. lint·workspace typecheck·API/Next.js 16.3.3 build 통과; legacy 54 + contracts 66 + database 15 + API 148 + web 545 + E2E preflight 85 = 913 tests 통과 |
+| 전체 coverage — 리뷰 round 1 전 | 2026-09-15 11:01:42 KST, `pnpm --filter @account-book/web exec vitest run --coverage` | 7.41s, 32 files·545 tests 통과. statements 95.01% (839/883), branches 92.54% (757/818), functions 96.92% (189/195), lines 98.73% (704/713). branches 100% gate 미충족으로 exit 1 |
+| SDK pre-map mutation RED | 11:12:04 KST, `pnpm --filter @account-book/web exec vitest run src/server/auth/supabase/provider-sdk-deadline.test.ts -t "gives the real SDK a fixed 408"` | 1 file, 1 failed·1 passed·5 skipped, exit 1. 본문 버퍼링 우회 시 실제 SDK body 오류 status가 기대 408 대신 0인 차이만 실패 |
+| SDK pre-map GREEN | 11:12:32 KST, `pnpm --filter @account-book/web exec vitest run src/server/auth/supabase/provider-sdk-deadline.test.ts src/server/auth/supabase/provider-operation.test.ts` | 2 files, 22/22 passed, exit 0; 11:12:41 web typecheck와 11:12:52 workspace lint도 exit 0 |
+| 보완 전 verify — 리뷰 round 1 후 | 컨트롤러 재실행 | `pnpm verify` exit 0. lint·workspace typecheck·API/web build 통과; legacy 54 + contracts 66 + database 15 + API 148 + web 547 + E2E preflight 85 = 915 tests 통과. malformed JSON 최종 보완 전 증거 |
+| 보완 전 coverage — 리뷰 round 1 후 | 2026-09-15 11:16:03 KST, `pnpm --filter @account-book/web exec vitest run --coverage` | 7.45s, 32 files·547 tests 통과. statements 95.01% (839/883), branches 92.54% (757/818), functions 96.92% (189/195), lines 98.73% (704/713). branches 100% gate 미충족으로 exit 1. 최종 보완 전 증거 |
+| malformed JSON RED | 11:31:02 KST, SDK/operation/adapter-deadline 3파일 | 54 tests 중 8 failed·46 passed, exit 1. 실제 SDK HTTP 200 pre-map status 0·원문 일부, 400/401/429 parse 원문 및 429 분류 손실, 디코딩 마감 누락 재현 |
+| malformed JSON GREEN | 11:31:47 KST, 동일 명령 | 54/54 passed, exit 0. `provider-operation.ts`의 구문 보호만 제품 수정 |
+| 최종 보완 focused/정적 검사 | 11:32:34 KST, 빈 429 SDK 사례 추가 후 | 3 files·55/55 passed, web typecheck·workspace lint exit 0. 앞선 test-only TS2683은 `this: TextDecoder` 명시 후 해결 |
+| 최종 보완 인증/상위 정책 | 11:33:04 KST, Supabase·adapter·email/password/session·controller | 11 files·217/217 passed, exit 0 |
+| 보완 후 최종 verify | 컨트롤러 `pnpm verify` | exit 0. lint·workspace typecheck·API/web build 및 legacy 54 + contracts 66 + database 15 + API 148 + web 569 + E2E preflight 85 = 937 tests 통과 |
+| 보완 후 최종 coverage | 11:36:18 KST, 컨트롤러 `pnpm --filter @account-book/web exec vitest run --coverage` | 7.59s, 32 files·569/569 passed. statements 94.84% (846/892), branches 92.48% (763/825), functions 96.93% (190/196), lines 98.47% (711/722). branches 100% gate 때문에 exit 1 |
+
+실제 SDK 검사는 원시 전송 오류와 본문 읽기 오류 각각에서 unmocked SDK의 반환값을 adapter `dataOf`·오류 매핑 전에 직접 관찰한다. data는 정확히 `{ user: null, session: null }`, error는 status 408·message `AUTH_PROVIDER_UNAVAILABLE`이며 원시 canary가 message에 없고 `console.error` 호출도 없어야 한다. 이는 최종 adapter 오류만 확인하던 최초 테스트가 놓친 **SDK-facing safe response**를 직접 증명한다. 별도 사례는 주입된 작업 신호가 헤더·본문 정지 모두에서 정확히 5초에 abort되고, SDK refresh backoff가 남아 있어도 마감 뒤 전송 횟수가 늘지 않는지 확인한다.
+
+이 단언은 mock-only 검사가 아니다. `provider-operation.ts`의 본문 `arrayBuffer` 읽기와 안전한 응답 재생성을 임시로 우회한 뒤 실제 auth-js 2.110.7을 실행하자 transport 사례는 통과하고 body 사례만 status 0 대 408로 실패했다. 제품 파일은 apply-patch로 즉시 원복했고 전후 SHA-256 `760F0EB6080752E0525E3900A775507797F785F6C021FC62B0EE25D88D4711D2`가 일치했다.
+
+어댑터 검사는 가입·복구 요청·메일 확인·OAuth·복구 교환·로그인·갱신의 영구 대기를 표 기반으로 제한하고, 직접 HTTP는 정확히 1회, SDK 대역 경로의 별도 HTTP seam은 0회임을 확인한다. `setSession` 4초 후의 `signOut`·`updateUser`가 남은 1초만 사용하며, 6초에 끝난 늦은 `setSession`은 후속 호출을 시작하지 않는다. 기존 사용자 불일치, 429, 메일 미확인, PKCE, 계정 열거 방지와 상위 claim/세션 폐기/회전 정책 테스트는 삭제하거나 완화하지 않았다.
+
+review round 1 전 전체 verify 원본 로그는 `.superpowers/sdd/2026-09-15-auth-provider-deadline/full-verify.log`, coverage 원본 로그는 같은 디렉터리의 `coverage.log`다. 인계용 복사본은 `output/auth-provider-deadline-full-verify.log`와 `output/auth-provider-deadline-coverage.log`이며 913개·545개는 수정 전 역사다. round 1 뒤 `output/auth-provider-deadline-final-verify.log`와 `output/auth-provider-deadline-final-coverage.log`의 915개·547개도 malformed JSON 최종 보완 전 결과다. 파일명에 final이 있어도 보완 후 소스의 검증으로 재사용하지 않는다.
+
+최종 보완 회귀의 fixture는 스트림이 정상 종료된 실제 `Response`의 JSON 구문만 손상시킨다. SDK 모듈은 그대로 실행하고 adapter 매핑 전에 SDK 결과를 별도로 관찰하므로 mock 반환값 자체를 검사하지 않는다. 잘못된 비-429 본문은 SDK에 고정 408·`AUTH_PROVIDER_UNAVAILABLE`만 전달되고 실제 429는 잘못된/빈 본문에도 고정 429·`AUTH_RATE_LIMITED`를 유지한다. 직접 HTTP 가입/복구의 malformed 429도 제한 오류로 남는다. 별도 정상 fixture는 유효 JSON 로그인·자격 증명/미인증 분류, 빈 200/204/205 logout, 304 무본문, 원본 JSON 바이트 보존을 확인한다. 디코딩 시 단조 시계를 정확히 5초로 옮기는 테스트는 SDK에 원래 성공 응답을 넘기지 않는지 확인한다. 새 endpoint 스키마·크기 제한·의존성은 없다. 정확한 RED/GREEN 명령과 출력은 `.superpowers/sdd/2026-09-15-auth-provider-deadline/final-fix-report.md`를 따른다.
+
+보완 전 coverage 명령의 테스트 자체는 모두 통과했지만 gate는 실패했다. 당시 branches 92.54%는 과거 91.86%보다 개선됐어도 100% 기준에는 미달했고 기준을 낮추지 않았다. 당시 신규 `provider-operation.ts`도 branch coverage 90%여서 남은 격차 전체를 기존 코드 탓으로 설명하지 않았다.
+
+현재 보완 후 최종 근거는 `output/auth-provider-deadline-json-guard-verify.log`와 `output/auth-provider-deadline-json-guard-coverage.log`다. 전체 verify 937개는 통과했지만 coverage branches는 92.48% (763/825)로 100% gate를 여전히 충족하지 못한다. `provider-operation.ts` 자체도 branches 94.11%·lines 100%이므로 새로운 분기 격차를 숨기지 않는다. coverage 실패는 테스트 실패가 아니라 유지된 기준 미달이다. scoped 최종 재검토는 APPROVED이며 malformed JSON Important finding은 해결됐다. 새 결함이나 범위 밖 변경은 없다는 판정이고 coverage gate 실패는 면제되지 않았다.
+
+이 증거는 fake timer와 통제된 fetch를 사용한 로컬 회귀 검사와 전체 정적·단위·사전 검증이다. 실제 hosted IdP/DB 전체 E2E, 배포 네트워크의 취소, 실제 브라우저 여정, 한국망 지연 p95, 의존성 audit를 이번 실행에서 측정했다고 주장하지 않는다. 구현 전 64개 인증·94개 상위 정책 기준선도 현재 통합 소스의 전체 성공 증거가 아니라 역사적 비교값으로만 보존한다.

@@ -1,5 +1,13 @@
 # Account Book 개발 진행 현황
 
+> **인증 시간 제한 커밋·푸시 승인 (2026-09-15):** 사용자 승인 후 `feature/auth-provider-deadline`의 제품·테스트·설정 10파일을 `45e4d76`으로 커밋했다. 전송 직전 전체 `pnpm verify`를 다시 실행해 **937개 테스트·lint·타입·API/웹 빌드 통과**(exit 0)를 확인했다. 로그는 `output/auth-provider-deadline-prepush-verify.log`다. 한국어 설계·계획·검증·진행 문서 6파일은 별도 문서 커밋으로 묶어 같은 브랜치로 전송한다. `.env`·`.env.*` 제외 규칙을 확인했고 Git이 추적하는 실제 환경 파일은 없으며, 사용자 기존 `.gitignore` 수정은 커밋에서 제외했다. 전송 성공은 원격 브랜치와 로컬 HEAD의 SHA 일치로 별도 확인한다. 기존 coverage 92.48%/100% 미달은 미해결이며 이번에는 재측정하지 않았다. 새 PR·병합·배포는 승인 범위가 아니다. 아래 미커밋·미푸시 문단은 전송 승인 이전의 이력이다.
+
+> **최신 상태 — 인증 시간 제한 구현·최종 보완 완료 (2026-09-15):** 승인된 SDK 유지 A안·작업당 총 5초와 malformed JSON의 SDK 원문 차단을 구현했다. 보완 후 전체 `pnpm verify`는 **937개 테스트·lint·타입·API/웹 빌드 통과**(exit 0), 독립 scoped 최종 재검토는 **APPROVED**다. 전체 web coverage는 **569/569 테스트 통과**지만 branches **92.48%로 100% 기준 미달**(exit 1)이며 기준을 낮추거나 실패를 면제하지 않았다. 현재 변경은 **미커밋·미푸시**이고 PR·병합·배포도 하지 않았다. 남은 사항은 coverage 분기 격차와 실제 hosted IdP/DB·배포망 취소·브라우저 여정·한국망 지연 등 미검증 항목을 별도 범위에서 다루는 것이다. [구현·최종 결과](../superpowers/plans/2026-09-15-auth-provider-deadline.md), [검증 기록](../guides/security-auth-testing.md#인증-제공자-작업당-5초-제한-2026-09-15-로컬-증거). 아래 계획 작성·구현 미실행 문단은 이전 시점의 이력이다.
+
+> **인증 시간 제한 실행 계획 작성 (2026-09-15):** 도구 실행이 가능함을 확인하고 승인된 A안·작업당 총 5초를 [실행 계획](../superpowers/plans/2026-09-15-auth-provider-deadline.md)에 구체화했다. ① 시간 제한·안전한 전송 경계 ② 어댑터·실제 SDK 연결/회귀 검증의 두 작업이며 구현 예상은 제품 4·테스트 5·설정 1·문서 4, 총 14파일이다. HTTP helper의 기존 주입점을 재사용하고 새 시간 관리와 전송 책임을 분리한다. 이번에는 설계·계획·검토 기록·진행 현황 4개 문서만 갱신했다. 제품 구현·새 테스트·커밋·푸시·PR·병합·배포는 미실행이며 기존 `.gitignore` 변경은 보존했다. 다음은 실행 방식 확정 후 Task 1의 RED부터 시작한다.
+
+> **인증 시간 제한 설계 재개:** 도구의 자동 승인 검토 용량 오류로 중단됐던 문서 작업을 재개했다. `feature/auth-provider-deadline`, 기준 `bb537e5`에서 사용자가 확정한 **SDK 유지 A안·인증 제공자 작업당 총 5초**를 [서면 설계](../superpowers/specs/2026-09-14-auth-provider-deadline-design.md)에 반영했다. 이번에는 검토 기록·서면 설계·진행 현황 3개 문서만 변경했으며 제품 코드·DB·UI·의존성은 미변경이다. 다음은 서면 요구사항 확인 후 실행 계획과 TDD 구현이다. 커밋·푸시·PR·병합·배포는 새로 실행하지 않았다. 기존 `.gitignore` 수정은 보존했다.
+
 > **Vitest 패치 전송 승인 (2026-09-14):** 사용자 요청으로 완료된 보안 패치 6파일을 커밋·푸시한다. 전송 성공 여부는 로컬 HEAD와 `hotfix/vitest-security-20260914` 원격 SHA 일치로 확인한다. 아래 미커밋 기록은 이전 시점이며 PR·병합·배포는 하지 않는다. 다음 작업은 R1 이후 실제 코드에 맞춘 인증 요청 시간 제한 상세 설계 검토다.
 
 > **Vitest 보안 패치·로컬 검증 완료 (2026-09-14):** R1 `f7ba1e5`에서 분기한 `hotfix/vitest-security-20260914`에서 Vitest/coverage-v8/mocker를 4.1.11로 갱신했다. 패키지·lockfile·정책 테스트·문서 총 6파일이며 제품 로직·DB·화면은 유지했다. 전체·운영 의존성 audit는 알려진 취약점 0건, 최종 `pnpm verify`는 878개 테스트·lint·타입·API/웹 빌드 통과다. 최초 실행의 route 테스트 5초 초과는 코드 변경 없이 단독/전체 재실행에서 통과했으며 확정 원인은 미상이다. 기존 coverage branches 91.86%는 100% 기준 미달(exit 1)로 남는다. 정책 테스트의 사전 RED 누락과 사후 불일치 검증도 [실행 계획](../superpowers/plans/2026-09-14-vitest-security-patch.md)·[검증 설명](../guides/security-auth-testing.md)에 기록했다. **미커밋·미푸시**이며 새 CI·PR·병합·배포는 하지 않았다. 다음 단계는 인증 요청 시간 제한 상세 설계다.
@@ -447,3 +455,29 @@ flowchart TD
 4. 첫 수입·지출의 생성과 조회를 PC 웹까지 연결한 뒤 범위를 넓히고, Expo 앱이 같은 계정의 원장을 사용하도록 연결한다.
 
 DB 우선은 데이터 무결성과 사용자 격리를 먼저 고정하는 장점이 있지만 화면 결과를 보는 시점이 늦다. UI 우선은 시연이 빠르지만 서버 규칙 확정 후 재작업 가능성이 있다. 전체 기능을 한 번에 만드는 대신 저장 기반 확정 후 작은 기능 단위로 연결하면 유지보수·검증 범위를 제한할 수 있다. 실제 금융정보 베타는 M1 hosted 인증·권한·백업·복구 등 운영 gate가 해소되기 전까지 시작하지 않는다.
+
+## 2026-09-15 인증 제공자 작업당 5초 제한 구현
+
+승인된 A안대로 Supabase SDK를 유지하면서 인증 제공자 작업 하나에 총 5,000ms 예산을 연결했다. 직접 HTTP와 SDK가 같은 보호 fetch를 사용하고, 가입·로그인·메일/OAuth/복구 코드 교환·세션 갱신·복구 요청은 각각 독립 예산을 갖는다. 로그아웃과 비밀번호 변경은 `setSession`을 포함한 전체 순차 흐름이 한 예산을 공유한다. 공개 `AuthProviderPort`, 계약, 의존성, DB, 화면은 변경하지 않았다.
+
+시간 초과·취소·원시 전송/본문 오류는 `AUTH_PROVIDER_UNAVAILABLE`로 고정하고, SDK가 받기 전에 안전한 내부 응답으로 바꾼다. 실제 SDK를 사용한 테스트에서 오류 표식이 console에 도달하지 않았고, 주입된 신호의 abort와 refresh backoff 뒤 추가 전송 차단을 확인했다. 취소가 원격 변경의 롤백을 뜻하지 않으므로 자동 재시도는 추가하지 않았다.
+
+Task 1은 focused 19 tests·typecheck·lint 종료 코드 0과 요구사항/품질 리뷰 Approved다. Task 2 RED는 2026-09-15 10:51 KST에 16 tests 중 15 failed·1 passed(exit 1), 구현 뒤 GREEN은 10:53에 16/16 passed(exit 0)였다. 같은 작업 트리의 통합·상위 정책 회귀는 controller를 포함해 11 files·193/193 passed(exit 0), web typecheck와 전체 lint도 exit 0이다. 구현 전 64개 인증·94개 상위 정책 기준선은 과거 기준선으로만 보존한다.
+
+Task 2 리뷰 round 1 전 소스에 대한 컨트롤러의 전체 `pnpm verify`는 exit 0이다. lint·workspace typecheck·API와 Next.js 16.3.3 build가 통과했고 legacy 54, contracts 66, database 15, API 148, web 545, E2E preflight 85로 총 913 tests가 통과했다. 로그는 `.superpowers/sdd/2026-09-15-auth-provider-deadline/full-verify.log`와 인계용 `output/auth-provider-deadline-full-verify.log`에 있다.
+
+같은 리뷰 전 소스에 대한 2026-09-15 11:01:42 KST의 전체 web coverage는 7.41초 동안 32 files·545 tests가 모두 통과했지만 branches 100% gate 때문에 exit 1이었다. statements 95.01% (839/883), branches 92.54% (757/818), functions 96.92% (189/195), lines 98.73% (704/713)이며 기준은 낮추지 않았다. branches는 과거 91.86%보다 개선됐지만 신규 `provider-operation.ts`도 90%여서 남은 격차가 전부 기존 코드라고 보지는 않는다. 로그는 `.superpowers/sdd/2026-09-15-auth-provider-deadline/coverage.log`와 `output/auth-provider-deadline-coverage.log`다.
+
+리뷰 round 1 당시 파일 길이는 어댑터 276줄, Task 1 신규 제품 모듈 79줄·93줄이었다. 신규 테스트 4파일은 최초 533줄이었고 리뷰 round 1의 실제 SDK pre-map 결과 검사를 더해 당시 590줄이었다. 테스트 추정을 넘은 이유는 실제 SDK 전송·본문 오류, abort, backoff, 모든 진입점과 순차 예산 경계를 분리 검증하고 한국어 역할 주석을 보존했기 때문이며 추가 제품 범위는 아니다.
+
+Task 2 리뷰 round 1은 최종 adapter 오류와 console 미호출만으로는 auth-js가 받은 내부 응답을 증명할 수 없다고 지적했다. 실제 SDK의 adapter 매핑 전 결과가 null user/session, status 408, 고정 message이며 canary가 없는지 직접 단언했다. 본문 버퍼링을 임시 우회한 mutation은 11:12:04 KST에 body 사례만 status 0 대 기대 408로 실패(exit 1)했고 transport 사례는 통과했다. 제품 파일을 즉시 원복해 SHA-256 `760F0EB6080752E0525E3900A775507797F785F6C021FC62B0EE25D88D4711D2` 일치를 확인했다. 11:12:32 KST SDK+operation 22/22 tests, 11:12:41 web typecheck, 11:12:52 lint는 모두 exit 0이다. round 1은 test·문서만 영구 변경했으므로 앞의 913개와 coverage는 이전 소스 증거이며 전체 재실행으로 표현하지 않는다.
+
+컨트롤러의 round 1 후, malformed JSON 최종 보완 전 `pnpm verify`는 exit 0이다. lint·workspace typecheck·API/web build가 통과했고 legacy 54, contracts 66, database 15, API 148, web 547, E2E preflight 85로 총 915 tests가 통과했다. 2026-09-15 11:16:03 KST coverage는 7.45초 동안 32 files·547 tests가 통과했지만 동일한 branches 100% gate 때문에 exit 1이었다. statements 95.01% (839/883), branches 92.54% (757/818), functions 96.92% (189/195), lines 98.73% (704/713)다. 보완 전 로그는 `output/auth-provider-deadline-final-verify.log`와 `output/auth-provider-deadline-final-coverage.log`이며 파일명의 final과 관계없이 915/547을 보완 후 결과로 주장하지 않는다. 913개·545개는 더 이른 이력이다.
+
+최종 검토에서 정상적으로 읽힌 잘못된 JSON이 SDK 해석 오류에 원문 일부를 남기는 누락을 확인했다. 공개 adapter 응답은 정규화되어 있었으며 공개 원문 유출이 입증된 것은 아니다. 최종 보완은 `provider-operation.ts` 안의 JSON 구문 검사로 한정했다. malformed 비-429는 기존 고정 408·실패/abort 경로, 실제 malformed/빈 429는 고정 제한 JSON·429, 유효 JSON은 원본 바이트·상태·헤더를 유지한다. 204/205/304와 성공한 빈 logout도 보존하고 디코딩 뒤 단조 시계 마감을 검사한다. 새 의존성·endpoint 스키마·오류 정책은 없다.
+
+11:31:02 KST TDD RED는 focused 54개 중 8 failed·46 passed(exit 1), 11:31:47 같은 명령의 GREEN은 54/54(exit 0)이다. 빈 429 SDK 확인까지 더한 11:32:34 focused는 55/55이고 web typecheck·lint도 exit 0이다. 테스트 `this` 타입 누락(TS2683)은 타입 명시만으로 수정 후 재검증했다. 11:33:04 인증/상위 정책 회귀 11파일·217/217도 exit 0이다. 제품·테스트를 고정해 컨트롤러에 넘겼으며 `.superpowers/sdd/2026-09-15-auth-provider-deadline/final-fix-report.md`에 정확한 명령·출력·고정 해시를 남겼다.
+
+컨트롤러의 보완 후 전체 `pnpm verify`는 exit 0이며 lint·workspace typecheck·API/web build와 legacy 54 + contracts 66 + database 15 + API 148 + web 569 + E2E preflight 85 = 937개 테스트가 통과했다. 11:36:18 KST coverage는 7.59초, 32파일·569/569 통과 뒤 branches 100% gate 때문에 exit 1이었다. statements 94.84% (846/892), branches 92.48% (763/825), functions 96.93% (190/196), lines 98.47% (711/722)이며 `provider-operation.ts`도 branches 94.11%·lines 100%라 분기 격차가 남아 있다. 기준을 낮추거나 전부 기존 부채로 돌리지 않았다. 현재 근거는 `output/auth-provider-deadline-json-guard-verify.log`와 `output/auth-provider-deadline-json-guard-coverage.log`다. scoped 최종 재검토는 APPROVED이며 malformed JSON Important finding은 해결됐다. 새 결함이나 범위 밖 변경은 없다는 판정이고 coverage gate 실패는 면제되지 않았다.
+
+실제 hosted Supabase/DB E2E, 배포망 취소, 실제 브라우저 여정, 한국망 지연 p95와 이번 변경 대상의 별도 audit는 미검증이다. 기존 `.gitignore` 수정은 건드리지 않았고 커밋·푸시·PR·병합·배포를 수행하지 않았다.

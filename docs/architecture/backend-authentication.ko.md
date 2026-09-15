@@ -25,6 +25,37 @@
 
 파일을 역할별로 나누는 것은 브라우저에서 필요한 JavaScript만 내려받는 동적 코드 분할과 다르다. 이번 변경으로 FCP나 서버 응답 시간이 개선됐다고 주장하지 않는다. 이득은 다음 수정 때 읽고 검토해야 할 책임의 범위가 명확해지는 것이다.
 
+## 인증 제공자 작업당 5초 경계 — 2026-09-15
+
+Supabase 인증 통신은 로컬 입력·설정 검증을 마친 뒤 작업마다 독립적인 총 5초 예산을 만든다. 작업 흐름은 **로컬 입력 검증 → 5초 예산 생성 → 작업 전용 SDK/HTTP → 응답 본문 읽기 → 응답 검증 → 타이머·리스너 정리** 순서다. OAuth 시작 URL 조립은 외부 통신이 없으므로 이 예산을 만들지 않으며, 사용자가 메일을 확인하거나 OAuth 동의를 마칠 때까지 기다리는 시간도 포함하지 않는다.
+
+책임은 다음과 같이 나뉜다.
+
+| 구성 요소 | 책임 |
+| --- | --- |
+| `provider-request-deadline.ts` | 단조 증가 시계, 총 5초 수명, 취소 신호와 종료 상태 |
+| `provider-operation.ts` | 작업 전용 fetch, 헤더·본문 읽기 제한, 원시 전송/본문 오류 차단 |
+| `supabase-auth-adapter.ts` | 입력 검증, 가입·로그인·복구·갱신·로그아웃·비밀번호 변경의 순서와 응답 검증 |
+| `supabase/sdk-client.ts` | 비영속 SDK를 작업마다 새로 만들고 보호된 fetch를 SDK에 주입 |
+
+`setSession → signOut`과 `setSession → updateUser`는 각 단계에 새 타이머를 만들지 않고 하나의 예산을 공유한다. 첫 단계가 늦게 끝나면 다음 SDK 호출 직전에 활성 상태를 다시 확인해 마감 뒤 새 전송을 시작하지 않는다. 가입·복구·PKCE 교환의 직접 HTTP 경로도 같은 보호 fetch를 사용하므로 헤더뿐 아니라 JSON 본문 읽기와 최종 세션 검증까지 총예산에 포함된다.
+
+시간 초과, 호출자 취소, 전송·본문 오류는 공개 가능한 `AUTH_PROVIDER_UNAVAILABLE`로만 전달한다. SDK에는 원시 예외 대신 고정된 내부 408 응답을 보여 주어 URL·토큰·비밀번호·제공자 원문이 SDK 오류 출력에 도달하지 않게 한다. 이 408은 브라우저 응답 정책이 아니라 SDK 전송 경계의 내부 표현이다. 실제 제공자의 429, 이메일 미확인, 잘못된 자격 증명, PKCE 오류와 계정 존재 여부 은폐 매핑은 기존대로 유지한다.
+
+취소는 원격 작업의 롤백이 아니다. 앱이 실패를 반환하기 전에 Supabase가 가입이나 비밀번호 변경을 처리했을 수 있으므로 결과가 불확실한 변경을 자동 재전송하지 않는다. 실제 hosted Supabase/DB 전체 E2E, 배포망에서의 취소 전달, 한국망 지연 p95는 통제된 fetch 테스트로 검증했다고 주장하지 않는다.
+
+Task 2 리뷰 round 1 전 전체 `pnpm verify`에서는 lint·workspace typecheck·API/Next.js 16.3.3 build와 913개 테스트가 통과했다. 같은 소스의 전체 web coverage 실행은 32개 파일·545개 테스트 자체는 통과했지만 branches 92.54% (757/818)로 100% gate를 충족하지 못해 종료 코드 1이었다. statements 95.01% (839/883), functions 96.92% (189/195), lines 98.73% (704/713)이며 기준은 낮추지 않았다. 신규 `provider-operation.ts`의 branches도 90%라서 이 격차를 기존 코드만의 부채로 보지 않는다.
+
+리뷰 round 1은 실제 auth-js 반환값을 adapter 매핑 전에 직접 검사하도록 보강했다. 원시 전송·본문 오류 모두 SDK가 null user/session과 status 408·message `AUTH_PROVIDER_UNAVAILABLE`만 받으며 canary를 받지 않는다. 본문 버퍼링을 임시 제거한 mutation에서는 body 사례가 status 0으로 실패하고 transport 사례는 통과했다. 제품 파일은 SHA-256 `760F0EB6080752E0525E3900A775507797F785F6C021FC62B0EE25D88D4711D2`로 정확히 원복했고, SDK+operation 22개 테스트와 typecheck·lint가 통과했다. 이 round의 영구 변경은 테스트·문서뿐이므로 앞의 913개와 coverage는 round 전 증거로 구분한다.
+
+round 1 뒤, malformed JSON 최종 보완 전 소스의 `pnpm verify`는 lint·workspace typecheck·API/web build와 총 915개 테스트를 통과했다. 2026-09-15 11:16:03 KST coverage는 32개 파일·547개 테스트가 통과했지만 동일한 branches 92.54% 대 100% gate 때문에 종료 코드 1이었다. 보완 전 근거는 `output/auth-provider-deadline-final-verify.log`와 `output/auth-provider-deadline-final-coverage.log`이며, 파일명의 final과 관계없이 현재 소스의 최종 결과는 아니다. 913개·545개는 더 이른 round 전 이력이다.
+
+최종 검토에서는 바이트 읽기에 성공한 잘못된 JSON이 SDK의 해석 오류에 원문 일부를 남기는 것을 확인했다. 공개 adapter 응답의 원문 유출은 입증되지 않았다. `provider-operation.ts`는 이제 SDK보다 먼저 JSON 구문을 확인한다. 잘못된 비-429 본문은 고정 가용성 오류로 작업을 실패 처리하고, 실제 429의 잘못된/빈 본문은 안전한 제한 JSON과 429로 유지한다. 유효 JSON은 원본 바이트·상태·헤더를 보존하며, 204/205/304와 성공한 빈 logout은 JSON 본문을 요구하지 않는다. 디코딩 후 SDK 전달 직전에도 단조 시계 마감을 검사하므로 전체 5초·abort·정리 책임은 그대로다. 이는 구문 보호이며 endpoint별 응답 스키마나 새 오류 정책이 아니다.
+
+최종 보완 TDD는 11:31:02 KST에 focused 54개 중 8개 실패로 실제 SDK pre-map status 0·원문 일부와 429 분류 손실을 재현했고, 11:31:47 동일 명령은 54개 모두 통과했다. 빈 429 SDK 사례 보강 뒤 focused 55개·인증/상위 정책 217개·web typecheck·lint가 통과했다. 컨트롤러의 보완 후 전체 `pnpm verify`는 총 937개 테스트와 lint·workspace typecheck·API/web build 통과(exit 0)다. 11:36:18 KST 전체 web coverage는 7.59초, 32파일·569/569 통과 뒤 기존 branches 100% gate로 exit 1이다. statements 94.84% (846/892), branches 92.48% (763/825), functions 96.93% (190/196), lines 98.47% (711/722)이며 `provider-operation.ts`도 branches 94.11%·lines 100%다. 분기 격차를 전부 기존 코드 탓으로 돌리지 않고 기준은 유지했다. 최종 로그는 `output/auth-provider-deadline-json-guard-verify.log`와 `output/auth-provider-deadline-json-guard-coverage.log`이며 scoped 최종 재검토는 APPROVED이며 malformed JSON Important finding은 해결됐다. Coverage gate 실패는 별도로 유지한다.
+
+검증 원본은 `.superpowers/sdd/2026-09-15-auth-provider-deadline/full-verify.log`와 `coverage.log`, 인계용 복사본은 `output/auth-provider-deadline-full-verify.log`와 `output/auth-provider-deadline-coverage.log`다. 이 로그는 hosted Supabase/DB E2E, 실제 브라우저 여정, 배포망 취소나 한국망 지연 측정을 포함하지 않는다.
+
 ## DB 연결 오류 경계 — 2026-09-09 A안
 
 DB 연결 풀은 여러 요청이 사용할 연결을 보관하고 재사용한다. BFF의 [`createDatabaseClient`](../../packages/database/src/client.ts)는 Drizzle이 만든 node-postgres 풀을 감싸며, API의 [`MeModule`](../../apps/api/src/me/me.module.ts)은 Nest DI에 API 전용 풀을 제공한다. 이번 A안은 두 생성 지점의 유휴 오류 수신을 보완한다. 실행·검증 상태는 [상세 계획](../superpowers/plans/2026-09-09-database-pool-error-boundary.md)의 기록을 따른다.
