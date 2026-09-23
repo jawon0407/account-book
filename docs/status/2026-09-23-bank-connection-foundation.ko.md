@@ -7,6 +7,10 @@
 
 - Task 1 — 공개 상태 계약: 완료. 요청 ID UUID, 공개 상태 enum, 엄격한 요청 상태
   object와 package root export를 추가했다. 민감 필드와 알 수 없는 상태/ID를 검사한다.
+- Task 2 — 연결 비밀값 기반: 완료. API 내부에 정규 32바이트 base64url 비밀값 생성,
+  비교용 SHA-256 지문, 엄격한 만료 경계 판정과 5분/60초 TTL 상수를 추가했다.
+  원자적 한 번 사용과 세션 결속은 아직 구현하지 않았으며, 이를 제공하는 endpoint,
+  DB 또는 provider 연동도 없다.
 - DB와 HTTP endpoint: 미구현.
 - 인가 코드·토큰·provider 연동: 미구현.
 - 잔액·거래 수집: 미구현.
