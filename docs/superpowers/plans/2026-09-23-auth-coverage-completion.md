@@ -193,7 +193,7 @@ it("stops session revocation if the user security gate cannot be locked", async 
 - [x] PR #12가 아직 Draft이며 head가 변하지 않았음을 확인.
 - [x] 테스트 보완·파일 규모·브랜치 적용·CI 누락을 계획에 포함.
 - [x] 기본 coverage 기준을 낮추지 않으며 실제 계정/키가 필요 없음을 확인.
-- [ ] 사용자가 상세 계획과 실행 방식 확인.
+- [x] 사용자가 상세 계획과 실행 방식 확인: 현재 세션 순차 구현 + 마지막 독립 리뷰.
 - [ ] 테스트/CI 구현 및 전체 검증.
 - [ ] PR #12 병합 → PR #13 대상 변경 → 경고 재확인.
 
