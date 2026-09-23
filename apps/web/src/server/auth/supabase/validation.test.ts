@@ -3,6 +3,6 @@ import { safeUrl } from "./validation.js";
 
 vi.mock("server-only", () => ({}));
 
-it("rejects an unparseable URL without retaining the submitted value", () => {
-  expect(() => safeUrl("not-a-url-private-input", false)).toThrow("AUTH_PROVIDER_UNAVAILABLE");
+it.each(["not-a-url-private-input", undefined, null, 42])("rejects malformed URL input without retaining the submitted value %#", (value) => {
+  expect(() => safeUrl(value, false)).toThrow("AUTH_PROVIDER_UNAVAILABLE");
 });
