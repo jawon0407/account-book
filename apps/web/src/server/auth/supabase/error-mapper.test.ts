@@ -1,7 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
 import { adapter, challenge, client, expectSafeError, jsonResponse, verifier } from "./test-fixtures.js";
+import { mappedProviderError, providerCode } from "./error-mapper.js";
 
 vi.mock("server-only", () => ({}));
+
+it.each([null, [], "private-error", { code: 123 }, {}])("ignores malformed provider codes %#", (value) => {
+  expect(providerCode(value)).toBe("");
+});
+
+it.each([
+  [{ code: "same_password" }, "AUTH_OAUTH_TRANSACTION_INVALID"],
+  [{ message: "private-provider-detail" }, "AUTH_PROVIDER_UNAVAILABLE"],
+  [null, "AUTH_PROVIDER_UNAVAILABLE"],
+] as const)("maps status-free SDK errors without leaking detail %#", (value, code) => {
+  const error = mappedProviderError(value);
+  expect(error).toMatchObject({ code, message: code });
+  expect(JSON.stringify(error)).not.toContain("private-provider-detail");
+});
 
 describe("Supabase error mapping through the public adapter", () => {
   it.each([
