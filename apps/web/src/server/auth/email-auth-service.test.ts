@@ -43,11 +43,22 @@ class EmailRepository {
   public record: EmailRecord | null = null;
   public events: string[] = [];
 
+  /**
+   * 호출 순서를 기록하고 이메일 확인 레코드를 메모리에 저장하는 대역입니다. 브라우저 해시는 복사합니다.
+   * @param record 저장을 요청받은 테스트 레코드.
+   * @returns 저장 후 값 없이 완료합니다.
+   */
   public async createEmailConfirmationTransaction(record: EmailRecord): Promise<void> {
     this.events.push("create");
     this.record = { ...record, interactionHash: Uint8Array.from(record.interactionHash) };
   }
 
+  /**
+   * 메모리 레코드의 브라우저·기한·미소비 상태를 확인한 뒤 소비 시각을 기록합니다.
+   * @param interactionHash 기대 브라우저 식별자 해시.
+   * @param claimedAt 소비 및 만료 판단 시각.
+   * @returns 소비한 레코드 또는 조건이 다르면 null.
+   */
   public async claimEmailConfirmationTransaction(interactionHash: Uint8Array, claimedAt: Date): Promise<EmailRecord | null> {
     this.events.push("claim");
     const record = this.record;
@@ -57,6 +68,11 @@ class EmailRepository {
   }
 }
 
+/**
+ * 고정 UUID·PKCE 값과 메모리 저장소·제공자 대역을 연결해 이메일 인증 테스트 환경을 만듭니다.
+ * @param clock 제공자 응답 이후 시각을 제어할 함수.
+ * @returns 서비스·저장소·대역·콜백 컨텍스트.
+ */
 function setup(clock: () => Date = () => new Date(now)) {
   const repository = new EmailRepository();
   const provider = {
@@ -65,17 +81,35 @@ function setup(clock: () => Date = () => new Date(now)) {
     confirmationResult: tokens as unknown,
     failure: null as AuthProviderError | null,
     calls: { signUp: [] as unknown[], signIn: [] as unknown[], confirm: [] as unknown[] },
+    /**
+     * 가입 요청과 실행 순서를 기록한 뒤 지정한 결과 또는 실패를 돌려주는 대역입니다.
+     * @param args 가입 입력·콜백 URL·PKCE 챌린지 인자 목록.
+     * @returns signUpResult에 지정된 테스트 응답.
+     * @throws provider.failure가 설정돼 있으면 그 오류.
+     */
     signUp: vi.fn(async (...args: unknown[]) => {
       repository.events.push("provider-signup");
       provider.calls.signUp.push(args);
       if (provider.failure) throw provider.failure;
       return provider.signUpResult;
     }),
+    /**
+     * 로그인 입력을 기록하고 지정한 토큰 응답 또는 실패를 재현합니다.
+     * @param input 서비스가 전달한 로그인 입력.
+     * @returns signInResult 테스트 응답.
+     * @throws 설정된 제공자 오류.
+     */
     signInWithPassword: vi.fn(async (input: unknown) => {
       provider.calls.signIn.push(input);
       if (provider.failure) throw provider.failure;
       return provider.signInResult;
     }),
+    /**
+     * 메일 확인 코드 교환의 입력과 순서를 기록하고 지정 결과를 반환합니다.
+     * @param input 확인 코드와 PKCE 검증값.
+     * @returns confirmationResult 테스트 응답.
+     * @throws 설정된 제공자 오류.
+     */
     confirmEmail: vi.fn(async (input: unknown) => {
       repository.events.push("provider-confirm");
       provider.calls.confirm.push(input);
@@ -84,6 +118,10 @@ function setup(clock: () => Date = () => new Date(now)) {
     }),
   };
   const sessions = {
+    /**
+     * 세션 생성 순서를 기록하고 고정된 공개 세션 정보를 반환합니다. 실제 세션은 저장하지 않습니다.
+     * @returns 테스트 식별자·접근 토큰 만료·하루 뒤 절대 만료 정보.
+     */
     create: vi.fn(async () => {
       repository.events.push("session");
       return { selector: "opaque-session-selector", accessTokenExpiresAt: tokens.accessTokenExpiresAt, absoluteExpiresAt: new Date(now.getTime() + 86_400_000) };
@@ -101,6 +139,96 @@ function setup(clock: () => Date = () => new Date(now)) {
 }
 
 describe("EmailAuthService PKCE confirmation continuity", () => {
+  it.each([
+    "https://app.example.test/confirm",
+    new URL("https://user:password@app.example.test/confirm"),
+    new URL("https://app.example.test/confirm#fragment"),
+    new URL("http://remote.example.test/confirm"),
+  ])("rejects unsafe callback input before persistence %#", async (emailRedirectUrl) => {
+    const subject = setup();
+    await expect(subject.service.signUp(validInput, { ...subject.context, emailRedirectUrl }))
+      .rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    expect(subject.repository.events).toEqual([]);
+  });
+
+  it("accepts explicit loopback HTTP callbacks", async () => {
+    const subject = setup();
+    await expect(subject.service.signUp(validInput, { ...subject.context, emailRedirectUrl: new URL("http://localhost:3000/confirm") }))
+      .resolves.toEqual({ accepted: true });
+    expect(subject.provider.calls.signUp[0]).toEqual([validInput, new URL("http://localhost:3000/confirm"), expect.any(String)]);
+  });
+
+  it.each(["signUp", "signIn"] as const)("rejects malformed %s input before external effects", async (method) => {
+    const subject = setup();
+    await expect(subject.service[method]({}, subject.context)).rejects.toMatchObject({ code: "AUTH_INVALID_CREDENTIALS" });
+    expect(subject.repository.events).toEqual([]);
+    expect(subject.provider.calls.signIn).toEqual([]);
+  });
+
+  it("rejects an invalid generated ID and an overflowing confirmation lifetime", async () => {
+    const subject = setup();
+    const invalidId = new EmailAuthService!(subject.provider, subject.sessions, subject.repository, keyring, () => "invalid", () => verifier);
+    await expect(invalidId.signUp(validInput, subject.context)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    await expect(subject.service.signUp(validInput, { ...subject.context, now: new Date(8_640_000_000_000_000) }))
+      .rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    expect(subject.repository.record).toBeNull();
+    expect(subject.provider.signUp).not.toHaveBeenCalled();
+  });
+
+  it("hides signup verification-required responses and unknown provider failures", async () => {
+    const subject = setup();
+    subject.provider.failure = new AuthProviderError("AUTH_EMAIL_VERIFICATION_REQUIRED");
+    await expect(subject.service.signUp(validInput, subject.context)).resolves.toEqual({ accepted: true });
+    subject.provider.signInWithPassword.mockRejectedValueOnce(new Error("private-provider-detail"));
+    await expect(subject.service.signIn(validInput, subject.context))
+      .rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", message: "AUTH_PROVIDER_UNAVAILABLE" });
+    expect(subject.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects token metadata inconsistent with a verified user", async () => {
+    const subject = setup();
+    subject.provider.signInResult = { ...tokens, accessToken: "" };
+    await expect(subject.service.signIn(validInput, subject.context)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    expect(subject.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { interactionHash: Buffer.alloc(32, 9) },
+    { consumedAt: null },
+    { expiresAt: new Date(now.getTime() + 900_001) },
+  ])("rejects malformed claimed transactions before exchanging codes %#", async (override) => {
+    const subject = setup();
+    await subject.service.signUp(validInput, subject.context);
+    vi.spyOn(subject.repository, "claimEmailConfirmationTransaction").mockResolvedValueOnce({ ...subject.repository.record!, consumedAt: now, ...override });
+    await expect(subject.service.confirmEmail({ code: "code" }, subject.context))
+      .rejects.toMatchObject({ code: "AUTH_OAUTH_TRANSACTION_INVALID" });
+    expect(subject.provider.confirmEmail).not.toHaveBeenCalled();
+    expect(subject.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("hides unexpected storage failures during confirmation", async () => {
+    const subject = setup();
+    vi.spyOn(subject.repository, "claimEmailConfirmationTransaction").mockRejectedValueOnce(new Error("private-storage-detail"));
+    await expect(subject.service.confirmEmail({ code: "code" }, subject.context))
+      .rejects.toMatchObject({ code: "AUTH_OAUTH_TRANSACTION_INVALID", message: "AUTH_OAUTH_TRANSACTION_INVALID" });
+    expect(subject.provider.confirmEmail).not.toHaveBeenCalled();
+  });
+
+  it("uses the default clock and generators without exposing provider tokens", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    try {
+      const subject = setup();
+      const service = new EmailAuthService!(subject.provider, subject.sessions, subject.repository, keyring);
+      await expect(service.signUp(validInput, subject.context)).resolves.toEqual({ accepted: true });
+      expect(subject.repository.record?.id).toMatch(/^[0-9a-f-]{36}$/u);
+      const result = await service.signIn(validInput, subject.context);
+      expect(result).toMatchObject({ user: tokens.user, selector: "opaque-session-selector" });
+      expect(subject.sessions.create).toHaveBeenCalledWith(expect.objectContaining({ userId }), now);
+      expect(JSON.stringify(result)).not.toContain(tokens.accessToken);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("stores an interaction-bound encrypted verifier before sending only its challenge", async () => {
     const subject = setup();
     await expect(subject.service.signUp(validInput, subject.context)).resolves.toEqual({ accepted: true });

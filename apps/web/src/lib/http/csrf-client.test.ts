@@ -5,6 +5,11 @@ import { describe, expect, it, vi } from "vitest";
 const module = await import("./csrf-client.js").catch(() => ({} as Record<string, unknown>));
 const postWithCsrf = module.postWithCsrf as ((path: string, json: unknown, client: unknown) => Promise<unknown>) | undefined;
 
+/**
+ * 네트워크 없이 json() 호출 결과를 주는 ky 응답 대역을 만든다.
+ * @param value json() Promise가 반환할 테스트 값.
+ * @returns 호출 횟수를 검사할 수 있는 mock json 메서드를 가진 객체.
+ */
 function result(value: unknown) {
   return { json: vi.fn(async () => value) };
 }

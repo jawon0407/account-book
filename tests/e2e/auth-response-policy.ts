@@ -19,13 +19,11 @@ const credentialOrCsrfLabel = /access.?token|refresh.?token|csrf.?token|password
 const canonicalUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 /**
- * Detects raw credential values and labels before assertions can echo a response.
- * The one public sign-in email and a CSRF endpoint's own key may be explicitly
- * allowed; parsed-value scanning still constrains their exact locations.
- * @param value - Response text retained only inside the current test process.
- * @param forbidden - Exact synthetic or live secrets known before this response.
- * @param options - Narrow endpoint-specific allowances validated again after parsing.
- * @returns True when raw text contains forbidden credential material.
+ * 응답 원문에 비밀값·토큰 이름·JWT 모양이 있는지 먼저 검사한다.
+ * @param value - 테스트 프로세스에서만 보관하는 응답 문자열이다.
+ * @param forbidden - 이미 알고 있는 비밀값. 빈 문자열은 검색에서 제외한다.
+ * @param options - 공개 이메일과 CSRF 키의 좁은 예외다. JSON 경로 검사는 별도 함수가 담당한다.
+ * @returns 누출 후보가 있으면 true. 원문을 출력하지 않는다.
  */
 export function containsCredentialMaterial(
   value: string,
@@ -42,12 +40,11 @@ export function containsCredentialMaterial(
 }
 
 /**
- * Recursively detects encoded/nested credentials while allowing only `user.email`
- * to carry the expected public email and only a root CSRF key when requested.
- * @param value - Safely parsed JSON value that is never passed to an assertion diff.
- * @param forbidden - Exact synthetic or live secrets known before this response.
- * @param options - Narrow path allowances for the public sign-in/CSRF contracts.
- * @returns True when a key or value contains forbidden credential material.
+ * 파싱한 JSON을 재귀 순회해 인코딩/중첩으로 숨은 자격증명을 검사한다.
+ * @param value - 안전하게 파싱한 JSON 값이다.
+ * @param forbidden - 현재 응답에서 금지할 비밀값 목록이다.
+ * @param options - user.email 및 루트 CSRF 키만 허용하는 endpoint별 예외다.
+ * @returns 키/값에 비밀 자료가 있으면 true. 외부 출력이나 저장은 없다.
  */
 export function containsCredentialMaterialInJson(
   value: unknown,
@@ -58,9 +55,9 @@ export function containsCredentialMaterialInJson(
 }
 
 /**
- * Parses JSON without allowing parser messages to retain hostile response snippets.
- * @param value - Response text already checked for known credential material.
- * @returns A discriminated success value or a fixed boolean-safe failure.
+ * JSON 파싱 오류 메시지에 원문이 남지 않도록 실패를 고정 결과로 바꾼다.
+ * @param value - 알려진 비밀 자료 검사를 먼저 거친 응답 문자열이다.
+ * @returns 성공은 {ok:true,value}, 실패는 {ok:false}. 파서 예외를 전파하지 않는다.
  */
 export function parseJsonSafely(value: string): SafeJsonParseResult {
   try {
@@ -71,9 +68,9 @@ export function parseJsonSafely(value: string): SafeJsonParseResult {
 }
 
 /**
- * Validates the exact one-key CSRF public contract with no assertion diff.
- * @param value - Safely parsed CSRF response.
- * @returns True only for one bounded non-empty `csrfToken` string.
+ * CSRF 공개 응답의 정확한 단일 키와 문자열 길이를 검사한다.
+ * @param value - 파싱된 응답 값이다.
+ * @returns csrfToken만 있고 길이가 1~1024인 문자열이면 true. 객체를 출력하지 않는다.
  */
 export function isCsrfResponse(value: unknown): value is Readonly<{ csrfToken: string }> {
   return hasExactKeys(value, ["csrfToken"])
@@ -83,10 +80,10 @@ export function isCsrfResponse(value: unknown): value is Readonly<{ csrfToken: s
 }
 
 /**
- * Validates an exact fixed auth-error envelope without exposing received fields.
- * @param value - Safely parsed public error response.
- * @param code - Fixed error code expected for the exercised branch.
- * @returns True only for the fixed message, UUID, retryability, and empty errors.
+ * 고정 인증 오류 코드·문구·UUID·재시도 여부·빈 fieldErrors를 검사한다.
+ * @param value - 파싱된 공개 오류 응답이다.
+ * @param code - 이번 테스트 분기에서 기대하는 두 허용 오류 코드 중 하나다.
+ * @returns 정확한 키와 값이 모두 맞으면 true. assertion에 원문을 넘기지 않는다.
  */
 export function isAuthErrorResponse(value: unknown, code: AuthErrorCode): boolean {
   return hasExactKeys(value, ["code", "fieldErrors", "message", "requestId", "retryable"])
@@ -100,10 +97,10 @@ export function isAuthErrorResponse(value: unknown, code: AuthErrorCode): boolea
 }
 
 /**
- * Validates the exact nested public session contract using fixed booleans only.
- * @param value - Safely parsed successful sign-in response.
- * @param expected - Synthetic public identity expected from the test IDP.
- * @returns True only for exact keys, identity, verification, and ordered ISO expiries.
+ * 로그인 공개 사용자와 두 만료 시각의 구조·순서를 검사한다.
+ * @param value - 파싱한 로그인 성공 응답이다.
+ * @param expected - 합성 사용자 email/userId 객체다.
+ * @returns 정확한 키·인증 상태·사용자 값과 정규 ISO 만료 시각 순서가 맞으면 true다.
  */
 export function isSignInResponse(
   value: unknown,
@@ -123,10 +120,10 @@ export function isSignInResponse(
 }
 
 /**
- * Validates the exact nested `/api/me` public identity without diffing its object.
- * @param value - Safely parsed current-user response.
- * @param expected - Fixed public identity fields expected from the API boundary.
- * @returns True only for the three exact keys and expected primitive values.
+ * 현재 사용자 응답의 정확한 세 키와 기대값을 검사한다.
+ * @param value - 파싱한 /api/me 응답이다.
+ * @param expected - 기대 email(또는 null)과 userId다.
+ * @returns 세 공개 필드가 기대와 일치하면 true. 응답 diff나 상태 변경은 없다.
  */
 export function isMeResponse(
   value: unknown,
@@ -139,21 +136,21 @@ export function isMeResponse(
 }
 
 /**
- * Validates the exact logout acknowledgement without diffing received JSON.
- * @param value - Safely parsed sign-out response.
- * @returns True only for the single fixed `signedOut: true` field.
+ * 로그아웃 응답에 signedOut:true 하나만 있는지 검사한다.
+ * @param value - 파싱한 로그아웃 응답이다.
+ * @returns 정확한 단일 필드이면 true. 외부 부작용은 없다.
  */
 export function isSignOutResponse(value: unknown): boolean {
   return hasExactKeys(value, ["signedOut"]) && value.signedOut === true;
 }
 
 /**
- * Recursively scans JSON paths so nested or escaped secrets cannot bypass raw text checks.
- * @param value - Current parsed JSON value.
- * @param forbidden - Exact secrets known to the calling response boundary.
- * @param options - Endpoint-specific public email or CSRF-key allowance.
- * @param path - Current object path, retained only as fixed property names.
- * @returns True when the current value or a descendant contains credential material.
+ * 현재 JSON 경로와 자식 값을 재귀 순회하여 비밀 자료를 찾는다.
+ * @param value - 현재 노드 값이다.
+ * @param forbidden - 해당 응답의 금지 문자열 목록이다.
+ * @param options - 공개 이메일 및 루트 CSRF 키 예외다.
+ * @param path - 현재 객체 키/배열 인덱스 경로다. user.email 예외 위치를 제한한다.
+ * @returns 현재 값 또는 자식에 비밀 자료가 있으면 true. 파싱된 비순환 JSON을 전제로 한다.
  */
 function scanJsonValue(
   value: unknown,
@@ -187,11 +184,11 @@ function scanJsonValue(
 }
 
 /**
- * Detects credential-bearing JSON keys before exact contract validation.
- * @param key - Current decoded object key.
- * @param path - Parent path used to constrain the sole CSRF-key allowance.
- * @param options - Endpoint-specific CSRF-key allowance.
- * @returns True for password, token, CSRF, or selector-bearing keys.
+ * 키의 비알파벳 문자를 제거하고 소문자로 바꿔 민감한 키를 판정한다.
+ * @param key - 디코딩된 현재 객체 키다.
+ * @param path - 부모 경로. 루트 CSRF 예외를 판정한다.
+ * @param options - endpoint별 CSRF 키 허용 설정이다.
+ * @returns 정규화한 키가 비밀번호·토큰·selector 목록에 있으면 true다.
  */
 function isSensitiveKey(
   key: string,
@@ -217,10 +214,10 @@ function isSensitiveKey(
 }
 
 /**
- * Checks exact object keys internally so assertion failures never print the object.
- * @param value - Candidate parsed JSON value.
- * @param keys - Fixed public keys allowed by the endpoint contract.
- * @returns True when value is a plain JSON object with exactly those own keys.
+ * 객체 자체를 assertion에 노출하지 않고 own key가 계약과 정확히 일치하는지 검사한다.
+ * @param value - 파싱된 JSON 후보 값이다.
+ * @param keys - endpoint가 허용한 고정 키 목록이다.
+ * @returns null/배열이 아닌 객체에 해당 키들만 있으면 true. prototype 검사는 하지 않는다.
  */
 function hasExactKeys<const Key extends string>(
   value: unknown,
@@ -233,18 +230,18 @@ function hasExactKeys<const Key extends string>(
 }
 
 /**
- * Narrows parsed JSON objects while excluding arrays and null.
- * @param value - Candidate parsed JSON value.
- * @returns True for a JSON object safe for fixed-key inspection.
+ * null과 배열을 제외하여 JSON 객체 후보로 타입을 좁힌다.
+ * @param value - 검사할 파싱값이다.
+ * @returns null이 아닌 비배열 객체이면 true. prototype까지 검증하지 않는다.
  */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 /**
- * Accepts only canonical UTC ISO timestamps so malformed expiry strings stay boolean-safe.
- * @param value - Candidate public expiry value.
- * @returns True when parsing is finite and round-trips to the same ISO string.
+ * 날짜를 파싱한 뒤 ISO 문자열로 되돌려 원문과 같은지 검사한다.
+ * @param value - 공개 만료 시각 후보다.
+ * @returns 유한한 시각이며 정규 UTC ISO 문자열과 정확히 같으면 true다.
  */
 function isCanonicalIsoDate(value: unknown): value is string {
   if (typeof value !== "string") return false;

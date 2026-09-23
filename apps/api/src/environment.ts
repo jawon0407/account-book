@@ -23,7 +23,11 @@ export type ApiEnvironment = Readonly<{
   bffJwtPublicKeys: DelegatedJwtKeyring;
 }>;
 
-/** Rejects environment strings that can hide configuration or cause parser ambiguity. */
+/**
+ * 빈 문자열, 앞뒤 공백, 제어문자가 없는 환경 변수인지 검사한다.
+ * @param value - 아직 신뢰하지 않는 환경 변수 원문.
+ * @returns 안전한 문자열이면 true. 입력은 변경하지 않는다.
+ */
 function safeEnvironmentValue(value: string | undefined): value is string {
   return typeof value === "string"
     && value.length > 0
@@ -34,7 +38,12 @@ function safeEnvironmentValue(value: string | undefined): value is string {
     });
 }
 
-/** Parses the bounded listener configuration without coercing unsafe input. */
+/**
+ * 서버가 열 주소와 포트를 검사하고 생략한 값에는 로컬 기본값을 적용한다.
+ * @param input - 환경 변수 목록. 호스트는 두 주소만, 포트는 1~65535만 허용한다.
+ * @returns 검증한 apiHost와 숫자 apiPort.
+ * @throws 허용 범위를 벗어나면 원문을 숨긴 API_CONFIGURATION_INVALID 오류.
+ */
 function parseListener(input: Readonly<Record<string, string | undefined>>): Pick<ApiEnvironment, "apiHost" | "apiPort"> {
   const apiHost = input.API_HOST ?? "127.0.0.1";
   const parsedPort = ApiPortSchema.safeParse(input.API_PORT);
@@ -42,7 +51,12 @@ function parseListener(input: Readonly<Record<string, string | undefined>>): Pic
   return { apiHost, apiPort: parsedPort.data };
 }
 
-/** Validates the API-owned database connection without disclosing credentials on failure. */
+/**
+ * API 전용 app_api 계정의 PostgreSQL URL을 검사한다. 로컬이 아니면 허용된 SSL 모드가 필수다.
+ * @param value - 비밀번호를 포함할 수 있어 로그에 남기면 안 되는 연결 문자열.
+ * @returns 검증을 통과한 원래 문자열. DB에는 연결하지 않는다.
+ * @throws 공백, 잘못된 URL·계정·SSL 설정이면 API_CONFIGURATION_INVALID 오류.
+ */
 function parseDatabaseUrl(value: string | undefined): string {
   if (!safeEnvironmentValue(value) || /[\s\p{White_Space}]/u.test(value)) throw new Error("API_CONFIGURATION_INVALID");
   let url: URL;
@@ -67,7 +81,12 @@ function parseDatabaseUrl(value: string | undefined): string {
   return value;
 }
 
-/** Parses a JSON accepted-kid list and rejects duplicate or unsafe identifiers. */
+/**
+ * 허용할 서명 키 식별자(kid)의 JSON 배열을 읽고 중복과 안전하지 않은 문자를 거부한다.
+ * @param value - 1~3개의 키 식별자를 담은 JSON 문자열.
+ * @returns 외부에서 배열을 바꾸지 못하도록 동결한 식별자 목록.
+ * @throws 형식이나 개수가 맞지 않으면 API_CONFIGURATION_INVALID 오류.
+ */
 function parseAcceptedKids(value: string | undefined): readonly string[] {
   if (!safeEnvironmentValue(value)) throw new Error("API_CONFIGURATION_INVALID");
   let parsed: unknown;
@@ -83,7 +102,13 @@ function parseAcceptedKids(value: string | undefined): readonly string[] {
   return Object.freeze([...parsed]);
 }
 
-/** Parses a deliberately narrow flat JSON object so duplicate key members cannot be overwritten by JSON.parse. */
+/**
+ * 키 식별자와 공개키 문자열만 담는 평평한 JSON 객체를 제한된 문법으로 읽는다.
+ * JSON.parse가 같은 이름의 필드를 덮어쓰는 문제를 피하려고 항목을 직접 추출한다.
+ * @param value - 1~3개 키 항목을 담은 설정 문자열.
+ * @returns 중복 없는 [키 식별자, 인코딩된 공개키] 목록.
+ * @throws 문법·개수·중복 검사에 실패하면 API_CONFIGURATION_INVALID 오류.
+ */
 function parseFlatKeyObject(value: string | undefined): readonly (readonly [string, string])[] {
   if (!safeEnvironmentValue(value)) throw new Error("API_CONFIGURATION_INVALID");
   const match = /^\{\s*(?:"([A-Za-z0-9._-]{1,128})"\s*:\s*"([A-Za-z0-9_-]+)"\s*)(?:,\s*"([A-Za-z0-9._-]{1,128})"\s*:\s*"([A-Za-z0-9_-]+)"\s*){0,2}\}$/u.exec(value);
@@ -98,7 +123,13 @@ function parseFlatKeyObject(value: string | undefined): readonly (readonly [stri
   return entries;
 }
 
-/** Imports one canonical P-256 SPKI key, rejecting private, malformed, or trailing-DER encodings. */
+/**
+ * base64url 문자열을 P-256 공개키로 읽고 다시 내보내 원본 바이트와 일치하는지 확인한다.
+ * 개인키나 불필요한 후행 데이터가 섞인 DER는 허용하지 않는다.
+ * @param value - SPKI DER 형식 공개키의 패딩 없는 base64url 문자열.
+ * @returns 서명 검증에 사용할 Node 공개키 객체.
+ * @throws 인코딩·키 종류·곡선이 다르면 API_CONFIGURATION_INVALID 오류.
+ */
 function parsePublicKey(value: string): KeyObject {
   if (!BASE64URL.test(value)) throw new Error("API_CONFIGURATION_INVALID");
   const der = Buffer.from(value, "base64url");
@@ -122,7 +153,13 @@ function parsePublicKey(value: string): KeyObject {
   return key;
 }
 
-/** Parses an immutable static keyring and checks that every accepted kid is locally owned. */
+/**
+ * 설정의 공개키들을 읽고 허용 목록의 모든 키가 실제로 존재하는지 확인한다.
+ * @param value - 키 식별자별 공개키를 담은 JSON 문자열.
+ * @param acceptedKids - API가 검증에 사용할 수 있는 키 식별자 목록.
+ * @returns 항목을 추가하거나 교체할 수 없도록 동결한 공개키 목록.
+ * @throws 공개키가 잘못되거나 허용 키가 없으면 API_CONFIGURATION_INVALID 오류.
+ */
 function parseKeyring(value: string | undefined, acceptedKids: readonly string[]): DelegatedJwtKeyring {
   const entries = parseFlatKeyObject(value);
   const keyring: Record<string, KeyObject> = {};
@@ -132,10 +169,10 @@ function parseKeyring(value: string | undefined, acceptedKids: readonly string[]
 }
 
 /**
- * Parses server environment input into an immutable static delegated-JWT configuration.
- * @param input - Untrusted process environment values.
- * @returns Frozen listener, database, kill-switch, accepted-key, and P-256 keyring settings.
- * @throws A fixed configuration error without echoing unsafe input or credentials.
+ * 서버 환경 변수를 검사해 위임 JWT 검증에 필요한 설정으로 묶는다. DB 연결이나 서명 검증은 하지 않는다.
+ * @param input - 아직 신뢰하지 않는 프로세스 환경 변수 목록.
+ * @returns 주소, 포트, DB URL, 인증 중지 스위치, 허용 키를 담은 동결된 설정.
+ * @throws 어떤 설정 검사든 실패하면 입력값이나 비밀번호 없는 API_CONFIGURATION_INVALID 오류.
  */
 export function parseApiEnvironment(input: Readonly<Record<string, string | undefined>>): ApiEnvironment {
   try {
@@ -157,9 +194,10 @@ export function parseApiEnvironment(input: Readonly<Record<string, string | unde
 let cachedEnvironment: ApiEnvironment | undefined;
 
 /**
- * Returns the one process-wide immutable API environment snapshot.
- * @returns A frozen static configuration parsed once from `process.env`.
- * @throws A fixed configuration error before any unsafe configuration can be consumed.
+ * 최초 호출 때 process.env를 검사해 보관하고 이후 호출에서는 같은 설정을 돌려준다.
+ * @returns 한 프로세스에서 공유하는 동결된 API 설정.
+ * @throws 최초 환경 변수 검사에 실패하면 고정된 설정 오류.
+ * @remarks 캐시를 갱신하므로 실행 도중 환경 변수를 바꿔도 이미 읽은 설정은 바뀌지 않는다.
  */
 export function getApiEnvironment(): ApiEnvironment {
   cachedEnvironment ??= parseApiEnvironment(process.env);

@@ -2,7 +2,9 @@
 
 ## 1. 범위와 보안 목표
 
-이 문서는 Next.js PWA, NestJS/Fastify API, Supabase Auth, PostgreSQL, Supabase Storage, IndexedDB 오프라인 대기열, Google·Kakao·Naver OAuth를 대상으로 한다.
+이 문서는 PC용 Next.js 웹/BFF, 별도 React Native + Expo 앱(예정), NestJS/Fastify API, Supabase Auth·PostgreSQL·Storage와 Google·Kakao·Naver OAuth를 대상으로 한다. PWA·IndexedDB 금융 캐시·오프라인 쓰기 큐는 초기 범위가 아니다.
+
+2026-09-08 현재 인증·위임 JWT·replay 경계는 코드로 구현됐고, 금융 DB/RLS·모바일·CSV·Storage 기능 및 운영 통제 다수는 후속 요구사항이다. 아래 “필수 통제”를 모두 구현 완료했다는 뜻은 아니다. 실제 상태는 [문서 지도](../README.md), 검증 증거는 날짜와 SHA가 있는 진행 기록을 따른다.
 
 보안 목표는 다음 순서로 평가한다.
 
@@ -18,14 +20,15 @@
 
 ```mermaid
 flowchart LR
-  U["사용자"] -->|"HTTPS"| W["Browser PWA\n신뢰하지 않는 클라이언트"]
+  U["사용자"] -->|"HTTPS"| W["PC 웹 브라우저\n신뢰하지 않는 클라이언트"]
   W -->|"same-origin·CSRF 방어"| B["Next.js BFF\nOAuth callback·보안 세션"]
-  W -->|"최소 오프라인 데이터"| I["IndexedDB\n신뢰하지 않는 캐시"]
+  B -->|"세션·OAuth 저장"| D["PostgreSQL 인증 저장소"]
   B -->|"OAuth Code + PKCE"| A["Supabase Auth"]
-  B -->|"HTTPS·짧은 수명 JWT"| N["NestJS/Fastify API\n권한 결정 지점"]
-  N -->|"최소 권한 DB 역할·RLS"| P["PostgreSQL"]
-  N -->|"짧은 수명 서명 URL"| S["Supabase Storage"]
-  A -->|"서명된 토큰·JWKS"| N
+  B -->|"HTTPS·BFF 발급 30초 ES256 JWT"| N["NestJS/Fastify API\n권한 결정 지점"]
+  N -->|"일회용 jti consume"| R["PostgreSQL replay 저장소"]
+  N -.->|"금융 RLS·미구현"| P["PostgreSQL 금융 원장"]
+  N -.->|"파일 처리·미구현"| S["Supabase Storage"]
+  M["별도 네이티브 앱·미구현"] -.->|"모바일 인증 경계·예정"| N
   O["Google·Kakao·Naver"] -->|"OAuth 인증"| A
   A -->|"OAuth callback"| B
   C["GitHub Actions·배포"] -->|"승인된 아티팩트·비밀 주입"| N
@@ -33,12 +36,14 @@ flowchart LR
 
 신뢰 경계마다 인증, 입력 검증, 최소 권한, 로그 마스킹, 실패 시 기본 거부를 적용한다. 프런트엔드에서 숨긴 버튼이나 UUID의 예측 난이도는 보안 통제가 아니다.
 
+BFF도 인증 저장소의 DB credential을 가진 서버다. 따라서 Vercel 침해 위험은 Heroku와 별도로 존재한다. 역할별 연결 문자열·최소 권한·TLS·pooler·키 폐기 검증을 생략할 수 없다. 브라우저 DB 접근 금지는 BFF 서버의 제한된 DB 접근 금지가 아니다.
+
 ## 3. 자산과 데이터 분류
 
 | 등급 | 데이터 | 저장 위치 | 필수 통제 |
 |---|---|---|---|
 | 제한 | service-role key, DB 자격 증명, OAuth client secret, 서명 키, refresh token, 비밀번호 재설정 토큰 | 비밀 저장소·인증 공급자 | 코드·Git·로그 금지, 최소 권한, 회전·폐기, 접근 감사 |
-| 기밀 | 거래, 예산, 잔액, 자산, 계좌 별칭·끝 네 자리, 메모, CSV, 이메일, OAuth subject | PostgreSQL·Storage·제한된 IndexedDB | 사용자 격리, TLS, 저장 암호화, 최소 보존, 내보내기·삭제 감사 |
+| 기밀 | 거래, 예산, 잔액, 자산, 계좌 별칭·끝 네 자리, 메모, CSV, 이메일, OAuth subject | PostgreSQL·Storage(금융 기능 예정), 클라이언트 일시 메모리 | 사용자 격리, TLS, 저장 암호화, 영구 금융 캐시 금지, 최소 보존, 내보내기·삭제 감사 |
 | 내부 | request ID, 배포 메타데이터, 마이그레이션 상태, 보안 감사 로그 | 로그 저장소·CI | 변조 방지, 접근 제한, 민감값 마스킹, 보존 정책 |
 | 공개 | 공개 제품 문서와 비민감 정적 자산 | 저장소·CDN | 무결성, 공급망 검증 |
 
@@ -64,8 +69,8 @@ flowchart LR
 | 세션 | 토큰 탈취·재사용, 고정 세션 | 짧은 access token, 안전한 refresh token 보관, 회전·폐기, `Secure`·`HttpOnly`·`SameSite` 쿠키 또는 동등한 서버 세션, 로그아웃 시 서버 폐기 | 만료·회전·탈취 가정 테스트 |
 | API | 객체 수준 권한 우회, 대량 할당, 주입 | 엔드포인트별 인증, 서버 유도 `userId`, DTO 허용 목록, 매개변수 SQL, 본문·페이지 크기 제한 | 사용자 A가 사용자 B 리소스에 접근하는 음성 테스트 |
 | 데이터베이스 | 교차 사용자 읽기·변조, 권한 상승 | 모든 사용자 테이블의 `user_id`, 소유권 조건, RLS, `BYPASSRLS` 없는 앱 역할, 사용자 경계를 포함한 FK·인덱스 | 정책 테스트와 마이그레이션 검토 |
-| 동기화 | 재전송, 순서 역전, 충돌 덮어쓰기 | client UUID, idempotency key, version 비교, 원자적 트랜잭션, tombstone, 충돌의 명시적 해결 | 중복·역순·두 기기 충돌 테스트 |
-| IndexedDB | 공유 기기 노출, 변조, 오래된 권한 재사용 | 토큰 저장 금지, 최소 필드, 사용자·버전 네임스페이스, 로그아웃·탈퇴 시 삭제, 서버 재검증 | 저장소 검사와 로그아웃 삭제 E2E |
+| 동기화 | 재전송, 순서 역전, 충돌 덮어쓰기 | 서버 발급 리소스 UUID, 클라이언트 생성 idempotency key, version 비교, 원자적 트랜잭션, tombstone | 중복·두 기기 충돌 테스트(금융 구현 후) |
+| 클라이언트 저장 | 공유 기기 노출, 변조, 오래된 권한 재사용 | 금융 영구 캐시·오프라인 큐 금지, 메모리 정리, 모바일 credential secure storage(예정), 서버 재검증 | 저장소 검사와 계정 전환 검증 |
 | CSV·파일 | 수식 삽입, 파서 공격, 악성 파일, 대량 업로드 | 크기·행 수·MIME·magic byte 제한, 격리 파싱, 수식 문자 중화, 짧은 보존, 서명 URL | 악성 샘플과 제한값 테스트 |
 | 웹 UI | XSS, CSRF, 클릭재킹, 정보 노출 | 출력 인코딩, CSP nonce, 상태 변경 GET 금지, CSRF token·Origin 검증, `frame-ancestors`, 안전한 오류 | 보안 헤더·XSS·CSRF 자동 테스트 |
 | 로그·관측 | 부인 방지 실패, 민감정보 유출, 로그 변조 | 인증·권한·내보내기·삭제 감사, UTC·request ID, 마스킹, 제한된 쓰기·읽기 권한, 경보 | 로그 스키마 테스트와 샘플 검토 |
@@ -87,12 +92,12 @@ flowchart LR
 ### 6.2 토큰 저장과 검증
 
 - refresh token은 `localStorage`, `sessionStorage`, IndexedDB에 저장하지 않는다.
-- Next.js BFF가 OAuth code를 교환하고 refresh token을 `Secure`, `HttpOnly`, 적절한 `SameSite` 속성의 쿠키 또는 서버 측 불투명 세션으로 보호한다.
+- Next.js BFF가 OAuth code를 교환한다. 브라우저 쿠키에는 provider refresh token 대신 opaque selector만 두고, DB에는 selector 해시와 암호화된 provider credential을 저장한다. 쿠키는 `__Host-ab_session`, `Secure`, `HttpOnly`, `SameSite` 정책을 따른다.
 - 브라우저는 같은 origin의 BFF만 호출하며 access token을 JavaScript에 전달하지 않는다. BFF가 짧은 수명 JWT를 NestJS API의 서버 간 요청에 사용한다.
-- API는 토큰 서명, 알고리즘, issuer, audience, 만료, not-before를 검증하고 JWKS 갱신 실패 시 기존 안전 캐시 범위를 벗어난 토큰을 거부한다.
+- API는 BFF가 발급한 30초 ES256 JWT를 static P-256 public-key keyring으로 검증한다. Supabase 사용자 JWT 전달이나 JWKS 자동 조회 방식이 아니다. accepted `kid`, issuer/audience, 시간·scope·요청 binding·request ID와 atomic `jti` consume을 검사하고 실패 시 차단한다.
 - 로그아웃, 비밀번호 변경, 공급자 연결 해제, 계정 위험 감지 시 refresh token 계열을 폐기한다.
 
-토큰 저장 방식은 구현 전에 ADR로 확정한다. 위 금지 조건을 만족하지 못한 구현은 기능 완성으로 간주하지 않는다.
+웹 토큰 저장 방식은 [ADR 0001](../architecture/adr/0001-opaque-auth-sessions.md)로 확정돼 있다. 모바일 인증은 별도 구현이 필요하다. API kill switch와 accepted-key 제거는 BFF와 분리된 무효화 수단이며 실제 운영 반영·회전·폐기 훈련은 아직 검증 전이다. 공급자별 scope·취소·이메일 누락·callback 동작을 하나의 성공 mock으로 대체하지 않는다.
 
 ## 7. 권한과 데이터베이스 통제
 
@@ -107,20 +112,20 @@ flowchart LR
 ## 8. API와 브라우저 통제
 
 - API는 HTTPS만 제공하며 HSTS를 적용한다.
-- CORS는 정확한 운영 origin 허용 목록을 사용하고 와일드카드와 credential 조합을 금지한다.
+- 브라우저는 같은 origin의 BFF만 호출하며 Heroku API는 브라우저 CORS를 허용하지 않는다. CORS는 서버 간 공격 방어가 아니므로 공인 HTTPS API는 JWT 검증과 rate limit이 필요하다. Vercel 고정 egress IP를 기본 신뢰 수단으로 가정하지 않는다.
 - 쿠키 인증 상태 변경 요청은 CSRF token과 `Origin` 또는 `Referer` 검증을 사용한다. `SameSite`는 단독 방어로 간주하지 않는다.
-- `GET`, `HEAD`, `OPTIONS`는 서버 상태를 변경하지 않는다.
+- `GET`, `HEAD`, `OPTIONS`로 금융 데이터를 변경하지 않는다. OAuth GET callback의 일회용 인증 트랜잭션 소비는 프로토콜 예외이며 state·PKCE·브라우저 결속 검증을 요구한다.
 - JSON content type, 요청 본문 크기, 배열 길이, 페이지 크기, 문자열 길이, 날짜·금액 범위를 서버에서 제한한다.
 - Drizzle의 매개변수 바인딩을 기본으로 하고 raw SQL은 정적 SQL과 바인딩 값으로만 작성한다. 정렬 열과 방향은 허용 목록으로 변환한다.
 - 응답은 내부 예외, SQL, 스택, 파일 경로, 공급자 원문 오류를 노출하지 않고 `requestId`와 안전한 오류 코드만 제공한다.
 - CSP nonce, `frame-ancestors 'none'`, `X-Content-Type-Options: nosniff`, 엄격한 `Referrer-Policy`, 최소 `Permissions-Policy`를 적용한다.
 - 사용자 입력을 HTML로 직접 렌더링하지 않는다. 불가피한 리치 텍스트는 검증된 sanitizer와 허용 목록을 사용한다.
 
-## 9. 오프라인·CSV·향후 파일 처리
+## 9. 클라이언트 저장·CSV·향후 파일 처리
 
-### 9.1 IndexedDB
+### 9.1 영구 금융 캐시 금지
 
-IndexedDB는 암호화된 금고가 아니라 사용자가 접근 가능한 기기의 캐시다. 보관 항목은 동기화에 필요한 최소 거래 필드, client UUID, idempotency key, version으로 제한한다. 로그아웃, 계정 전환, 탈퇴 완료 시 해당 사용자의 대기열과 캐시를 삭제한다. 변조된 로컬 데이터는 서버 스키마·소유권·버전 검사를 다시 통과해야 한다.
+초기 버전은 IndexedDB·localStorage·서비스워커 Cache Storage에 금융 응답이나 오프라인 쓰기 큐를 보관하지 않는다. 화면에서 필요한 서버 상태는 일시 메모리만 사용하고 계정 전환·로그아웃 시 이전 사용자 상태가 남지 않게 해야 한다. 현재 금융 화면과 모바일 앱은 미구현이므로 이 규칙의 금융 E2E 증거도 아직 없다. 네이티브 credential은 구현 시 Keychain/Keystore 기반 secure storage를 사용하며 금융 데이터 저장소로 확장하지 않는다. 메모리도 XSS·잠금 해제 기기에서 안전한 금고는 아니다.
 
 ### 9.2 CSV
 
@@ -166,7 +171,7 @@ IndexedDB는 암호화된 금고가 아니라 사용자가 접근 가능한 기�
 
 - 목적이 없는 개인정보와 분석 식별자는 수집하지 않는다.
 - 계정 화면에서 저장 데이터 범위, 연결된 공급자, 내보내기, 삭제 상태를 확인할 수 있게 한다.
-- 탈퇴는 새 세션을 차단한 뒤 인증 계정, 금융 데이터, 파일, 오프라인 삭제 신호를 순서대로 처리하고 감사 결과를 남긴다.
+- 탈퇴는 새 세션을 차단한 뒤 인증 계정, 금융 데이터, 파일을 처리하고 클라이언트 메모리·모바일 credential을 정리하도록 설계한다. 전체 탈퇴 기능은 후속 구현이며 감사 결과를 남겨야 한다.
 - 백업은 암호화하고 운영 DB와 다른 권한 경계에 보관한다.
 - 복구 연습은 분기별로 수행하며 복구 후 권한 정책과 데이터 정합성을 함께 검증한다.
 - 백업 보존과 삭제 지연은 사용자 안내와 운영 문서에 명시한다.
@@ -180,7 +185,7 @@ IndexedDB는 암호화된 금고가 아니라 사용자가 접근 가능한 기�
 5. 동일 이메일의 다른 공급자 계정이 자동 병합되지 않는다.
 6. 같은 `idempotency_key`를 반복 전송해도 금융 행이 한 번만 생성된다.
 7. 오래된 version의 업데이트가 최신 거래를 조용히 덮어쓰지 않는다.
-8. 로그아웃·계정 전환 후 이전 사용자의 IndexedDB 데이터가 표시되거나 전송되지 않는다.
+8. 금융 데이터가 클라이언트 영구 저장소에 남지 않고, 로그아웃·계정 전환 후 이전 사용자 메모리 데이터가 표시되거나 전송되지 않는다.
 9. SQL·HTML·CSV 수식 페이로드가 실행되지 않고 데이터로 처리된다.
 10. cross-site 상태 변경 요청과 허용되지 않은 origin을 거부한다.
 11. 로그·오류·URL·분석 이벤트에서 비밀정보와 거래 원문을 찾을 수 없다.
@@ -188,7 +193,8 @@ IndexedDB는 암호화된 금고가 아니라 사용자가 접근 가능한 기�
 
 ## 14. 잔여 위험과 별도 승인 대상
 
-- 웹 오프라인 데이터는 잠금 해제된 기기와 XSS에 노출될 수 있다. 최소 저장, 빠른 삭제, CSP, 출력 인코딩으로 위험을 줄이지만 웹 플랫폼에서 완전한 기기 보안을 보장하지 않는다.
+- 일시 메모리의 데이터도 잠금 해제 기기와 XSS에 노출될 수 있다. 영구 캐시 금지·CSP·출력 인코딩은 위험을 줄이지만 완전한 기기 보안을 보장하지 않는다.
+- Impeccable live 개발 도구의 로컬 파일 노출 문제는 2026-09-08 현재 미수정이다. 해당 개발 서버는 실행하지 않는다. production 의존성 audit 통과가 이 문제의 해결을 의미하지 않는다.
 - 관리형 Auth와 DB의 가용성·내부 통제는 공급자에 의존한다. 상태 모니터링, 백업, 최소 권한, 공급자 사고 대응 절차가 필요하다.
 - 사용자 MFA는 1단계 필수 범위가 아니지만 운영 관리자 MFA는 필수다. 사용자 MFA를 제외한 결정은 첫 공개 출시 전에 재검토한다.
 - 가족 공유, OCR, 금융기관 자동 연동은 현재 모델보다 권한·파일·외부 토큰 위험이 크므로 기존 승인만으로 구현하지 않는다.

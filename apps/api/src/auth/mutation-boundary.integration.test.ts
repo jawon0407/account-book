@@ -47,6 +47,10 @@ const PRIVATE_SCALAR = Buffer.from(
   "hex",
 );
 
+/**
+ * 고정 스칼라에서 테스트용 P-256 키 쌍을 재현한다. 운영 자격 증명이 아니다.
+ * @returns BFF 서명기와 API 검증기에 나눠 줄 개인키·공개키.
+ */
 function deterministicKeyPair() {
   const ecdh = createECDH("prime256v1");
   ecdh.setPrivateKey(PRIVATE_SCALAR);
@@ -66,6 +70,12 @@ class MemoryReplayStore implements ReplayStore {
   private readonly entries = new Set<string>();
   public failure: Error | undefined;
 
+  /**
+   * 해시 길이와 45초 보존 시각을 확인하고 메모리에서 한 번만 사용하게 한다.
+   * @param digest - 검증기가 전달한 32바이트 해시.
+   * @param expiresAt - 고정 테스트 시각 기준의 예상 만료 시각.
+   * @returns 최초 사용이면 true, 중복이면 false. 입력 불일치나 failure 설정은 오류를 던진다.
+   */
   public async consume(digest: Uint8Array, expiresAt: Date): Promise<boolean> {
     if (
       digest.byteLength !== 32 ||
@@ -80,6 +90,10 @@ class MemoryReplayStore implements ReplayStore {
     return true;
   }
 
+  /**
+   * 다음 테스트에 영향을 주지 않도록 사용 해시와 주입한 장애를 지운다.
+   * @returns 반환값 없음. 이 메모리 대역의 상태만 초기화한다.
+   */
   public reset(): void {
     this.entries.clear();
     this.failure = undefined;
@@ -89,29 +103,70 @@ class MemoryReplayStore implements ReplayStore {
 class CapturingLogger implements LoggerService {
   private readonly records: unknown[][] = [];
 
+  /**
+   * log 호출을 출력하지 않고 배열에 수집하는 로거 대역이다.
+   * @param message - 주 로그 값.
+   * @param optionalParams - 함께 기록할 추가 값들.
+   * @returns 반환값 없음. 테스트가 나중에 유출 여부를 검사한다.
+   */
   public log(message: unknown, ...optionalParams: unknown[]): void {
     this.records.push([message, ...optionalParams]);
   }
+  /**
+   * error 호출을 출력하지 않고 배열에 수집하는 로거 대역이다.
+   * @param message - 주 로그 값.
+   * @param optionalParams - 함께 기록할 추가 값들.
+   * @returns 반환값 없음. 테스트가 나중에 유출 여부를 검사한다.
+   */
   public error(message: unknown, ...optionalParams: unknown[]): void {
     this.records.push([message, ...optionalParams]);
   }
+  /**
+   * warn 호출을 출력하지 않고 배열에 수집하는 로거 대역이다.
+   * @param message - 주 로그 값.
+   * @param optionalParams - 함께 기록할 추가 값들.
+   * @returns 반환값 없음. 테스트가 나중에 유출 여부를 검사한다.
+   */
   public warn(message: unknown, ...optionalParams: unknown[]): void {
     this.records.push([message, ...optionalParams]);
   }
+  /**
+   * debug 호출을 출력하지 않고 배열에 수집하는 로거 대역이다.
+   * @param message - 주 로그 값.
+   * @param optionalParams - 함께 기록할 추가 값들.
+   * @returns 반환값 없음. 테스트가 나중에 유출 여부를 검사한다.
+   */
   public debug(message: unknown, ...optionalParams: unknown[]): void {
     this.records.push([message, ...optionalParams]);
   }
+  /**
+   * verbose 호출을 출력하지 않고 배열에 수집하는 로거 대역이다.
+   * @param message - 주 로그 값.
+   * @param optionalParams - 함께 기록할 추가 값들.
+   * @returns 반환값 없음. 테스트가 나중에 유출 여부를 검사한다.
+   */
   public verbose(message: unknown, ...optionalParams: unknown[]): void {
     this.records.push([message, ...optionalParams]);
   }
+  /**
+   * fatal 호출을 출력하지 않고 배열에 수집하는 로거 대역이다.
+   * @param message - 주 로그 값.
+   * @param optionalParams - 함께 기록할 추가 값들.
+   * @returns 반환값 없음. 테스트가 나중에 유출 여부를 검사한다.
+   */
   public fatal(message: unknown, ...optionalParams: unknown[]): void {
     this.records.push([message, ...optionalParams]);
   }
 
+  /** 다음 테스트를 위해 수집한 로그만 비운다. @returns 반환값 없음. 외부 로그 파일은 변경하지 않는다. */
   public reset(): void {
     this.records.length = 0;
   }
 
+  /**
+   * 수집된 로그를 한 문자열로 합쳐 비밀값 유출 여부를 단언할 수 있게 한다.
+   * @returns 오류는 이름·메시지, 객체는 JSON 또는 문자열로 바꾼 여러 줄 로그.
+   */
   public serialized(): string {
     return this.records
       .map((record) =>
@@ -132,6 +187,11 @@ class CapturingLogger implements LoggerService {
 }
 
 class TestMutationController {
+  /**
+   * 인증을 통과한 사용자와 파싱 본문을 그대로 돌려주는 테스트 전용 경로다.
+   * @param request - 실제 가드와 본문 파서를 통과한 요청.
+   * @returns 사용자 ID와 본문. 금융 거래를 DB에 저장하지 않는다.
+   */
   public create(request: FastifyRequest): unknown {
     return { userId: request.principal!.userId, body: request.body };
   }
@@ -159,6 +219,10 @@ Req()(TestMutationController.prototype, "create", 0);
 const keys = deterministicKeyPair();
 const replayStore = new MemoryReplayStore();
 const logger = new CapturingLogger();
+/**
+ * 서명기와 검증기가 시간 경계에서 흔들리지 않도록 같은 시각을 제공한다.
+ * @returns 고정 테스트 시각의 새 Date.
+ */
 const now = () => new Date(NOW_SECONDS * 1_000);
 const signer = new DelegatedJwtSigner({
   keyId: KEY_ID,
@@ -189,6 +253,11 @@ Module({
 const exactBodyText = '{"amount":1200,"memo":"lunch"}';
 const exactBody = new TextEncoder().encode(exactBodyText);
 
+/**
+ * 정상 POST 변경 요청에 일부 변경값을 적용해 실제 BFF 서명기로 서명한다.
+ * @param overrides - 본문·경로·권한 등의 테스트 변경값.
+ * @returns 서명 토큰과 요청 ID가 담긴 비동기 결과.
+ */
 function signMutation(
   overrides: Partial<Parameters<DelegatedJwtSigner["sign"]>[0]> = {},
 ) {
@@ -204,6 +273,11 @@ function signMutation(
   });
 }
 
+/**
+ * 서명 결과를 HTTP 테스트에 필요한 세 헤더로 바꾼다.
+ * @param signed - 토큰과 요청 ID를 담은 서명 결과.
+ * @returns Authorization, Content-Type, X-Request-Id 헤더 객체.
+ */
 function requestHeaders(signed: Awaited<ReturnType<typeof signMutation>>) {
   return {
     authorization: `Bearer ${signed.token}`,
@@ -212,6 +286,11 @@ function requestHeaders(signed: Awaited<ReturnType<typeof signMutation>>) {
   };
 }
 
+/**
+ * 응답이 고정된 401 인증 실패 계약과 일치하는지 단언한다.
+ * @param response - 상태 코드와 JSON 본문 접근기를 가진 HTTP 테스트 응답.
+ * @returns 반환값 없음. 상태·스키마·필드가 다르면 테스트 실패.
+ */
 function expectAuthenticationFailure(response: {
   statusCode: number;
   json(): unknown;
@@ -224,6 +303,12 @@ function expectAuthenticationFailure(response: {
   });
 }
 
+/**
+ * 기존 토큰의 발급자·수신자만 바꿔 다시 서명하므로 서명 오류와 클레임 정책 오류를 구분할 수 있다.
+ * @param token - 페이로드를 가져올 테스트 토큰.
+ * @param claim - 덮어쓸 iss 또는 aud.
+ * @returns 테스트 개인키로 다시 서명한 토큰.
+ */
 async function tokenWithClaim(
   token: string,
   claim: Readonly<{ iss?: string; aud?: string }>,
@@ -235,6 +320,13 @@ async function tokenWithClaim(
 
 type RawResponse = Readonly<{ statusCode: number; body: string }>;
 
+/**
+ * 중복 헤더가 합쳐지지 않도록 이름·값 배열로 실제 HTTP POST를 보낸다.
+ * @param baseUrl - 로컬 테스트 서버 주소.
+ * @param headers - 중복을 보존할 원시 헤더 쌍.
+ * @param payload - 전송할 정확한 본문 바이트.
+ * @returns 응답 상태와 UTF-8 본문. 요청 전송 오류는 Promise를 거부한다.
+ */
 function rawPost(
   baseUrl: string,
   headers: string[],

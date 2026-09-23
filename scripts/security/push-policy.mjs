@@ -14,11 +14,11 @@ const ALLOWED_PR_TARGETS = new Set([
 ]);
 
 /**
- * Parses Git pre-push stdin lines.
- *
- * @param {string} input Raw lines in `<local-ref> <local-sha> <remote-ref> <remote-sha>` form.
- * @returns {Array<{localRef: string, localSha: string, remoteRef: string, remoteSha: string}>}
- * @throws {SecurityGateError} When input is empty, incomplete, or contains invalid refs/SHAs.
+ * Git pre-push 훅이 표준 입력으로 보낸 줄을 네 필드로 나눠 참조와 SHA 형식을 검사한다.
+ * 이 단계는 refs/ 접두사와 SHA 형식만 확인하며 허용 브랜치 정책은 별도 함수가 검사한다.
+ * @param {string} input `<local-ref> <local-sha> <remote-ref> <remote-sha>` 형식의 원시 여러 줄 문자열.
+ * @returns {Array<{localRef: string, localSha: string, remoteRef: string, remoteSha: string}>} 빈 줄을 제외하고 파싱한 참조 변경 목록.
+ * @throws {SecurityGateError} 입력이 비었거나 필드 수·참조 접두사·SHA 형식이 잘못되면 발생한다.
  */
 export function parsePrePushInput(input) {
   const lines = input.split(/\r?\n/u).filter((line) => line.trim().length > 0);
@@ -56,11 +56,10 @@ export function parsePrePushInput(input) {
 }
 
 /**
- * Blocks direct main pushes and refs outside the approved branch convention.
- *
- * @param {ReturnType<typeof parsePrePushInput>} updates Parsed ref updates.
- * @returns {void}
- * @throws {SecurityGateError} When a target ref violates repository policy.
+ * 원격 목적지가 main이거나 허용된 feature/*·hotfix/*·maintenance-branch 규칙 밖이면 푸시 검사를 실패시킨다.
+ * @param {ReturnType<typeof parsePrePushInput>} updates 형식 검사가 끝난 참조 변경 목록.
+ * @returns {void} 모든 원격 참조가 정책을 통과하면 반환값 없이 종료한다. 실제 푸시는 하지 않는다.
+ * @throws {SecurityGateError} main 직접 푸시 또는 허용되지 않은 참조 이름이면 발생한다.
  */
 export function assertPrePushPolicy(updates) {
   for (const update of updates) {
@@ -81,13 +80,11 @@ export function assertPrePushPolicy(updates) {
 }
 
 /**
- * Applies the same branch policy to a GitHub Actions event.
- * PR targets are allowed because they use review flows, while a push event targeting main
- * is rejected as a direct-main policy violation.
- *
- * @param {{eventName: string, targetRef: string}} options Event and normalized target ref.
- * @returns {void}
- * @throws {SecurityGateError} When a direct main push or unknown event/ref is observed.
+ * CI 이벤트 종류와 목적 브랜치를 함께 검사한다. push는 로컬과 같은 브랜치 규칙을 적용한다.
+ * pull_request는 main 또는 maintenance-branch를 대상으로 할 때 허용하지만 PR 승인 여부를 조회하지는 않는다.
+ * @param {{eventName: string, targetRef: string}} options GitHub 이벤트 이름과 refs/heads/... 형태의 목적 참조.
+ * @returns {void} 허용된 이벤트·참조 조합이면 반환값 없이 종료한다.
+ * @throws {SecurityGateError} main 직접 push, 허용되지 않은 브랜치 또는 알 수 없는 이벤트 조합이면 발생한다.
  */
 export function assertCiPolicy({ eventName, targetRef }) {
   if (eventName === "push") {

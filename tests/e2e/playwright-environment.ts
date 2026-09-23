@@ -1,7 +1,11 @@
 type Environment = Readonly<Record<string, string | undefined>>;
 type ChildEnvironment = Readonly<Record<string, string>>;
 
-/** Returns whether a name belongs to an E2E security boundary, regardless of Windows casing. */
+/**
+ * 환경변수 이름을 대문자로 정규화하여 E2E 보안 경계 설정인지 분류한다.
+ * @param variable - 부모 프로세스 환경변수의 이름이다.
+ * @returns 인증·API·DB 등 격리할 설정 이름이면 true. 값은 읽지 않는다.
+ */
 function isSecurityBoundaryVariable(variable: string): boolean {
   const normalized = variable.toUpperCase();
   return normalized === "APP_ORIGIN"
@@ -16,11 +20,10 @@ function isSecurityBoundaryVariable(variable: string): boolean {
 }
 
 /**
- * Starts from inherited non-security variables and adds only the supplied child
- * process trust-boundary settings. Callers must supply every required setting.
- * @param inherited - Parent process environment.
- * @param allowed - Explicit values appropriate for one E2E child process.
- * @returns Isolated child environment without inherited boundary credentials.
+ * 부모의 일반 환경변수만 복사하고 명시한 자식 보안 설정을 덮어쓴다.
+ * @param inherited - 부모 프로세스 환경변수. 보안 설정은 대소문자와 무관하게 제거한다.
+ * @param allowed - 이 자식 프로세스에 명시적으로 허용할 문자열 설정이다.
+ * @returns 분리된 새 환경 객체. 원본 환경이나 프로세스는 변경하지 않는다.
  */
 export function createE2eChildEnvironment(inherited: Environment, allowed: ChildEnvironment): ChildEnvironment {
   const child: Record<string, string> = {};
@@ -48,10 +51,9 @@ export type PlaywrightServerEnvironments = Readonly<{
 }>;
 
 /**
- * Builds the actual Playwright IDP, API, and BFF child environments from explicit
- * E2E values after case-insensitive boundary filtering of inherited process state.
- * @param input - Disposable database, runtime URLs, delegated key direction, and fresh BFF secrets.
- * @returns Isolated environments for the three local server processes.
+ * 테스트 IDP·API·웹 서버의 환경을 분리하고 키의 전달 방향을 고정한다.
+ * @param input - 폐기용 DB URL, baseURL, 부모 환경, csrf/session 키와 위임 개인/공개 키다.
+ * @returns idp/api/web 환경 객체. API에는 공개 키, BFF에는 개인 키를 전달하며 서버 실행은 하지 않는다.
  */
 export function buildPlaywrightServerEnvironments(input: PlaywrightServerEnvironmentInput): PlaywrightServerEnvironments {
   return {

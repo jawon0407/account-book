@@ -10,6 +10,10 @@ import { registerRawJsonBody } from "./raw-json-body.js";
 const servers: FastifyInstance[] = [];
 
 class RawJsonBodyLifecycleController {
+  /**
+   * 본문 파서가 Nest 초기화 뒤에도 동작함을 확인하기 위한 고정 응답 핸들러다.
+   * @returns 상태값 ok. 실제 거래 저장은 하지 않는다.
+   */
   public handle(): Readonly<{ status: "ok" }> { return { status: "ok" }; }
 }
 Controller("lifecycle")(RawJsonBodyLifecycleController);
@@ -22,6 +26,10 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => server.close()));
 });
 
+/**
+ * 원문 JSON 파서와 본문 확인용 경로를 갖춘 Fastify 테스트 서버를 만든다.
+ * @returns 테스트 후 닫을 목록에도 등록한 새 서버. 이 함수는 listen을 호출하지 않는다.
+ */
 function server(): FastifyInstance {
   const instance = Fastify();
   registerRawJsonBody(instance);

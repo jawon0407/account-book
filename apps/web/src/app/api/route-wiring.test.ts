@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
@@ -23,12 +24,20 @@ const routes = [
 
 const expectedRoutePolicy = [
   'export const runtime = "nodejs";',
-  'export const preferredRegion = "iad1";',
   'export const dynamic = "force-dynamic";',
   "export const maxDuration = 10;",
 ] as const;
 
 describe("Next authentication route wiring", () => {
+  it("keeps the web deployment region policy at the deployment root", async () => {
+    // 역할: Vercel 배포 루트의 승인된 리전 정책 전체를 검증한다.
+    // 인자: 테스트 콜백은 외부 인자를 받지 않는다.
+    const configUrl = new URL("../../../vercel.json", import.meta.url);
+    expect(existsSync(configUrl), "web deployment root must provide its region policy").toBe(true);
+    const config: unknown = JSON.parse(await readFile(configUrl, "utf8"));
+    expect(config).toEqual({ $schema: "https://openapi.vercel.sh/vercel.json", regions: ["iad1"] });
+  });
+
   it.each(routes)("keeps %s as a thin request-scoped adapter", async (relativePath) => {
     const route = fileURLToPath(new URL(relativePath, import.meta.url));
     const source = await readFile(route, "utf8");

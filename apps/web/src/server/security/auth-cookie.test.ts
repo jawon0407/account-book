@@ -9,6 +9,13 @@ const INTERACTION_COOKIE_NAME = cookieModule.INTERACTION_COOKIE_NAME as string |
 
 const selector = Buffer.alloc(32, 7).toString("base64url");
 
+/**
+ * 작업이 고정 쿠키 오류를 던지고 제출 값을 메시지에 노출하지 않는지 확인합니다. 검증 때문에 작업을 두 번 호출합니다.
+ * @param action 실패해야 하는 동기 작업.
+ * @param supplied 메시지에 없어야 할 선택적 입력값.
+ * @returns 검증 후 값 없이 종료합니다.
+ * @throws 기대한 오류나 비노출 조건이 맞지 않으면 테스트 실패.
+ */
 function expectInvalid(action: () => unknown, supplied?: string): void {
   expect(action).toThrow("AUTH_COOKIE_INVALID");
   try {

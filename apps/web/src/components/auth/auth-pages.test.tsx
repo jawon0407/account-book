@@ -7,6 +7,11 @@ import type { ComponentType } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Providers } from "../../app/providers.js";
 
+/**
+ * 인증 페이지 모듈을 읽어 기본 컴포넌트를 테스트에 제공한다.
+ * @param path 테스트 파일 기준 모듈 경로. 실제 import 실패는 빈 모듈로 처리한다.
+ * @returns 기본 export 또는 undefined. 페이지 존재 여부는 호출한 테스트가 단정한다.
+ */
 async function optionalPage(path: string): Promise<ComponentType | undefined> {
   const module = await vi.importActual<Record<string, unknown>>(path).catch(() => ({}));
   return (module as Record<string, unknown>).default as ComponentType | undefined;

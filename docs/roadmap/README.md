@@ -1,3 +1,13 @@
-# Roadmap
+# 개발 로드맵
 
-Implementation proceeds through project foundation, security and authentication, ledger core, budgets and assets, offline sync, CSV and PWA release, receipt OCR, financial institution integration, and finally the separately secured administrator application.
+기준: 2026-09-08, [웹 + 별도 네이티브 앱 승인 설계](../superpowers/specs/2026-07-27-web-native-mobile-shared-ledger-design.md). 구현 현황은 [최신 문서 지도](../README.md)를 우선한다.
+
+| 단계 | 사용자에게 제공할 것 | 현재 상태 | 남은 핵심 작업 |
+| --- | --- | --- | --- |
+| M1 기반·인증·보안 | 안전한 로그인 | 로컬 코드·disposable CI 구현, 운영 검증 미완료 | hosted OAuth, DB 권한·풀러, 지속형 rate limit, 운영 로그·복구 |
+| M2 공유 장부 | 계좌·분류·거래·이체, 웹과 앱 | 공용 계약 구현 | 금융 DB/RLS → repository/API → 웹 `/app` → Expo 앱 |
+| M3 확장 가계부 | 예산·반복 거래·자산·통계 | 미구현 | 도메인 규칙, 화면, 자동 처리·집계 검증 |
+| M4 기기 간 일관성 | 웹에서 저장한 데이터를 앱에서 확인 | 미구현 | version 충돌, 재시도·재조회, 세션 만료, 교차 기기 검증 |
+| M5 CSV·출시 운영 | 입출력·안정적 배포 | 미구현 | 파일 검증, 관측·경보, 백업·복구, 출시 승인 |
+
+동기화는 하나의 서버 원장을 다시 조회하는 방식이다. 초기 버전에 오프라인 쓰기 큐나 금융 데이터 영구 캐시를 넣지 않는다. PWA 배포가 아니라 PC 웹과 React Native + Expo 앱을 별도로 만든다. 금융기관 연동·OCR·관리자 페이지는 이 다섯 단계 이후 별도 설계한다.

@@ -4,12 +4,11 @@ import {
 } from "./diagnostic-path-sanitizer.mjs";
 
 /**
- * Detects supported credential signatures in exact blob bytes.
- * Regex matches are reduced immediately to paths and stable rule IDs; matched
- * substrings are never retained in findings or diagnostics.
- *
- * @param {Array<{path: string, content: Buffer}>} blobs Exact blobs from pushed commits.
- * @returns {Array<{path: string, ruleId: string}>} Sanitized deterministic findings.
+ * blob 바이트를 latin1 문자열로 읽고 등록된 AWS·GitHub 토큰·개인키 패턴이 있는지 검사한다.
+ * 발견한 비밀값 자체는 보관하지 않으며 경로와 규칙 ID로만 결과를 만들고 일정한 순서로 정렬한다.
+ * @param {Array<{path: string, content: Buffer}>} blobs 푸시 대상 커밋에서 읽은 파일 경로와 정확한 내용 바이트.
+ * @returns {Array<{path: string, ruleId: string}>} 경로와 탐지 규칙 목록. 경로는 아직 원문이므로 공개 출력 전에 formatSecretFindings를 거쳐야 한다.
+ * @remarks 파일이나 입력 배열은 변경하지 않는다. 등록한 패턴 외의 모든 비밀값을 탐지하는 것은 아니다.
  */
 export function scanBlobsForSecrets(blobs) {
   const findings = [];
@@ -29,10 +28,9 @@ export function scanBlobsForSecrets(blobs) {
 }
 
 /**
- * Formats sanitized findings for terminal/CI display with untrusted paths escaped.
- *
- * @param {Array<{path: string, ruleId: string}>} findings Sanitized scan findings.
- * @returns {string} Multi-line report containing only redacted, escaped paths and rule IDs.
+ * 검사 결과를 터미널·CI용 여러 줄 보고서로 만든다. 경로 속 비밀값을 가리고 JSON 문자열로 이스케이프한다.
+ * @param {Array<{path: string, ruleId: string}>} findings 내부 스캐너가 만든 경로와 고정 규칙 ID 목록.
+ * @returns {string} 일치한 비밀값 없이 정화된 경로와 규칙 ID만 담는 보고서. 이 함수가 직접 출력하지는 않는다.
  */
 export function formatSecretFindings(findings) {
   return [

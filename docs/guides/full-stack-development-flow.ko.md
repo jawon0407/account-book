@@ -1,5 +1,7 @@
 # 가계부 풀스택 개발 흐름 학습 가이드
 
+> 2026-09-08 상태 안내: 아래 금융 service/repository/RLS·모바일 흐름은 승인된 **목표 구조**입니다. 현재 실행 코드는 웹 인증·BFF/API 인증 경계와 금융 공용 계약까지입니다. 처음 읽는 경우 [실제 코드 읽기](code-reading.ko.md)를 먼저 보세요. `apps/mobile`과 운영 금융 API는 아직 없고, 이 문서의 예제는 존재하지 않는 함수를 호출하라는 실행 지침이 아닙니다.
+
 이 문서는 가계부의 PC 웹, 모바일 앱, BFF, Node API, PostgreSQL이 어떻게 연결되는지 학습할 수 있도록 개발 흐름을 설명한다. 구현 진행 중에는 각 계획의 RED/GREEN 결과, 주요 매개변수, 오류와 보안 판단을 이 문서의 구조에 맞춰 누적한다.
 
 ## 1. 전체 요청 흐름
@@ -98,18 +100,26 @@ React Native 화면
 ```ts
 type CreateTransactionInput = Readonly<{
   accountId: string;
-  amountKrw: string;
+  amountKrw: number;
   categoryId: string;
   idempotencyKey: string;
-  kind: "income" | "expense";
   memo?: string;
   occurredOn: string;
+  type: "income" | "expense";
 }>;
 ```
 
+amountKrw는 1 이상 Number.MAX_SAFE_INTEGER 이하의 정수다. PostgreSQL BIGINT보다
+공개 JSON 범위를 의도적으로 좁혀 웹·Node·React Native가 같은 값을 정확히
+표현하게 한다. idempotencyKey는 생성 시도 UUID이며 저장된 거래 ID가 아니다.
+transactionId는 성공 시 서버가 생성해 응답한다.
+
+> 2026-07-16 PWA offline client-ID flow는 현재 M2 runtime model이 아니다. 승인된
+> 2026-07-27 web/native-mobile design은 online server ledger와 server-created permanent ID를 사용한다.
+
 중요한 판단:
 
-- 금액은 JSON number가 아니라 정규화된 정수 문자열로 전송한다.
+- 금액은 JSON number인 정수로 전송한다.
 - `userId`는 요청에 받지 않고 인증 principal에서 가져온다.
 - 수정·삭제는 `expectedVersion`을 요구한다.
 - 알 수 없는 필드는 strict schema에서 거부한다.

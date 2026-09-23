@@ -12,6 +12,12 @@ const principal = {
   requestId: "123e4567-e89b-12d3-a456-426614174002",
 } as const;
 
+/**
+ * 가드가 사용하는 최소한의 원시 Fastify 요청 대역을 만든다.
+ * @param rawHeaders - 중복까지 유지할 헤더 이름·값 배열.
+ * @param options - 메서드·URL·원문 본문을 바꿀 선택값.
+ * @returns 네트워크 전송 없이 검사에 사용할 요청 객체.
+ */
 function request(
   rawHeaders: string[],
   options: Readonly<{ method?: string; url?: string; rawBody?: Uint8Array }> = {},
@@ -23,6 +29,11 @@ function request(
   } as unknown as FastifyRequest;
 }
 
+/**
+ * 요청과 가짜 컨트롤러·핸들러를 돌려주는 Nest 실행 문맥을 만든다.
+ * @param value - getRequest에서 그대로 반환할 요청.
+ * @returns 가드 단위 테스트용 실행 문맥 대역.
+ */
 function context(value: FastifyRequest): ExecutionContext {
   return {
     switchToHttp: () => ({ getRequest: () => value }),
@@ -32,8 +43,18 @@ function context(value: FastifyRequest): ExecutionContext {
 }
 
 class Controller {}
+/**
+ * 경로 메타데이터 조회의 대상으로만 사용하는 빈 테스트 핸들러다.
+ * @returns 반환값 없음. 요청을 처리하지 않는다.
+ */
 function handler(): void {}
 
+/**
+ * 검증기와 권한 메타데이터 대역을 연결한 가드를 만든다.
+ * @param verifier - 성공·실패를 통제할 토큰 검증기.
+ * @param scope - 경로가 선언했다고 가정할 권한. 잘못된 값도 테스트하려고 unknown을 받는다.
+ * @returns 실제 가드 인스턴스.
+ */
 function guard(verifier: AccessTokenVerifier, scope: unknown = "me:read"): AuthGuard {
   const reflector = {
     getAllAndOverride: vi.fn((key: unknown) => key === DELEGATED_SCOPE ? scope : undefined),

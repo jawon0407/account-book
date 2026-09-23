@@ -1,3 +1,4 @@
+import { ApiErrorSchema, type ApiError } from "@account-book/contracts";
 import { describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({ client: { get: vi.fn(), post: vi.fn() }, create: vi.fn() }));
@@ -5,7 +6,7 @@ mocks.create.mockReturnValue(mocks.client);
 vi.mock("ky", () => ({ default: { create: mocks.create } }));
 
 const module = await import("./api-client.js").catch(() => ({} as Record<string, unknown>));
-const apiError = module.apiError as ((error: unknown) => Promise<Readonly<{ code: string; retryable: boolean }>>) | undefined;
+const apiError = module.apiError as ((error: unknown) => Promise<{ code: string; retryable: boolean; envelope: ApiError }>) | undefined;
 
 describe("browser API client", () => {
   it("creates exactly one relative same-origin ky boundary with retries disabled", () => {
@@ -20,12 +21,22 @@ describe("browser API client", () => {
     });
   });
 
+  it("uses a strict fresh local fallback envelope", async () => {
+    const error = await apiError!({});
+    const second = await apiError!({});
+    expect(error.code).toBe("AUTH_PROVIDER_UNAVAILABLE");
+    const parsed = ApiErrorSchema.parse(error.envelope);
+    const parsedSecond = ApiErrorSchema.parse(second.envelope);
+    expect(error.envelope.message).toBe("The authentication service is unavailable.");
+    expect(parsed.requestId).not.toBe(parsedSecond.requestId);
+  });
+
   it("parses ky 2 error data after the response body has already been consumed", async () => {
     expect(apiError).toBeTypeOf("function");
     const envelope = {
       code: "AUTH_INVALID_CREDENTIALS",
-      message: "Untrusted display message",
-      requestId: "request-123",
+      message: "The authentication input was rejected.",
+      requestId: "123e4567-e89b-12d3-a456-426614174012",
       retryable: false,
       fieldErrors: [],
     };

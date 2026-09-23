@@ -1,5 +1,78 @@
 # 인증 백엔드 아키텍처
 
+## Supabase 인증 어댑터의 역할 분리 — 2026-09-10 R1
+
+이 절은 승인된 R1 구조를 설명한다. 구현·검증의 완료 여부는 [실행 계획](../superpowers/plans/2026-09-10-auth-adapter-role-split.md)과 [테스트 기록](../guides/security-auth-testing.md#supabase-어댑터-역할-분리-2026-09-10-r1)을 따른다. 인증 기능을 새로 만드는 작업이 아니라 기존 625줄 파일의 책임을 나누는 작업이다.
+
+어댑터(adapter)는 앱이 쓰는 인증 인터페이스를 외부 Supabase 호출로 바꿔 주는 연결부다. 서비스는 여전히 `SupabaseAuthAdapter`만 호출하고 내부 파일 배치에 의존하지 않는다. 파일이 늘어도 외부 공개 API와 사용자 로그인 절차는 같아야 한다.
+
+| 파일 (`apps/web/src/server/auth/` 기준) | 책임과 입력 → 출력 | 수정하는 상황 |
+| --- | --- | --- |
+| `supabase-auth-adapter.ts` | 로그인·가입·복구 등의 작업 입력 → 검증된 인증 결과. 어떤 검사를 먼저 하고 어떤 통신을 호출할지 조합 | 인증 작업의 순서를 검토할 때 |
+| `supabase/validation.ts` | URL·문자열·UUID·PKCE 후보 → 허용된 입력 또는 고정 오류 | 입력 형식/설정 정책을 변경할 때 |
+| `supabase/session-parser.ts` | 외부 SDK/HTTP 응답 → 내부 토큰 쌍. 사용자·메일 확인·발급/만료 시각 일치 검사 | 외부 응답 계약을 검토할 때 |
+| `supabase/error-mapper.ts` | 원시 오류·HTTP 상태 → 허용된 앱 오류/계정 존재 은폐 판단 | 오류 정책을 검토할 때 |
+| `supabase/http-client.ts` | 서버 설정·fetch 함수·URL·JSON 객체 → HTTP 상태와 읽은 본문 | 직접 HTTP 전송/JSON 처리를 검토할 때 |
+| `supabase/sdk-client.ts` | URL·anon 키·비영속 옵션 → 새 SDK 클라이언트 | SDK 초기화/서버 저장 금지 정책을 검토할 때 |
+
+입문자는 공개 어댑터의 `signInWithPassword`를 먼저 읽고, `sdk-client` → `session-parser` → `validation` → `error-mapper` 순서로 따라가면 된다. 로그인은 이메일·비밀번호를 검사한 후 작업 전용 SDK로 요청하고, SDK의 오류를 먼저 확인한 다음 세션의 사용자·토큰·시각을 검사한다. 외부 호출만 성공했다고 앱의 세션이 자동 생성되는 것은 아니다. 검증된 결과를 받은 상위 서비스가 서버 세션 저장을 맡는다.
+
+메일 확인/OAuth/복구 코드 교환은 다른 경로다. 서버 보유 PKCE verifier와 코드를 검사하고 `http-client`로 직접 POST한다. SDK에 PKCE 저장을 맡기지 않는다. `error-mapper`는 직접 HTTP의 실제 상태를 우선하므로, 본문 안에 가짜 status가 있어도 이를 대신 사용하지 않는다. 가입 중 이미 존재하는 계정, 복구 중 없는 계정을 숨기는 허용 상태·오류 코드 조합도 기존 정책 그대로다.
+
+`session-parser`의 JWT 처리는 **구문과 클레임의 일관성 검사이지 암호학적 서명 검증이 아니다**. Heroku API의 delegated JWT 서명 검증과 혼동하면 안 된다. 또한 파일 분리는 새 timeout·재시도·레이트리밋·보안 기능을 추가하지 않는다.
+
+서버 전용 경계는 모든 제품 모듈의 `server-only` 표식으로 유지한다. 의존 방향은 어댑터 → 통신/파서 → 검증/오류이며, 오류 모듈이 검증 모듈을 역참조하지 않는다. `SupabaseServerConfig`, `SupabaseClientFactory`, `SupabaseFetch`는 기존 어댑터 경로에서도 타입으로 사용할 수 있어 호출부를 바꿀 필요가 없다. 테스트 대역은 `test-fixtures.ts`에만 두고 제품 코드에서는 사용하지 않는다.
+
+파일을 역할별로 나누는 것은 브라우저에서 필요한 JavaScript만 내려받는 동적 코드 분할과 다르다. 이번 변경으로 FCP나 서버 응답 시간이 개선됐다고 주장하지 않는다. 이득은 다음 수정 때 읽고 검토해야 할 책임의 범위가 명확해지는 것이다.
+
+## 인증 제공자 작업당 5초 경계 — 2026-09-15
+
+Supabase 인증 통신은 로컬 입력·설정 검증을 마친 뒤 작업마다 독립적인 총 5초 예산을 만든다. 작업 흐름은 **로컬 입력 검증 → 5초 예산 생성 → 작업 전용 SDK/HTTP → 응답 본문 읽기 → 응답 검증 → 타이머·리스너 정리** 순서다. OAuth 시작 URL 조립은 외부 통신이 없으므로 이 예산을 만들지 않으며, 사용자가 메일을 확인하거나 OAuth 동의를 마칠 때까지 기다리는 시간도 포함하지 않는다.
+
+책임은 다음과 같이 나뉜다.
+
+| 구성 요소 | 책임 |
+| --- | --- |
+| `provider-request-deadline.ts` | 단조 증가 시계, 총 5초 수명, 취소 신호와 종료 상태 |
+| `provider-operation.ts` | 작업 전용 fetch, 헤더·본문 읽기 제한, 원시 전송/본문 오류 차단 |
+| `supabase-auth-adapter.ts` | 입력 검증, 가입·로그인·복구·갱신·로그아웃·비밀번호 변경의 순서와 응답 검증 |
+| `supabase/sdk-client.ts` | 비영속 SDK를 작업마다 새로 만들고 보호된 fetch를 SDK에 주입 |
+
+`setSession → signOut`과 `setSession → updateUser`는 각 단계에 새 타이머를 만들지 않고 하나의 예산을 공유한다. 첫 단계가 늦게 끝나면 다음 SDK 호출 직전에 활성 상태를 다시 확인해 마감 뒤 새 전송을 시작하지 않는다. 가입·복구·PKCE 교환의 직접 HTTP 경로도 같은 보호 fetch를 사용하므로 헤더뿐 아니라 JSON 본문 읽기와 최종 세션 검증까지 총예산에 포함된다.
+
+시간 초과, 호출자 취소, 전송·본문 오류는 공개 가능한 `AUTH_PROVIDER_UNAVAILABLE`로만 전달한다. SDK에는 원시 예외 대신 고정된 내부 408 응답을 보여 주어 URL·토큰·비밀번호·제공자 원문이 SDK 오류 출력에 도달하지 않게 한다. 이 408은 브라우저 응답 정책이 아니라 SDK 전송 경계의 내부 표현이다. 실제 제공자의 429, 이메일 미확인, 잘못된 자격 증명, PKCE 오류와 계정 존재 여부 은폐 매핑은 기존대로 유지한다.
+
+취소는 원격 작업의 롤백이 아니다. 앱이 실패를 반환하기 전에 Supabase가 가입이나 비밀번호 변경을 처리했을 수 있으므로 결과가 불확실한 변경을 자동 재전송하지 않는다. 실제 hosted Supabase/DB 전체 E2E, 배포망에서의 취소 전달, 한국망 지연 p95는 통제된 fetch 테스트로 검증했다고 주장하지 않는다.
+
+Task 2 리뷰 round 1 전 전체 `pnpm verify`에서는 lint·workspace typecheck·API/Next.js 16.3.3 build와 913개 테스트가 통과했다. 같은 소스의 전체 web coverage 실행은 32개 파일·545개 테스트 자체는 통과했지만 branches 92.54% (757/818)로 100% gate를 충족하지 못해 종료 코드 1이었다. statements 95.01% (839/883), functions 96.92% (189/195), lines 98.73% (704/713)이며 기준은 낮추지 않았다. 신규 `provider-operation.ts`의 branches도 90%라서 이 격차를 기존 코드만의 부채로 보지 않는다.
+
+리뷰 round 1은 실제 auth-js 반환값을 adapter 매핑 전에 직접 검사하도록 보강했다. 원시 전송·본문 오류 모두 SDK가 null user/session과 status 408·message `AUTH_PROVIDER_UNAVAILABLE`만 받으며 canary를 받지 않는다. 본문 버퍼링을 임시 제거한 mutation에서는 body 사례가 status 0으로 실패하고 transport 사례는 통과했다. 제품 파일은 SHA-256 `760F0EB6080752E0525E3900A775507797F785F6C021FC62B0EE25D88D4711D2`로 정확히 원복했고, SDK+operation 22개 테스트와 typecheck·lint가 통과했다. 이 round의 영구 변경은 테스트·문서뿐이므로 앞의 913개와 coverage는 round 전 증거로 구분한다.
+
+round 1 뒤, malformed JSON 최종 보완 전 소스의 `pnpm verify`는 lint·workspace typecheck·API/web build와 총 915개 테스트를 통과했다. 2026-09-15 11:16:03 KST coverage는 32개 파일·547개 테스트가 통과했지만 동일한 branches 92.54% 대 100% gate 때문에 종료 코드 1이었다. 보완 전 근거는 `output/auth-provider-deadline-final-verify.log`와 `output/auth-provider-deadline-final-coverage.log`이며, 파일명의 final과 관계없이 현재 소스의 최종 결과는 아니다. 913개·545개는 더 이른 round 전 이력이다.
+
+최종 검토에서는 바이트 읽기에 성공한 잘못된 JSON이 SDK의 해석 오류에 원문 일부를 남기는 것을 확인했다. 공개 adapter 응답의 원문 유출은 입증되지 않았다. `provider-operation.ts`는 이제 SDK보다 먼저 JSON 구문을 확인한다. 잘못된 비-429 본문은 고정 가용성 오류로 작업을 실패 처리하고, 실제 429의 잘못된/빈 본문은 안전한 제한 JSON과 429로 유지한다. 유효 JSON은 원본 바이트·상태·헤더를 보존하며, 204/205/304와 성공한 빈 logout은 JSON 본문을 요구하지 않는다. 디코딩 후 SDK 전달 직전에도 단조 시계 마감을 검사하므로 전체 5초·abort·정리 책임은 그대로다. 이는 구문 보호이며 endpoint별 응답 스키마나 새 오류 정책이 아니다.
+
+최종 보완 TDD는 11:31:02 KST에 focused 54개 중 8개 실패로 실제 SDK pre-map status 0·원문 일부와 429 분류 손실을 재현했고, 11:31:47 동일 명령은 54개 모두 통과했다. 빈 429 SDK 사례 보강 뒤 focused 55개·인증/상위 정책 217개·web typecheck·lint가 통과했다. 컨트롤러의 보완 후 전체 `pnpm verify`는 총 937개 테스트와 lint·workspace typecheck·API/web build 통과(exit 0)다. 11:36:18 KST 전체 web coverage는 7.59초, 32파일·569/569 통과 뒤 기존 branches 100% gate로 exit 1이다. statements 94.84% (846/892), branches 92.48% (763/825), functions 96.93% (190/196), lines 98.47% (711/722)이며 `provider-operation.ts`도 branches 94.11%·lines 100%다. 분기 격차를 전부 기존 코드 탓으로 돌리지 않고 기준은 유지했다. 최종 로그는 `output/auth-provider-deadline-json-guard-verify.log`와 `output/auth-provider-deadline-json-guard-coverage.log`이며 scoped 최종 재검토는 APPROVED이며 malformed JSON Important finding은 해결됐다. Coverage gate 실패는 별도로 유지한다.
+
+검증 원본은 `.superpowers/sdd/2026-09-15-auth-provider-deadline/full-verify.log`와 `coverage.log`, 인계용 복사본은 `output/auth-provider-deadline-full-verify.log`와 `output/auth-provider-deadline-coverage.log`다. 이 로그는 hosted Supabase/DB E2E, 실제 브라우저 여정, 배포망 취소나 한국망 지연 측정을 포함하지 않는다.
+
+## DB 연결 오류 경계 — 2026-09-09 A안
+
+DB 연결 풀은 여러 요청이 사용할 연결을 보관하고 재사용한다. BFF의 [`createDatabaseClient`](../../packages/database/src/client.ts)는 Drizzle이 만든 node-postgres 풀을 감싸며, API의 [`MeModule`](../../apps/api/src/me/me.module.ts)은 Nest DI에 API 전용 풀을 제공한다. 이번 A안은 두 생성 지점의 유휴 오류 수신을 보완한다. 실행·검증 상태는 [상세 계획](../superpowers/plans/2026-09-09-database-pool-error-boundary.md)의 기록을 따른다.
+
+쿼리 실패와 유휴 연결 오류는 서로 다른 경로다.
+
+1. **쿼리 중 실패:** 요청을 처리하던 코드가 reject된 Promise를 받아 기존 오류 응답으로 바꾼다. API replay 저장소는 상세 정보를 버린 `ReplayStoreUnavailableError`를 발생시켜 인증을 실패 차단한다.
+2. **유휴 연결의 오류:** 사용하지 않는 연결도 DB 재시작·네트워크 단절로 실패할 수 있다. 이때 풀의 `error` 이벤트를 별도로 받아야 한다. 요청 함수의 try/catch만으로는 이 이벤트를 처리할 수 없다.
+
+두 생성 지점의 수신 함수는 오류와 client 인수를 읽지 않고, **풀마다 최초 한 번만** `DB_POOL_IDLE_ERROR source=bff` 또는 `DB_POOL_IDLE_ERROR source=api`를 서버의 표준 오류 출력에 남긴다. 출력 전에 인스턴스별 플래그를 설정해 반복·중첩 이벤트의 로그 폭주를 막는다. 로그 출력 자체가 동기적으로 실패하더라도 그 예외를 다시 이벤트 밖으로 전파하지 않는다. 오류 원문·stack·SQL·연결 문자열·사용자 데이터는 진단에 포함하지 않는다.
+
+이는 완전한 장애 모니터링이 아니다. 같은 풀에서 두 번째 이후 장애는 별도 출력하지 않으므로 이 메시지 수를 장애 횟수로 계산하면 안 된다. 여러 프로세스/인스턴스는 각각 최초 진단을 낼 수 있고, 출력 계층 자체가 실패하면 기록이 남지 않을 수 있다. 배포 시 이 고정 이벤트와 플랫폼 로그·가용성 경보를 연결하는 작업은 별도다.
+
+오류 수신은 DB 복구나 쿼리 재실행을 뜻하지 않는다. 손상된 유휴 연결 제거는 pg 드라이버의 기존 책임이며, 앱은 자동 재시도·전역 예외 무시·인증 성공 우회를 추가하지 않는다. API의 최대 5개 연결·연결 대기 2초·유휴 10초 설정, BFF의 프로세스 내 클라이언트 재사용, replay 저장소의 종료 1회 책임은 유지한다. 전체 인스턴스 연결 예산과 실제 Supabase 요청 시간 제한은 이번 변경과 별개다.
+
+> 2026-09-08 갱신: 이 문서의 SHA별 테스트·Task 기록은 당시 증거로 보존한다. 최신 HEAD `5cc94601c74a1e08f848a0cbc0bde191e7a47f81` CI는 899개 테스트 기록이며 로컬 UUID 보완은 contracts 66개로 별도 검증했다. 현재 금융 CRUD·원장 DB·`/app`·모바일은 미구현이다. 입문자는 [코드 읽기](../guides/code-reading.ko.md), 전체 상태는 [문서 지도](../README.md)를 먼저 읽는다. live Supabase 미검증과 disposable PostgreSQL CI 성공은 서로 다른 상태다.
+
 > **English Summary:** The implemented authentication boundary now includes 14 same-origin Next.js BFF routes, always-Secure opaque cookies, selector-bound CSRF, server-owned OAuth redirect handoff, request-scoped services over a shared database client, encrypted provider credentials, responsive accessible authentication screens, and a NestJS/Fastify API that independently verifies JWT signatures and claims before creating a request principal. Rate-limit use cases and live Supabase/PostgreSQL verification remain unfinished.
 
 이 문서는 현재 코드에 구현된 인증 도메인, 저장소, same-origin HTTP 경계가 왜 이런 구조를 택했는지 설명한다. 구현 근거는 [`apps/web/src/server`](../../apps/web/src/server/), [`apps/web/src/app/api`](../../apps/web/src/app/api/), browser query 계층과 [인증 DB 스키마](../database/auth-schema.ko.md)다.
@@ -10,7 +83,7 @@
 | --- | --- |
 | 구현됨 | 인증 계약과 도메인 서비스, Supabase server-only adapter, opaque session·PostgreSQL 저장소, Next.js BFF 14개 route, request-scoped controller/container, same-origin CSRF, server-owned OAuth redirect handoff, always-Secure cookie, no-store 응답, ky 2 browser client와 TanStack Query binding, Task 11 반응형 인증 UI, Task 12 NestJS/Fastify JWT guard와 `/health`·`/v1/me`, Task 13 disposable DB·ES256 IDP·Playwright 인증 체인과 CI gate, Task 14 browser UI·HTTP response contract 분리, exact app alert 선택자, token-free storage, opaque cookie·logout selector replay의 동일 SHA CI 증거 |
 | 스키마만 구현됨 | `auth_rate_limits` 테이블. 이를 사용하는 rate-limit use case는 없다. |
-| 아직 없음 | 관리자 페이지, rate-limit use case, revocation retry worker |
+| 아직 없음 | 금융 원장 DB/RLS·CRUD API, `/app` 화면, 별도 모바일 앱, 관리자 페이지, persistent rate-limit use case, revocation retry worker |
 | 이 작업 공간에서 미검증 | 실제 hosted Supabase Auth·role·pooler와 Google·Kakao·Naver live 통합 검증 |
 | 품질 후속 | 최종 SHA `93737d3`에서 Security/legacy 53개, contracts 22개, database 12개, API 113개, web 479개, E2E preflight 2개가 로컬에서 통과했다. 같은 SHA의 GitHub security-gate run 15는 disposable PostgreSQL과 Chromium E2E까지 통과했다. 기존 optional branch coverage `91.78%`의 100% threshold 충족은 별도 품질 후속이다. Hosted DB 최소 권한·pooler, persistent rate limit과 Google·Kakao·Naver live OAuth는 여전히 운영 출시 차단 항목이다. |
 | Task 14 동일 SHA 검증 | 최종 검증 코드 SHA `0d996fe726debaa8a2eec10865f63418635d06d8`에서 [push CI](https://github.com/jawon0407/account-book/actions/runs/30252139895)와 [PR CI](https://github.com/jawon0407/account-book/actions/runs/30252146533)가 성공했다. Node 22 CI는 disposable PostgreSQL DB 22개, browser-stage 정책·preflight 7개, 단일 worker Playwright HTTP·UI 8개를 통과했다. 로컬 Node 24는 `pnpm test`의 legacy/security 53개, contracts 22개, database package 12개, API 113개, web 479개, E2E preflight 2개를 통과했으며 PostgreSQL-backed Playwright는 로컬에서 실행하지 않았다. |
@@ -321,7 +394,7 @@ provider boundary가 허용하는 오류 코드는 다음 다섯 개다.
 
 브라우저는 Vercel same-origin BFF의 HttpOnly opaque cookie만 사용한다. BFF는 세션을 확인한 뒤 Heroku API 요청마다 ES256 delegated JWT를 발급하며, Heroku는 PostgreSQL에서 원자적으로 one-time replay를 consume한다. JWT는 30초 TTL, exact issuer/audience, route scope, request binding, `jti`를 요구한다. Heroku는 static public-key allowlist만 신뢰하고 `BFF_AUTH_DISABLED` kill switch로 BFF를 독립적으로 fail-closed 할 수 있다.
 
-모든 BFF route는 Node.js, `iad1`, dynamic, 10초 maxDuration 정책을 명시한다. E2E는 프로세스 수명의 ephemeral P-256 key pair로 private BFF signing key와 public API verification key를 분리한다. secret, key material, JWT, selector, request-binding hash, DB 연결 문자열은 문서·로그·trace·snapshot에 기록하지 않는다.
+모든 BFF route는 Node.js, dynamic, 10초 maxDuration 정책을 명시한다. 단일 `iad1` 실행 지역은 `apps/web/vercel.json`으로 통합했으며 향후 Vercel Root Directory는 `apps/web`이다. 실제 프로젝트 생성과 hosted 배치 확인은 아직 미완료다. 이 변경은 Heroku API 리전·DB credential·JWT 신뢰 경계를 바꾸지 않는다. E2E는 프로세스 수명의 ephemeral P-256 key pair로 private BFF signing key와 public API verification key를 분리한다. secret, key material, JWT, selector, request-binding hash, DB 연결 문자열은 문서·로그·trace·snapshot에 기록하지 않는다.
 
 Task 7 code-fix commit은 `357f8412dcb19b004a0a0e45f08449682fc23f75`, 최종 검증 SHA는 `93737d3c8278f92242670b403c30cb3beb05b0e2`다. focused route-wiring GREEN은 25 files/479 tests였고, 최종 로컬 `pnpm test`는 legacy 53, contracts 22, database 12, API 113, web 479, E2E preflight 2 tests로 exit 0이었다. child process는 OS/toolchain 변수만 상속하고 Windows case-insensitive API/BFF/auth/database boundary 변수를 explicit allowlist 전 삭제한다. 개발 PC의 PostgreSQL listener 부재로 guarded DB preparation과 browser E2E는 로컬에서 실행하지 않았지만, 같은 최종 SHA의 GitHub `security-gate` [run 15](https://github.com/jawon0407/account-book/actions/runs/30214338261)가 pinned Node 22, disposable PostgreSQL, Chromium E2E와 production audit를 통과했다. Hosted Supabase role·pooler·cron, provider별 live OAuth, key rotation 제거와 kill-switch evidence는 출시 전 책임자가 별도로 수집해야 하는 차단 조건이다.
 

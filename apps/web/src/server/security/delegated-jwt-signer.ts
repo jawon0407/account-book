@@ -41,6 +41,11 @@ type SignerDependencies = Readonly<{
  * @returns Never; this helper always throws the fixed public-safe configuration error.
  * @throws `AUTH_CONFIGURATION_INVALID` without contextual values.
  */
+/**
+ * 잘못된 서명 설정의 세부값을 숨기고 고정 오류를 던집니다.
+ * @returns 반환하지 않습니다.
+ * @throws AUTH_CONFIGURATION_INVALID.
+ */
 function invalidConfiguration(): never {
   throw new Error("AUTH_CONFIGURATION_INVALID");
 }
@@ -49,6 +54,11 @@ function invalidConfiguration(): never {
  * Collapses request-time signing failures so claims, entropy, request data, and tokens are never reflected.
  * @returns Never; this helper always throws the fixed public-safe signing error.
  * @throws `DELEGATED_JWT_INVALID` without contextual values.
+ */
+/**
+ * 요청·토큰·키 정보를 노출하지 않고 서명 작업을 중단합니다.
+ * @returns 반환하지 않습니다.
+ * @throws DELEGATED_JWT_INVALID.
  */
 function invalidToken(): never {
   throw new Error("DELEGATED_JWT_INVALID");
@@ -59,6 +69,11 @@ function invalidToken(): never {
  * @param value Untrusted claim or generated request-ID candidate.
  * @returns Whether the value is a canonical UUID with a supported version and RFC variant.
  */
+/**
+ * 소문자 UUID가 지원 버전과 RFC variant 비트를 가진 표준 형태인지 확인합니다.
+ * @param value 검사할 사용자·세션·요청 ID.
+ * @returns 유효한 표준 UUID이면 true.
+ */
 function isCanonicalUuid(value: unknown): value is string {
   return typeof value === "string" && CANONICAL_UUID.test(value);
 }
@@ -68,6 +83,12 @@ function isCanonicalUuid(value: unknown): value is string {
  * @param dependencies Candidate server-only key material and runtime functions.
  * @returns A frozen, fully validated dependency snapshot.
  * @throws `AUTH_CONFIGURATION_INVALID` without reflecting candidate values for every failure.
+ */
+/**
+ * P-256 개인키와 키 ID, 시계·난수 함수를 검증하고 기본 난수 함수를 채워 변경 불가 객체로 만듭니다.
+ * @param dependencies 서버 전용 서명 설정.
+ * @returns 검증·고정한 완전한 의존성 객체.
+ * @throws 모든 설정 오류를 AUTH_CONFIGURATION_INVALID로 통일합니다.
  */
 function validatedDependencies(dependencies: SignerDependencies): Required<SignerDependencies> {
   try {
@@ -100,6 +121,12 @@ function validatedDependencies(dependencies: SignerDependencies): Required<Signe
  * @returns The unchanged token after its UTF-8 size is proven safe.
  * @throws `DELEGATED_JWT_INVALID` without secret detail when the output is invalid or oversized.
  */
+/**
+ * 완성된 JWT의 UTF-8 바이트 수가 계약상 최대 크기 이내인지 검사합니다.
+ * @param token 서명 라이브러리의 출력 후보.
+ * @returns 크기 검사를 통과한 문자열.
+ * @throws 문자열이 아니거나 너무 크면 DELEGATED_JWT_INVALID.
+ */
 export function assertDelegatedJwtSize(token: unknown): string {
   if (typeof token !== "string" || Buffer.byteLength(token, "utf8") > DELEGATED_JWT_MAX_BYTES) {
     return invalidToken();
@@ -123,6 +150,11 @@ export class DelegatedJwtSigner {
    * @param dependencies P-256 private key, safe rotation ID, clock, and optional testable CSPRNG functions.
   * @throws `AUTH_CONFIGURATION_INVALID` without key material or configuration values when validation fails.
    */
+  /**
+   * 설정을 한 번 검증해 서명기 내부에 보관합니다. 이 단계에서는 토큰을 발급하지 않습니다.
+   * @param dependencies P-256 개인키·키 ID·시계·선택적 난수 함수.
+   * @throws 잘못된 설정이면 AUTH_CONFIGURATION_INVALID.
+   */
   public constructor(dependencies: SignerDependencies) {
     const validated = validatedDependencies(dependencies);
     this.keyId = validated.keyId;
@@ -137,6 +169,12 @@ export class DelegatedJwtSigner {
    * @param input Exact outbound request plus canonical app user/session UUIDs and one allowlisted scalar scope.
    * @returns A frozen request ID and compact JWT pair for the same outbound request.
    * @throws `DELEGATED_JWT_INVALID` without claim, request, randomness, or key detail for every runtime failure.
+   */
+  /**
+   * 사용자·세션·권한과 요청 내용을 검증하고, 본문 해시와 요청 메타데이터에 묶인 30초 ES256 JWT를 발급합니다. 일회 사용 여부는 수신 측에서 판정합니다.
+   * @param input 실제 전송할 메서드·경로·본문·콘텐츠 타입과 사용자·세션·권한.
+   * @returns 변경 불가 요청 ID와 서명된 JWT 쌍.
+   * @throws 입력·시각·난수·서명 실패 시 DELEGATED_JWT_INVALID.
    */
   public async sign(input: DelegatedSignInput): Promise<Readonly<{ requestId: string; token: string }>> {
     try {

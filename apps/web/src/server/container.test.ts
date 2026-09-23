@@ -25,6 +25,11 @@ const previousKey = Buffer.alloc(32, 9).toString("base64url");
  * @param scalar Symmetric-key bytes intentionally reused as the EC private scalar.
  * @returns Canonical PKCS8 DER encoded as unpadded base64url.
  */
+/**
+ * 선택한 바이트를 P-256 개인 스칼라로 사용해 PKCS8 테스트 키를 만듭니다. 대칭키와 서명키 재사용 검출을 시험하기 위한 자료입니다.
+ * @param scalar 개인 스칼라로 재사용할 32바이트 테스트 값.
+ * @returns 패딩 없는 base64url PKCS8 DER 문자열.
+ */
 function p256Pkcs8FromScalar(scalar: Buffer): string {
   const ecdh = createECDH("prime256v1");
   ecdh.setPrivateKey(scalar);

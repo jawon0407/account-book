@@ -34,6 +34,45 @@ it("implements every provider operation only from explicit deterministic results
 const bridgeInput = { email: "verified@example.test", password: "correct horse battery staple" };
 const bridgeUser = { id: "123e4567-e89b-42d3-a456-426614174001", email: bridgeInput.email, emailVerified: true };
 
+it("propagates explicitly configured fake failures", async () => {
+  const fake = new FakeAuthProvider();
+  fake.failure = new AuthProviderError("AUTH_RATE_LIMITED");
+  await expect(fake.signOut("access", "refresh")).rejects.toMatchObject({ code: "AUTH_RATE_LIMITED" });
+});
+
+it("uses the default fetch seam when no bridge fetcher is supplied", async () => {
+  const fetcher = vi.fn<typeof fetch>(async () => validBridgeResponse());
+  vi.stubGlobal("fetch", fetcher);
+  try {
+    const fake = new FakeAuthProvider({ tokenUrl: new URL("http://127.0.0.1:4510/token") });
+    await expect(fake.signInWithPassword(bridgeInput)).resolves.toMatchObject({ userId: bridgeUser.id });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  } finally { vi.unstubAllGlobals(); }
+});
+
+it.each([
+  ["missing content type", () => new Response(null)],
+  ["non-JSON response", () => new Response("private", { headers: { "content-type": "text/plain" } })],
+  ["empty body", () => new Response("", { headers: { "content-type": "application/json" } })],
+  ["non-object body", () => Response.json(null)],
+  ["malformed JSON", () => new Response("{", { headers: { "content-type": "application/json" } })],
+] as const)("rejects bridge %s without leaking raw data", async (_label, response) => {
+  const fake = new FakeAuthProvider({ tokenUrl: new URL("http://127.0.0.1:4510/token"), fetcher: async () => response() });
+  await expect(fake.signInWithPassword(bridgeInput)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", message: "AUTH_PROVIDER_UNAVAILABLE" });
+});
+
+it.each([{ accessTokenExpiresAt: null }, { accessTokenExpiresAt: "invalid" }, { user: { ...bridgeUser, emailVerified: false } }, { accessTokenExpiresAt: "2020-01-01T00:00:00.000Z" }])(
+  "rejects malformed bridge token metadata %#", async (override) => {
+    const pair = await validBridgeResponse().json() as Record<string, unknown>;
+    const fake = new FakeAuthProvider({ tokenUrl: new URL("http://127.0.0.1:4510/token"), fetcher: async () => Response.json({ ...pair, ...override }) });
+    await expect(fake.signInWithPassword(bridgeInput)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+  },
+);
+
+/**
+ * 현재보다 1초 전 발급되어 5분 수명을 갖는 정상 테스트 제공자 응답을 만듭니다. 실제 인증 토큰은 아닙니다.
+ * @returns 검증된 사용자 형식과 가짜 토큰을 담은 캐시 금지 JSON Response.
+ */
 function validBridgeResponse(): Response {
   const issuedAtSeconds = Math.floor(Date.now() / 1000) - 1;
   return Response.json({

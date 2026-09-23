@@ -45,11 +45,21 @@ class OAuthRepository {
   public record: RecordShape | null = null;
   public events: string[] = [];
 
+  /**
+   * OAuth 저장 순서를 기록하고 두 해시를 복사해 한 레코드만 메모리에 보관합니다.
+   * @param record 저장할 OAuth 테스트 레코드.
+   * @returns 저장 후 값 없이 완료합니다.
+   */
   public async createOAuthTransaction(record: RecordShape): Promise<void> {
     this.events.push("create");
     this.record = { ...record, stateHash: Uint8Array.from(record.stateHash), interactionHash: Uint8Array.from(record.interactionHash) };
   }
 
+  /**
+   * 제공자·state·브라우저 해시·기한이 일치하는 미소비 레코드를 한 번 소비하는 대역입니다.
+   * @param input 기대 바인딩 값과 현재 시각.
+   * @returns 소비한 레코드 또는 불일치하면 null.
+   */
   public async claimOAuthTransaction(input: { provider: string; stateHash: Uint8Array; interactionHash: Uint8Array; now: Date }): Promise<RecordShape | null> {
     this.events.push("claim");
     const record = this.record;
@@ -66,15 +76,30 @@ class OAuthRepository {
   }
 }
 
+/**
+ * 고정된 난수·콜백 컨텍스트와 호출 기록 대역으로 OAuth 테스트 환경을 구성합니다.
+ * @param clock 제공자 응답 이후 시각을 제어할 함수.
+ * @returns 서비스·저장소·제공자·세션 대역과 시작/완료 컨텍스트.
+ */
 function setup(clock: () => Date = () => new Date(now.getTime() + 1_000)) {
   const repository = new OAuthRepository();
   const provider = {
     calls: { start: [] as unknown[], exchange: [] as unknown[] },
+    /**
+     * 제공자 시작 요청과 순서를 기록하고 고정 인증 URL을 돌려줍니다.
+     * @param input 제공자·콜백·PKCE 챌린지.
+     * @returns 테스트 인증 URL.
+     */
     startOAuth: vi.fn(async (input: unknown) => {
       repository.events.push("provider-start");
       provider.calls.start.push(input);
       return { authorizationUrl: new URL("https://provider.example.test/authorize") };
     }),
+    /**
+     * 코드 교환 요청과 순서를 기록하고 정상 테스트 토큰을 돌려줍니다.
+     * @param input OAuth 코드와 PKCE 검증값.
+     * @returns 미리 정의한 제공자 토큰 쌍.
+     */
     exchangeOAuthCode: vi.fn(async (input: unknown) => {
       repository.events.push("exchange");
       provider.calls.exchange.push(input);
@@ -82,6 +107,10 @@ function setup(clock: () => Date = () => new Date(now.getTime() + 1_000)) {
     }),
   };
   const sessions = {
+    /**
+     * 앱 세션 생성 순서를 기록하고 공개 결과만 반환하는 대역입니다.
+     * @returns 고정 세션 식별자와 만료 정보.
+     */
     create: vi.fn(async () => {
       repository.events.push("session");
       return { selector: "opaque-session-selector", accessTokenExpiresAt: tokens.accessTokenExpiresAt, absoluteExpiresAt: new Date(now.getTime() + 86_400_000) };
@@ -94,6 +123,11 @@ function setup(clock: () => Date = () => new Date(now.getTime() + 1_000)) {
   return { repository, provider, sessions, service, startContext, completeContext };
 }
 
+/**
+ * 실제 저장소 해시와 대조할 기대 SHA-256 값을 계산합니다.
+ * @param value 테스트 state 또는 브라우저 식별자.
+ * @returns 복사된 32바이트 해시.
+ */
 function digest(value: string): Uint8Array {
   return Uint8Array.from(createHash("sha256").update(value, "utf8").digest());
 }

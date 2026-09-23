@@ -2,7 +2,7 @@
 
 > **English Summary:** Six authentication tables live in the private `app_private` schema. The BFF reuses one process-scoped Drizzle database client while rebuilding repository and auth services per request. The `app_session_bff` role receives explicit CRUD grants only on those tables, while browser-facing roles and default future-table grants are revoked.
 
-이 문서는 현재 [`Drizzle auth schema`](../../packages/database/src/schema/auth.ts), 세 SQL migration, [`AuthRepository`](../../apps/web/src/server/persistence/auth-repository.ts), [`PostgresAuthRepository`](../../apps/web/src/server/persistence/postgres-auth-repository.ts)를 기준으로 한다. PostgreSQL 식별자는 `snake_case`, TypeScript 필드는 대응하는 `camelCase`다.
+이 문서는 현재 [`Drizzle auth schema`](../../packages/database/src/schema/auth.ts), 인증 SQL migration 3개와 replay SQL migration 1개, [`AuthRepository`](../../apps/web/src/server/persistence/auth-repository.ts), [`PostgresAuthRepository`](../../apps/web/src/server/persistence/postgres-auth-repository.ts)를 기준으로 한다. PostgreSQL 식별자는 `snake_case`, TypeScript 필드는 대응하는 `camelCase`다. 처음 보는 DB 용어는 [코드 읽기 가이드](../guides/code-reading.ko.md)를 참고한다.
 
 ## 최종 객체 지도
 
@@ -14,6 +14,7 @@
 | `app_private.auth_recovery_transactions` | password recovery의 pending/exchanged/update-claimed/consumed 상태 | 사용 중 |
 | `app_private.email_confirmation_transactions` | email confirmation의 interaction-bound PKCE transaction | 사용 중 |
 | `app_private.auth_rate_limits` | 인증 rate-limit bucket | **스키마만 존재**. repository operation과 use case는 아직 없다. |
+| `app_private.api_jwt_replays` | BFF 위임 JWT `jti` digest의 중복 사용 방지 | API replay store에서 사용 중, 인증 repository와 별도 권한 |
 
 Drizzle export 이름은 각각 `authUserSecurityState`, `authSessions`, `oauthTransactions`, `authRecoveryTransactions`, `emailConfirmationTransactions`, `authRateLimits`다.
 
@@ -98,7 +99,7 @@ Task 10은 schema나 migration을 바꾸지 않고 [`createRequestContainer`](..
 - 같은 connection string의 다음 요청은 기존 client를 공유한다. process가 살아 있는 동안 다른 fingerprint가 들어오면 새 client를 만들거나 URL을 출력하지 않고 `AUTH_CONFIGURATION_INVALID`로 실패한다.
 - `PostgresAuthRepository`, provider adapter, `SessionService`, email/OAuth/recovery service와 `AuthController`는 요청마다 새로 만든다. 복호화한 credential이나 user session을 module scope에 cache하지 않는다.
 
-이 lifecycle은 실제 connection pool의 staging 부하·종료 동작을 검증했다는 뜻이 아니다. live Supabase/disposable PostgreSQL integration과 pool lifecycle 검증은 아직 미실행이다.
+이 lifecycle은 실제 connection pool의 staging 부하·종료 동작을 검증했다는 뜻이 아니다. disposable PostgreSQL과 인증 E2E의 CI 증거는 존재하지만 live Supabase·운영 pooler·부하·종료 검증을 대신하지 않는다. `BFF_DATABASE_URL` 분리와 BFF role/pool hardening은 후속 작업이며 현재 `DATABASE_URL` 구현과 혼동하지 않는다.
 
 ## `auth_user_security_state`
 
@@ -301,9 +302,17 @@ OAuth, email confirmation, recovery exchange, recovery password update는 provid
 
 [`202607200003_user_security_state.sql`](../../supabase/migrations/202607200003_user_security_state.sql)은 `auth_user_security_state`를 만들고 nonnegative minimum constraint와 explicit revoke/grant를 적용한다.
 
+### 004: API JWT replay (202607230001)
+
+[`202607230001_delegated_jwt_replay.sql`](../../supabase/migrations/202607230001_delegated_jwt_replay.sql)은 `app_private.api_jwt_replays`를 만든다. `jti_digest`는 정확히 32바이트인 기본 키, `created_at`은 기본 `now()`, `expires_at`은 생성 이후 시각이다. repository는 `ON CONFLICT DO NOTHING`으로 중복 삽입을 생략한다. 영향 행 수가 0이면 false를 반환해 API가 재사용을 거부한다. 중복 거부와 DB 장애 오류는 다른 경로다.
+
+`app_api`는 `LOGIN NOINHERIT NOBYPASSRLS`이며 상위 role membership을 제거하고 schema USAGE와 이 테이블 INSERT만 받는다. SELECT/UPDATE/DELETE 및 BFF 인증 테이블 권한은 부여하지 않는다. `app_session_bff`도 replay 테이블 권한을 받지 않는다. pg_cron이 사용 가능하면 만료 행 정리 job을 설치하며, 운영에서 설치·실행되는지는 별도 검증해야 한다. 이는 업무 멱등성 테이블이 아니고 금융 원장은 아직 없다.
+
 ## rollback 한계
 
 세 migration은 destructive down migration을 제공하지 않는다.
+
+replay migration에도 down script는 없다. replay 테이블을 비우거나 제거하면 이미 사용한 JWT의 중복 판정 기록이 사라지므로 단순한 정리 작업으로 취급하지 않는다.
 
 - 003을 제거하면 사용자별 minimum이 사라져 recovery와 늦게 도착한 로그인 사이의 race 차단 상태를 잃는다.
 - 002 적용 뒤 confirmation row 또는 pending recovery row가 생기면 table/column 삭제로 transaction을 잃는다.
@@ -317,9 +326,10 @@ OAuth, email confirmation, recovery exchange, recovery password update는 provid
 
 - Drizzle schema test는 최종 6개 테이블과 주요 constraint 이름을 정적으로 검사한다.
 - migration source test는 002와 003의 SQL shape를 정적으로 검사한다.
-- 현재 disposable PostgreSQL test는 **001만 읽어 실행**하며 001 당시 네 테이블과 권한을 검사한다.
-- 이 작업 공간에서는 `TEST_DATABASE_URL`과 disposable opt-in이 없어 live DB test가 실행되지 않았다.
-- 따라서 001→002→003 전체를 실제 PostgreSQL에 적용한 live 증거는 아직 없다.
+- `tests/database/auth-migration.test.ts`는 foundation과 replay SQL의 권한·제약을 검사한다. 별도 replay 테스트를 포함한 DB 통합 기록은 22개다.
+- `tests/database/prepare-auth-e2e.ts`는 정확한 폐기용 로컬 URL·opt-in·DB owner를 확인한 후 인증 001→002→003→replay 순서로 네 migration을 적용한다. 운영 DB에서 실행하는 스크립트가 아니다.
+- 2026-09-08 확인한 HEAD `5cc94601c74a1e08f848a0cbc0bde191e7a47f81`의 CI에 disposable DB와 Chromium 인증 증거가 있다. 이번 문서 작업에서 live DB 테스트를 재실행하지 않았다.
+- Supabase hosted role·TLS·pooler·백업·실제 OAuth 증거는 여전히 미완료다. CI 성공을 운영 검증 완료로 간주하지 않는다.
 
 ## 관련 문서
 

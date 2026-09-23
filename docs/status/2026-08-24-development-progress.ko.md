@@ -1,5 +1,33 @@
 # Account Book 개발 진행 현황
 
+> **인증 시간 제한 커밋·푸시 승인 (2026-09-15):** 사용자 승인 후 `feature/auth-provider-deadline`의 제품·테스트·설정 10파일을 `45e4d76`으로 커밋했다. 전송 직전 전체 `pnpm verify`를 다시 실행해 **937개 테스트·lint·타입·API/웹 빌드 통과**(exit 0)를 확인했다. 로그는 `output/auth-provider-deadline-prepush-verify.log`다. 한국어 설계·계획·검증·진행 문서 6파일은 별도 문서 커밋으로 묶어 같은 브랜치로 전송한다. `.env`·`.env.*` 제외 규칙을 확인했고 Git이 추적하는 실제 환경 파일은 없으며, 사용자 기존 `.gitignore` 수정은 커밋에서 제외했다. 전송 성공은 원격 브랜치와 로컬 HEAD의 SHA 일치로 별도 확인한다. 기존 coverage 92.48%/100% 미달은 미해결이며 이번에는 재측정하지 않았다. 새 PR·병합·배포는 승인 범위가 아니다. 아래 미커밋·미푸시 문단은 전송 승인 이전의 이력이다.
+
+> **최신 상태 — 인증 시간 제한 구현·최종 보완 완료 (2026-09-15):** 승인된 SDK 유지 A안·작업당 총 5초와 malformed JSON의 SDK 원문 차단을 구현했다. 보완 후 전체 `pnpm verify`는 **937개 테스트·lint·타입·API/웹 빌드 통과**(exit 0), 독립 scoped 최종 재검토는 **APPROVED**다. 전체 web coverage는 **569/569 테스트 통과**지만 branches **92.48%로 100% 기준 미달**(exit 1)이며 기준을 낮추거나 실패를 면제하지 않았다. 현재 변경은 **미커밋·미푸시**이고 PR·병합·배포도 하지 않았다. 남은 사항은 coverage 분기 격차와 실제 hosted IdP/DB·배포망 취소·브라우저 여정·한국망 지연 등 미검증 항목을 별도 범위에서 다루는 것이다. [구현·최종 결과](../superpowers/plans/2026-09-15-auth-provider-deadline.md), [검증 기록](../guides/security-auth-testing.md#인증-제공자-작업당-5초-제한-2026-09-15-로컬-증거). 아래 계획 작성·구현 미실행 문단은 이전 시점의 이력이다.
+
+> **인증 시간 제한 실행 계획 작성 (2026-09-15):** 도구 실행이 가능함을 확인하고 승인된 A안·작업당 총 5초를 [실행 계획](../superpowers/plans/2026-09-15-auth-provider-deadline.md)에 구체화했다. ① 시간 제한·안전한 전송 경계 ② 어댑터·실제 SDK 연결/회귀 검증의 두 작업이며 구현 예상은 제품 4·테스트 5·설정 1·문서 4, 총 14파일이다. HTTP helper의 기존 주입점을 재사용하고 새 시간 관리와 전송 책임을 분리한다. 이번에는 설계·계획·검토 기록·진행 현황 4개 문서만 갱신했다. 제품 구현·새 테스트·커밋·푸시·PR·병합·배포는 미실행이며 기존 `.gitignore` 변경은 보존했다. 다음은 실행 방식 확정 후 Task 1의 RED부터 시작한다.
+
+> **인증 시간 제한 설계 재개:** 도구의 자동 승인 검토 용량 오류로 중단됐던 문서 작업을 재개했다. `feature/auth-provider-deadline`, 기준 `bb537e5`에서 사용자가 확정한 **SDK 유지 A안·인증 제공자 작업당 총 5초**를 [서면 설계](../superpowers/specs/2026-09-14-auth-provider-deadline-design.md)에 반영했다. 이번에는 검토 기록·서면 설계·진행 현황 3개 문서만 변경했으며 제품 코드·DB·UI·의존성은 미변경이다. 다음은 서면 요구사항 확인 후 실행 계획과 TDD 구현이다. 커밋·푸시·PR·병합·배포는 새로 실행하지 않았다. 기존 `.gitignore` 수정은 보존했다.
+
+> **Vitest 패치 전송 승인 (2026-09-14):** 사용자 요청으로 완료된 보안 패치 6파일을 커밋·푸시한다. 전송 성공 여부는 로컬 HEAD와 `hotfix/vitest-security-20260914` 원격 SHA 일치로 확인한다. 아래 미커밋 기록은 이전 시점이며 PR·병합·배포는 하지 않는다. 다음 작업은 R1 이후 실제 코드에 맞춘 인증 요청 시간 제한 상세 설계 검토다.
+
+> **Vitest 보안 패치·로컬 검증 완료 (2026-09-14):** R1 `f7ba1e5`에서 분기한 `hotfix/vitest-security-20260914`에서 Vitest/coverage-v8/mocker를 4.1.11로 갱신했다. 패키지·lockfile·정책 테스트·문서 총 6파일이며 제품 로직·DB·화면은 유지했다. 전체·운영 의존성 audit는 알려진 취약점 0건, 최종 `pnpm verify`는 878개 테스트·lint·타입·API/웹 빌드 통과다. 최초 실행의 route 테스트 5초 초과는 코드 변경 없이 단독/전체 재실행에서 통과했으며 확정 원인은 미상이다. 기존 coverage branches 91.86%는 100% 기준 미달(exit 1)로 남는다. 정책 테스트의 사전 RED 누락과 사후 불일치 검증도 [실행 계획](../superpowers/plans/2026-09-14-vitest-security-patch.md)·[검증 설명](../guides/security-auth-testing.md)에 기록했다. **미커밋·미푸시**이며 새 CI·PR·병합·배포는 하지 않았다. 다음 단계는 인증 요청 시간 제한 상세 설계다.
+
+> **R1 전송 승인 (2026-09-10):** 사용자가 R1 변경의 커밋·푸시를 승인했다. 역할 분리 제품·테스트·설정 11파일과 관련 문서 7파일만 커밋 대상으로 삼으며 기존 `.gitignore` 수정은 제외한다. 전송 전 전체 `pnpm verify`와 저장소 보안 게이트를 다시 확인한다. 새 기능 브랜치의 이력에는 기존 리전 설정 `92e54e2`·DB 오류 처리 `66a2319`도 포함된다. 아래 미커밋·미푸시 표현은 당시 기록이며 실제 전송 성공 여부는 로컬 HEAD와 원격 브랜치 SHA 일치로 확인한다. PR 생성·병합·배포·다음 개발은 이번 범위에서 제외한다.
+
+> **R1 역할별 분리 완료 (2026-09-10):** `66a2319`에서 만든 `feature/auth-adapter-role-split`에서 Supabase 어댑터625→248줄 및 검증·세션 파싱·오류 변환·HTTP·SDK 생성의5모듈 분리를 마쳤다. 로그인 동작·DB·UI·의존성은 유지했다. 원본64개 인증 사례/24개 테스트 블록을 보존했고 마지막 주석 복원 후 전체 `pnpm verify`878tests·lint·6 workspace 타입·API/웹build가 종료코드0이다. 선택적 branches는91.73%→91.86%로 여전히 기존100% 기준 미달이다. 독립 task/전체리뷰 및 주석 보완 재리뷰를 마쳤고 미해결 지적은 없다. [파일 지도·실행 결과](../superpowers/plans/2026-09-10-auth-adapter-role-split.md), [한국어 코드 흐름](../architecture/backend-authentication.ko.md), [테스트 기록](../guides/security-auth-testing.md)을 갱신했다. 리전 `92e54e2`와 DB 오류 처리 `66a2319`는 로컬 커밋이며 R1은 미커밋이다. 푸시·새 CI·실제 IdP/DB 전체E2E·배포는 하지 않았다. R2 이후와 인증 시간 제한은 별도 착수 범위다.
+
+> **로컬 커밋 정리·다음 작업 검토 (2026-09-10):** 사용자가 커밋 생성을 승인했다. 커밋 전 전체 `pnpm verify`를 재실행해 878 tests·lint·타입·API/웹 build 통과(종료 코드 0)를 확인했다. 리전 설정은 `92e54e2`로 저장했고 DB 오류 처리·공통 결과 문서는 별도 커밋 단위로 정리한다. 아래 미커밋 표현은 당시 이력이며 최신 상태는 Git 커밋을 따른다. 푸시·새 CI·배포는 하지 않는다. 다음 개발은 [실제 Supabase 인증 요청 시간 제한 검토](2026-09-10-auth-deadline-next-work.ko.md)의 A안 승인 대기다. 새 제품 코드는 수정하지 않았다.
+
+> **DB 유휴 오류 경계 추가 (2026-09-09):** 승인된 A안으로 BFF/API 풀 생성 지점 2곳에 오류 수신과 풀별 최초 1회 고정 진단을 추가했다. 원문·SQL·연결 문자열은 출력하지 않고 기존 연결 한도·인증 실패 차단·종료 책임은 유지한다. RED 재현 후 focused database 15/15·API 24/24, 전체 `pnpm verify` 878 tests·lint·타입·빌드가 통과했다. 실제 DB 단절·hosted 인증·새 CI·배포는 미검증이며 리전 변경과 함께 미커밋 상태다. 다음 후보는 실제 Supabase 요청 시간 제한이며 별도 계획·승인 후 진행한다. [이번 실행 계획](../superpowers/plans/2026-09-09-database-pool-error-boundary.md), [검증 기록](../guides/security-auth-testing.md).
+
+> **리전 이전 추가 (2026-09-09):** Vercel 프로젝트 미생성을 확인했고 A안에 따라 향후 Root Directory를 `apps/web`으로 정했다. `feature/vercel-region-policy`에서 설정 이전 후 focused 16/16·전체 verify 874 tests·타입·lint·API/웹 build를 통과했고 deprecated 경고가 없어졌다. 이전 보안 업데이트 `afacc4c`의 [CI](https://github.com/jawon0407/account-book/actions/runs/34307677601)는 성공했지만 새 리전 변경은 미커밋이며 새 CI·실제 배치 지역은 미검증이다. 실제 배포는 하지 않았다. [리전 이전 실행 계획](../superpowers/plans/2026-09-09-vercel-region-policy.md)을 최신 기록으로 참고한다.
+
+> **전송 준비 추가 (2026-09-09):** 아래 미커밋 기록 이후 사용자가 커밋·푸시를 승인했다. 전송 전 verify·운영 audit 재검증은 종료 코드 0이다. 실제 전송/CI 상태는 해당 브랜치 HEAD로 확인하며, PR 생성·병합·배포는 수행 범위가 아니다. 다음 리전 설정 대안·후보 22파일·검증 순서는 [계획서 8절](../superpowers/plans/2026-09-09-next-security-update.md#8-다음-작업-사전-검토--구현-승인-대기)에 기록했다. 다음 제품 코드 변경은 승인 대기다.
+
+> **최신 추가 (2026-09-09):** 사용자 승인 후 `hotfix/next-security-20260909`에서 Next 16.3.3·baseline-browser-mapping 2.11.0으로 보안 업데이트했다. 기준 커밋은 `a36f719`이고 수정은 아직 미커밋이다. 로컬 verify(873 tests·lint·타입·API/웹 빌드), 운영 audit 0건, 공개 인증 화면 15조합 검증을 통과했다. 실제 DB/인증 전체 E2E·새 CI·배포는 미실행이다. `preferredRegion` 사용 중단 경고의 배포 정책 검토를 별도 승인 과제로 추가했다. [검증 기록](../guides/security-auth-testing.md), [실행 계획](../superpowers/plans/2026-09-09-next-security-update.md), [상시 작업 승인 절차](../guides/change-workflow.ko.md)를 참고한다. 아래 9월 8일 안내와 1~13절은 과거 기록이다.
+
+> **최신 안내 (2026-09-08):** 이 파일의 1~13절은 8월 24일 스냅샷이며 PR 번호·미해결 의존성 수치·다음 작업 순서는 당시 기록입니다. 현재 분야별 상태는 [문서 지도](../README.md), 최근 코드 변경은 아래 날짜별 기록을 우선합니다. 현재 작업 브랜치는 `feature/ledger-public-contracts`, 기준 HEAD는 `5cc94601c74a1e08f848a0cbc0bde191e7a47f81`입니다. PR #9 보안 패치는 병합됐고 PR #8의 해당 SHA CI가 통과했습니다. 로컬 UUID 수정과 이번 주석·문서 변경은 그 CI 이후 작업입니다.
+
 > - 기준일: 2026-08-24
 > - 기준 브랜치: `feature/financial-mutation-boundary`
 > - 기준 커밋: `51a9667511058395c4f72e4af42e2e4c25b243dc`
@@ -44,7 +72,7 @@
 - 현재 우선순위: 웹과 Android를 먼저 완성하고, iOS도 같은 코드 기반에서 지원한다.
 - 초기 범위 제외: 금융기관 자동 연동, OCR, 관리자 페이지, 복잡한 오프라인 쓰기 동기화는 핵심 가계부 완성 후 별도 단계로 진행한다.
 
-루트 `PRODUCT.md`와 일부 이전 계획의 PWA 표현은 과거 방향을 담고 있다. 이 진행 현황과 최신 승인 설계가 현재 구현 방향이며, 제품 명세 전체 정리는 장부 구현 계획을 확정할 때 함께 수행해야 한다.
+2026-09-08에 루트 `PRODUCT.md`·활성 문서를 웹/별도 네이티브 앱 방향으로 갱신했다. 이전 계획의 PWA 표현은 과거 의사결정 기록으로 보존하며 현재 구현 방향으로 적용하지 않는다.
 
 ## 3. 현재와 목표 아키텍처
 
@@ -316,3 +344,140 @@ flowchart TD
 - 실행 중인 로컬 서버가 `#F7F7F5`와 `--shadow-raised`를 포함한 갱신 CSS를 제공하는 것을 확인했다.
 - 최초 PR CI는 `.auth-shell`의 1px 테두리가 `clientWidth`를 좌우 2px 줄여 데스크톱 너비 E2E 2개에서 실패했다.
 - 테두리를 레이아웃 크기에 영향을 주지 않는 내부 `outline`으로 교체했으며 Chromium에서 1080→648, 1920→1152, 1921→1080을 다시 확인했다.
+
+## 2026-08-26 M2.1 공개 계약 진행
+
+- 브랜치: `feature/ledger-public-contracts`
+- Task 5 구현 커밋: `c2db82c`
+- 공개 schema 수: common 10개, account 9개, category 7개, transaction 10개
+- contracts 집중 검증: `corepack pnpm@11.9.0 --filter @account-book/contracts exec vitest run src/errors.test.ts` — 13/13 tests 통과
+- contracts 전체 검증: `corepack pnpm@11.9.0 --filter @account-book/contracts test` — 7 files, 61 tests 통과; typecheck/build 통과
+- 전체 저장소 lint: `corepack pnpm@11.9.0 lint` — 통과
+- 전체 저장소 legacy test — 53/53 통과; workspace test — contracts 61, database 12, API 147, web 509 통과; E2E preflight 85/85 통과
+- Task 6 fix round에서 auth-controller가 auth-only 오류 코드 subset을 사용하고 ledger 오류를 `AUTH_PROVIDER_UNAVAILABLE`로 정규화하도록 보강했다. 고정 runtime workaround로 workspace typecheck/build를 다시 실행해 통과했다.
+- DB 금융 schema/RLS, API controller/service/repository, PC web 장부 기능, mobile 앱은 아직 미구현이다.
+- 다음 계획: PostgreSQL 금융 schema, roles, grants, RLS, indexes.
+
+## 2026-09-08 개발 재개 — M2.1 UUID 검증 보완
+
+### 사용자 요청과 범위
+
+- 추가 침투 테스트·실제 디바이스 연결 테스트는 보류하고 개발을 우선한다.
+- 기능 수정에 직접 필요한 단위 회귀 검증·타입 검사·lint는 유지한다.
+- `feature/ledger-public-contracts`의 기존 worktree에서 수정했다. 별도 DB나 운영 서비스는 변경하지 않았다.
+- 이번 작업은 제품 코드 1개, 테스트 2개, 설명/진행 문서 2개 파일의 소규모 수정이다.
+- Impeccable live 개발 도구의 보안 문제는 아직 미수정이며 해당 도구를 실행하지 않는다.
+
+### 원리와 변경 사항
+
+- 문제: UUID는 대소문자와 무관하게 같은 식별자인데 기존 코드는 문자열을 그대로 비교했다.
+- `LedgerIdSchema`를 `z.uuid().toLowerCase()`로 변경해 유효한 리소스 ID를 소문자로 통일한다.
+- 따라서 동일 계좌 이체, 동일 거래 ID를 사용한 이체 응답 쌍을 대소문자로 우회할 수 없게 한다.
+- 같은 transferId의 대소문자 차이를 잘못 불일치로 거부하던 문제도 함께 해결한다.
+- 공통 계약에서 통일하므로 계좌·카테고리·거래의 소비자가 각자 비교 함수를 복제하지 않는다.
+- 공개 타입은 string으로 유지되며 인증 UUID/토큰, 멱등성 키, DB 스키마는 변경하지 않는다.
+- 소비자는 입력 원본이 아닌 파싱 결과 `data`를 사용해야 한다. 소유권·원자성·사용자 격리는 후속 API/DB 계층의 별도 책임이다.
+
+### RED → GREEN 기록
+
+| 검증 | 결과 |
+|---|---|
+| 수정 전 두 테스트 파일 | 28개 중 신규 5개가 의도한 이유로 실패, 기존 23개 통과 |
+| 수정 후 contracts 전체 | 7개 파일, 66/66 통과 |
+| `pnpm typecheck` | 공통 package build 및 6개 workspace 타입 검사 통과 |
+| `pnpm lint` | 통과 |
+
+신규 사례는 공통 UUID 정규화, 같은 계좌 이체 거부, 응답의 동일 거래 ID 거부,
+응답의 동일 계좌 ID 거부, 같은 이체 참조의 대소문자 혼용 허용이다.
+이번 변경에 전체 `pnpm verify`, DB 통합, 브라우저·기기·침투 테스트를 재실행했다고 주장하지 않는다.
+이전 감사의 899개 통과 기록은 이전 SHA의 증거이며 이번 로컬 변경에 그대로 적용하지 않는다.
+
+### 다음 개발 범위
+
+다음 M2 단계는 승인된 웹·네이티브 공용 원장 설계를 바탕으로 PostgreSQL 금융 저장 계층을 구체화하는 것이다.
+
+1. 계좌·카테고리·거래·이체 그룹·멱등성 저장의 관계와 migration 단위를 정한다.
+2. `user_id NOT NULL`, 사용자 경계를 포함한 복합 FK, ENABLE/FORCE RLS, 비owner API role을 적용한다.
+3. BIGINT 원화 금액·DATE 거래일·UTC 이벤트 시각·version·삭제/보관 규칙을 공개 계약과 맞춘다.
+4. 그다음 repository → API/BFF → `/app` PC 원장 화면 → Expo 모바일 순서로 구현한다.
+
+이는 후속 작업 목록이며 금융 DB·원장 화면·모바일 앱의 구현 완료를 의미하지 않는다.
+
+## 2026-09-08 최신 설계 문서화·한국어 함수 주석
+
+### 사용자 요청과 범위
+
+- 최신 승인 방향과 실제 코드를 대조해 기획·디자인·프론트·백엔드·DB·보안·개발 흐름 MD를 갱신했다.
+- [문서 지도](../README.md), [초급 코드 읽기](../guides/code-reading.ko.md), [프론트 구현 설명](../architecture/frontend.ko.md)을 추가했다.
+- PWA·오프라인 큐를 현재 방향에서 제외하고 PC 웹 + 별도 Expo 앱 + 서버 단일 원장으로 정리했다.
+- 실제 인증/위임 JWT/replay 구현과 금융 계약만 존재하는 상태, 미구현 금융 DB/API/화면/모바일을 구분했다.
+- 원래 계획서와 날짜별 검증 증거는 역사 기록으로 보존했다. 과거 테스트 수를 현재 변경의 통과 증거로 재사용하지 않는다.
+
+### 코드 주석을 읽는 법
+
+제품 소스·개발 스크립트·테스트의 명명 도우미에 한국어 JSDoc으로 역할, 작동 원리, `@param`, `@returns`, 필요한 오류/부작용을 설명했다. 포트·콜백 타입은 호출 규약을 설명한다. 단순 `it`/`describe` 익명 콜백은 테스트 이름이 의도를 설명하므로 똑같은 주석을 반복하지 않았다. 생성물·외부 라이브러리·AST 검사용 문자열 fixture는 변경하지 않았다.
+
+문서·주석만 수정했으며 기존 UUID 정규화 수정은 보존했다. 금융 기능·DB migration·런타임 설정·보안 정책 코드를 새로 구현하거나 변경하지 않았다. Impeccable live 도구의 미해결 문제도 수정 완료로 표시하지 않는다.
+
+### 검증 경계
+
+이 작업은 작업 시작 시 소스 기준선과 주석을 제거한 TypeScript AST 출력의 해시를 비교하고, 명명 함수 JSDoc 유무·문서 로컬 링크·typecheck·lint·diff 공백 오류를 확인한다. 개발 스크립트도 비교 대상이다. 새 기능 테스트는 추가하지 않았고 전체 기능 테스트·DB·브라우저·기기·침투 테스트는 재실행하지 않았다. 커밋·푸시·PR 변경은 별도 요청 전까지 하지 않는다.
+
+최종 정적 검증 결과:
+
+- TS/TSX/MJS 167개 파일의 주석 제거 AST 출력 비교: 실행 코드 차이 0. 기존 UUID 수정이 포함된 작업 시작 상태와 비교했다.
+- 명명 함수·메서드·생성자·화살표 선언 687개에 설명 주석 존재(익명 테스트 콜백·문자열 fixture는 별도 범위).
+- 변경/추가 Markdown 24개, 로컬 링크 175개 대상 누락 0.
+- Node 22.15.1·pnpm 11.9.0에서 공통 package build와 6개 workspace typecheck, lint, `git diff --check` 통과.
+- 독립 문서 검토에서 replay 중복의 `ON CONFLICT DO NOTHING` 처리와 HttpOnly 설명을 더 정확하게 정정했다.
+
+## 2026-09-08 커밋·푸시 전 재검증
+
+사용자가 문서·주석 작업의 커밋·푸시를 요청했다. 기존 기능 브랜치 `feature/ledger-public-contracts`에서 UUID 기능 수정과 문서·주석 보강을 구분해 커밋하며, 기존 Draft PR #8을 유지한다. 병합·배포나 다음 금융 기능 구현은 이번 작업에 포함하지 않는다.
+
+### 이번 실행에서 확인한 증거
+
+- Node 22.15.1·pnpm 11.9.0의 `pnpm verify` 종료 코드 0: lint, 타입 검사, 테스트, API·웹 프로덕션 빌드 통과.
+- 테스트 합계 872개: 레거시·보안 53 + contracts 66 + database 단위 12 + API 147 + web 509 + E2E 사전 검사 85. E2E 사전 검사는 브라우저 본 실행이 아니다.
+- `pnpm audit --prod`: 알려진 운영 의존성 취약점 0건. 전체 보안 무결성이나 Impeccable live 문제 해결을 뜻하지 않는다.
+- 주석 제거 AST 비교 167개 파일에서 추가 실행 코드 차이 0, 명명 선언 687개 주석 확인, Markdown 24개·로컬 링크 175개 누락 0.
+- `.env`, `.env.*` 제외 규칙과 루트·웹·API 환경 파일 경로의 ignore 적용을 확인했다. `.env.example`만 예외 허용하며 현재 실제 env 파일은 추적하지 않는다.
+- 실제 DB·브라우저·기기·침투 테스트는 이 로컬 재검증에서 실행하지 않았다. 푸시 후 기존 CI가 실행하는 disposable 검사는 별도 SHA의 결과로 판단한다.
+- 위 결과는 커밋 직전 작업 트리 기준이다. 커밋 SHA·원격 푸시·CI 성공은 이후 Git/GitHub 조회 결과로 확인하며 미리 성공으로 기록하지 않는다.
+
+### 다음 개발 제안과 승인 경계
+
+승인된 순서인 **공용 계약 → PostgreSQL/RLS → repository → API → PC 웹 → Expo 앱**을 유지한다. 다음은 M2.2 금융 저장 계층의 상세 설계이며, M2.1 승인을 후속 DB 설계 승인으로 간주하지 않는다.
+
+1. 계좌·카테고리·거래·이체 그룹·멱등 기록의 관계도와 컬럼·제약 조건을 한국어로 설명한다.
+2. 사용자 격리(RLS·복합 FK·최소 DB 권한), 금액·날짜·버전, 이체 원자성, 중복 요청·동시 수정의 처리 규칙을 비교하고 승인받는다.
+3. 승인 후 migration·DB 통합 테스트부터 구현하고 repository/API를 연결한다. 운영 DB가 아닌 폐기 가능한 테스트 DB에서 검증한다.
+4. 첫 수입·지출의 생성과 조회를 PC 웹까지 연결한 뒤 범위를 넓히고, Expo 앱이 같은 계정의 원장을 사용하도록 연결한다.
+
+DB 우선은 데이터 무결성과 사용자 격리를 먼저 고정하는 장점이 있지만 화면 결과를 보는 시점이 늦다. UI 우선은 시연이 빠르지만 서버 규칙 확정 후 재작업 가능성이 있다. 전체 기능을 한 번에 만드는 대신 저장 기반 확정 후 작은 기능 단위로 연결하면 유지보수·검증 범위를 제한할 수 있다. 실제 금융정보 베타는 M1 hosted 인증·권한·백업·복구 등 운영 gate가 해소되기 전까지 시작하지 않는다.
+
+## 2026-09-15 인증 제공자 작업당 5초 제한 구현
+
+승인된 A안대로 Supabase SDK를 유지하면서 인증 제공자 작업 하나에 총 5,000ms 예산을 연결했다. 직접 HTTP와 SDK가 같은 보호 fetch를 사용하고, 가입·로그인·메일/OAuth/복구 코드 교환·세션 갱신·복구 요청은 각각 독립 예산을 갖는다. 로그아웃과 비밀번호 변경은 `setSession`을 포함한 전체 순차 흐름이 한 예산을 공유한다. 공개 `AuthProviderPort`, 계약, 의존성, DB, 화면은 변경하지 않았다.
+
+시간 초과·취소·원시 전송/본문 오류는 `AUTH_PROVIDER_UNAVAILABLE`로 고정하고, SDK가 받기 전에 안전한 내부 응답으로 바꾼다. 실제 SDK를 사용한 테스트에서 오류 표식이 console에 도달하지 않았고, 주입된 신호의 abort와 refresh backoff 뒤 추가 전송 차단을 확인했다. 취소가 원격 변경의 롤백을 뜻하지 않으므로 자동 재시도는 추가하지 않았다.
+
+Task 1은 focused 19 tests·typecheck·lint 종료 코드 0과 요구사항/품질 리뷰 Approved다. Task 2 RED는 2026-09-15 10:51 KST에 16 tests 중 15 failed·1 passed(exit 1), 구현 뒤 GREEN은 10:53에 16/16 passed(exit 0)였다. 같은 작업 트리의 통합·상위 정책 회귀는 controller를 포함해 11 files·193/193 passed(exit 0), web typecheck와 전체 lint도 exit 0이다. 구현 전 64개 인증·94개 상위 정책 기준선은 과거 기준선으로만 보존한다.
+
+Task 2 리뷰 round 1 전 소스에 대한 컨트롤러의 전체 `pnpm verify`는 exit 0이다. lint·workspace typecheck·API와 Next.js 16.3.3 build가 통과했고 legacy 54, contracts 66, database 15, API 148, web 545, E2E preflight 85로 총 913 tests가 통과했다. 로그는 `.superpowers/sdd/2026-09-15-auth-provider-deadline/full-verify.log`와 인계용 `output/auth-provider-deadline-full-verify.log`에 있다.
+
+같은 리뷰 전 소스에 대한 2026-09-15 11:01:42 KST의 전체 web coverage는 7.41초 동안 32 files·545 tests가 모두 통과했지만 branches 100% gate 때문에 exit 1이었다. statements 95.01% (839/883), branches 92.54% (757/818), functions 96.92% (189/195), lines 98.73% (704/713)이며 기준은 낮추지 않았다. branches는 과거 91.86%보다 개선됐지만 신규 `provider-operation.ts`도 90%여서 남은 격차가 전부 기존 코드라고 보지는 않는다. 로그는 `.superpowers/sdd/2026-09-15-auth-provider-deadline/coverage.log`와 `output/auth-provider-deadline-coverage.log`다.
+
+리뷰 round 1 당시 파일 길이는 어댑터 276줄, Task 1 신규 제품 모듈 79줄·93줄이었다. 신규 테스트 4파일은 최초 533줄이었고 리뷰 round 1의 실제 SDK pre-map 결과 검사를 더해 당시 590줄이었다. 테스트 추정을 넘은 이유는 실제 SDK 전송·본문 오류, abort, backoff, 모든 진입점과 순차 예산 경계를 분리 검증하고 한국어 역할 주석을 보존했기 때문이며 추가 제품 범위는 아니다.
+
+Task 2 리뷰 round 1은 최종 adapter 오류와 console 미호출만으로는 auth-js가 받은 내부 응답을 증명할 수 없다고 지적했다. 실제 SDK의 adapter 매핑 전 결과가 null user/session, status 408, 고정 message이며 canary가 없는지 직접 단언했다. 본문 버퍼링을 임시 우회한 mutation은 11:12:04 KST에 body 사례만 status 0 대 기대 408로 실패(exit 1)했고 transport 사례는 통과했다. 제품 파일을 즉시 원복해 SHA-256 `760F0EB6080752E0525E3900A775507797F785F6C021FC62B0EE25D88D4711D2` 일치를 확인했다. 11:12:32 KST SDK+operation 22/22 tests, 11:12:41 web typecheck, 11:12:52 lint는 모두 exit 0이다. round 1은 test·문서만 영구 변경했으므로 앞의 913개와 coverage는 이전 소스 증거이며 전체 재실행으로 표현하지 않는다.
+
+컨트롤러의 round 1 후, malformed JSON 최종 보완 전 `pnpm verify`는 exit 0이다. lint·workspace typecheck·API/web build가 통과했고 legacy 54, contracts 66, database 15, API 148, web 547, E2E preflight 85로 총 915 tests가 통과했다. 2026-09-15 11:16:03 KST coverage는 7.45초 동안 32 files·547 tests가 통과했지만 동일한 branches 100% gate 때문에 exit 1이었다. statements 95.01% (839/883), branches 92.54% (757/818), functions 96.92% (189/195), lines 98.73% (704/713)다. 보완 전 로그는 `output/auth-provider-deadline-final-verify.log`와 `output/auth-provider-deadline-final-coverage.log`이며 파일명의 final과 관계없이 915/547을 보완 후 결과로 주장하지 않는다. 913개·545개는 더 이른 이력이다.
+
+최종 검토에서 정상적으로 읽힌 잘못된 JSON이 SDK 해석 오류에 원문 일부를 남기는 누락을 확인했다. 공개 adapter 응답은 정규화되어 있었으며 공개 원문 유출이 입증된 것은 아니다. 최종 보완은 `provider-operation.ts` 안의 JSON 구문 검사로 한정했다. malformed 비-429는 기존 고정 408·실패/abort 경로, 실제 malformed/빈 429는 고정 제한 JSON·429, 유효 JSON은 원본 바이트·상태·헤더를 유지한다. 204/205/304와 성공한 빈 logout도 보존하고 디코딩 뒤 단조 시계 마감을 검사한다. 새 의존성·endpoint 스키마·오류 정책은 없다.
+
+11:31:02 KST TDD RED는 focused 54개 중 8 failed·46 passed(exit 1), 11:31:47 같은 명령의 GREEN은 54/54(exit 0)이다. 빈 429 SDK 확인까지 더한 11:32:34 focused는 55/55이고 web typecheck·lint도 exit 0이다. 테스트 `this` 타입 누락(TS2683)은 타입 명시만으로 수정 후 재검증했다. 11:33:04 인증/상위 정책 회귀 11파일·217/217도 exit 0이다. 제품·테스트를 고정해 컨트롤러에 넘겼으며 `.superpowers/sdd/2026-09-15-auth-provider-deadline/final-fix-report.md`에 정확한 명령·출력·고정 해시를 남겼다.
+
+컨트롤러의 보완 후 전체 `pnpm verify`는 exit 0이며 lint·workspace typecheck·API/web build와 legacy 54 + contracts 66 + database 15 + API 148 + web 569 + E2E preflight 85 = 937개 테스트가 통과했다. 11:36:18 KST coverage는 7.59초, 32파일·569/569 통과 뒤 branches 100% gate 때문에 exit 1이었다. statements 94.84% (846/892), branches 92.48% (763/825), functions 96.93% (190/196), lines 98.47% (711/722)이며 `provider-operation.ts`도 branches 94.11%·lines 100%라 분기 격차가 남아 있다. 기준을 낮추거나 전부 기존 부채로 돌리지 않았다. 현재 근거는 `output/auth-provider-deadline-json-guard-verify.log`와 `output/auth-provider-deadline-json-guard-coverage.log`다. scoped 최종 재검토는 APPROVED이며 malformed JSON Important finding은 해결됐다. 새 결함이나 범위 밖 변경은 없다는 판정이고 coverage gate 실패는 면제되지 않았다.
+
+실제 hosted Supabase/DB E2E, 배포망 취소, 실제 브라우저 여정, 한국망 지연 p95와 이번 변경 대상의 별도 audit는 미검증이다. 기존 `.gitignore` 수정은 건드리지 않았고 커밋·푸시·PR·병합·배포를 수행하지 않았다.

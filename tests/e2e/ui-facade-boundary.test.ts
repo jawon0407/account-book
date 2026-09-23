@@ -160,6 +160,11 @@ const exactThreatFamilies = [
   "root escape and unsupported extension",
 ] as const;
 
+/**
+ * 임시 TS 파일에 합성 소스를 기록해 경계를 검사하고 임시 폴더를 정리한다.
+ * @param source - 실행하지 않고 파싱할 테스트 소스다.
+ * @returns 위반 목록. 파일 생성/삭제 부작용이 있으며 finally에서 정리한다.
+ */
 function inspect(source: string) {
   const rootDirectory = mkdtempSync(join(tmpdir(), "ui-facade-boundary-"));
   const rootFile = join(rootDirectory, "root.ts");
@@ -171,6 +176,11 @@ function inspect(source: string) {
   }
 }
 
+/**
+ * callback 문법을 검사할 최소 인증 테스트 소스를 만든다.
+ * @param callback - authTest 두 번째 인자에 넣을 소스 문자열이다.
+ * @returns 합성 email/password 선언과 callback을 포함한 문자열. 실행하지 않는다.
+ */
 function authSource(callback: string): string {
   return `
     import { authTest } from "../support/safe-ui-test.js";
@@ -180,6 +190,11 @@ function authSource(callback: string): string {
   `;
 }
 
+/**
+ * 최상위 문장 변형을 검사할 테스트 소스를 만든다.
+ * @param statement - import 아래에 삽입할 소스 문자열이다.
+ * @returns 최소 authTest 호출을 포함한 문자열. 실행하지 않는다.
+ */
 function moduleSource(statement: string): string {
   return `
     import { authTest } from "../support/safe-ui-test.js";
@@ -188,6 +203,11 @@ function moduleSource(statement: string): string {
   `;
 }
 
+/**
+ * 파일 경계 검사기의 예상 밖 예외를 고정 표식으로 바꾼다.
+ * @param options - 허용 rootDirectory와 검사 rootFile 경로다.
+ * @returns 위반 목록 또는 unexpected-system-error. 원본 시스템 예외는 버린다.
+ */
 function inspectBoundary(options: Readonly<{ rootDirectory: string; rootFile: string }>): unknown {
   try {
     return findUiFacadeBoundaryViolations(options);
@@ -196,6 +216,13 @@ function inspectBoundary(options: Readonly<{ rootDirectory: string; rootFile: st
   }
 }
 
+/**
+ * 경로·실제 경로·파일 종류를 대조해 링크/대체 파일을 거부한다.
+ * @param candidate - 현재 검사 경로다.
+ * @param expected - 기대하는 정규 경로다.
+ * @param kind - directory 또는 file이다.
+ * @returns 동일한 일반 경로이면 true. 파일 조회 오류는 호출자에 전파한다.
+ */
 function hasExactOrdinaryIdentity(
   candidate: string,
   expected: string,
@@ -213,6 +240,11 @@ function hasExactOrdinaryIdentity(
     && realpathSync.native(candidate) === expectedPath;
 }
 
+/**
+ * 정규 지원 TS 옆에 우선 해석될 수 있는 실행 파일이 없는지 검사한다.
+ * @param supportDirectory - safe-ui-test 지원 폴더다.
+ * @returns js/jsx/tsx 대체물이 모두 없으면 true. 조회 실패도 false로 처리한다.
+ */
 function hasNoExecutableSupportShadows(supportDirectory: string): boolean {
   for (const fileName of ["safe-ui-test.js", "safe-ui-test.jsx", "safe-ui-test.tsx"] as const) {
     try {
@@ -225,6 +257,11 @@ function hasNoExecutableSupportShadows(supportDirectory: string): boolean {
   return true;
 }
 
+/**
+ * 정규 파일 신원·지원 파일·첫 import를 확인한 뒤 AST 검사를 실행한다.
+ * @param paths - UI/지원 디렉터리와 각 정규 파일 경로다.
+ * @returns 위반 목록. 경로 오류는 고정 boundary 위반이며 소스를 실행하지 않는다.
+ */
 function inspectAuthoritativeAuthUiSpec(paths: CanonicalAuthUiPaths) {
   try {
     if (!hasExactOrdinaryIdentity(paths.uiDirectory, paths.uiDirectory, "directory")
@@ -256,6 +293,10 @@ function inspectAuthoritativeAuthUiSpec(paths: CanonicalAuthUiPaths) {
   }
 }
 
+/**
+ * 격리된 UI/지원 파일 구조를 임시 디렉터리에 만든다.
+ * @returns 정리할 parent 경로와 paths. 호출자가 테스트 후 폴더를 삭제해야 한다.
+ */
 function createCanonicalAuthUiFixture(): Readonly<{
   parent: string;
   paths: CanonicalAuthUiPaths;
@@ -274,6 +315,11 @@ function createCanonicalAuthUiFixture(): Readonly<{
   return { parent, paths: { uiDirectory, rootFile, supportDirectory, supportFile } };
 }
 
+/**
+ * 소스를 AST로 읽어 test 호출의 문자열 제목을 모은다.
+ * @param file - 검사할 테스트 파일 경로다.
+ * @returns 이름 집합. 파일을 실행하지 않으며 읽기 오류는 전파한다.
+ */
 function collectNamedTests(file: string): ReadonlySet<string> {
   const sourceFile = ts.createSourceFile(
     file,
@@ -282,6 +328,11 @@ function collectNamedTests(file: string): ReadonlySet<string> {
     true,
   );
   const names = new Set<string>();
+  /**
+   * AST를 재귀 순회해 직접 test 호출의 문자열 첫 인자를 기록한다.
+   * @param node - 현재 AST 노드다.
+   * @returns 반환값 없음. names 집합에 제목을 추가한다.
+   */
   const visit = (node: ts.Node): void => {
     const [firstArgument] = ts.isCallExpression(node) ? node.arguments : [];
     if (ts.isCallExpression(node)
@@ -304,6 +355,10 @@ test("accepts the real auth UI spec through the authoritative identity preflight
 test("authoritative preflight returns fixed findings for import mismatch and missing canonical files", () => {
   const mutations = [
     {
+      /** import 불일치를 재현하도록 임시 UI 소스를 덮어쓴다.
+       * @param fixture - 현재 테스트가 소유한 임시 정규 파일 구조다.
+       * @returns 반환값 없음. rootFile 내용만 변경한다.
+       */
       mutate(fixture: ReturnType<typeof createCanonicalAuthUiFixture>) {
         writeFileSync(
           fixture.paths.rootFile,
@@ -314,6 +369,10 @@ test("authoritative preflight returns fixed findings for import mismatch and mis
       want: [{ category: "import", capability: "unapproved-import" }],
     },
     {
+      /** 정규 UI 파일 누락을 재현한다.
+       * @param fixture - 현재 테스트의 임시 파일 구조다.
+       * @returns 반환값 없음. 임시 rootFile만 삭제한다.
+       */
       mutate(fixture: ReturnType<typeof createCanonicalAuthUiFixture>) {
         rmSync(fixture.paths.rootFile, { force: true });
       },
@@ -321,6 +380,10 @@ test("authoritative preflight returns fixed findings for import mismatch and mis
       want: [{ category: "boundary", capability: "boundary-escape" }],
     },
     {
+      /** 정규 지원 파일 누락을 재현한다.
+       * @param fixture - 현재 테스트의 임시 파일 구조다.
+       * @returns 반환값 없음. 임시 supportFile만 삭제한다.
+       */
       mutate(fixture: ReturnType<typeof createCanonicalAuthUiFixture>) {
         rmSync(fixture.paths.supportFile, { force: true });
       },

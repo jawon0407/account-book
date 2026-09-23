@@ -5,9 +5,9 @@ import type { DelegatedScope } from "@account-book/contracts/internal-api";
 export const DELEGATED_SCOPE = Symbol("DELEGATED_SCOPE");
 
 /**
- * Declares the exact delegated capability required by a controller route.
- * The guard treats missing or malformed metadata as unauthenticated, avoiding a
- * default capability when future protected handlers are added.
- * @param scope - Contract-defined capability required for the decorated route.
+ * 컨트롤러 경로가 요구하는 권한을 Nest 메타데이터로 선언한다.
+ * 가드는 이 선언이 없거나 잘못된 경로를 거부하므로 새 경로에 기본 권한이 생기지 않는다.
+ * @param scope - 공유 계약에 정의된 경로별 위임 권한.
+ * @returns 클래스나 메서드에 권한 메타데이터를 붙이는 데코레이터.
  */
 export const RequireDelegatedScope = (scope: DelegatedScope) => SetMetadata(DELEGATED_SCOPE, scope);

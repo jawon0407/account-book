@@ -127,15 +127,28 @@ Dashboard의 **Connect** 화면에서 연결 경로를 확인하되 URL 전체�
 
 1. Vercel Dashboard에서 **Add New → Project**를 연다.
 2. GitHub의 `jawon0407/account-book`를 선택하되 production deploy는 배포 설정 PR이 merge된 뒤 진행한다.
-3. monorepo web app의 대상은 `apps/web`이다. shared workspace package를 함께 build하도록 root directory와 “source outside root” 설정을 배포 PR에서 검증한다.
+3. monorepo web app의 **Root Directory는 `apps/web`**으로 설정한다. 이 디렉터리의 `vercel.json`이 함수 리전 정책의 기준이다. “Include source files outside of the Root Directory in the Build Step”를 켜고 공유 workspace package의 선행 빌드와 import 해석을 배포 PR에서 검증한다. 현재 프로젝트는 아직 생성하지 않았다.
 4. production branch는 `main`, Preview는 feature branch로 둔다.
-5. Function region은 `iad1`, runtime은 Node.js, app 내부 `maxDuration`은 10초로 유지한다.
+5. `apps/web/vercel.json`의 `regions: ["iad1"]`로 Function region을 지정한다. runtime은 Node.js, route의 `maxDuration`은 10초로 유지한다. deprecated된 `preferredRegion` route export를 다시 추가하지 않는다.
 6. custom domain은 production build와 health/smoke가 준비된 뒤 연결한다.
 7. spend/usage 알림을 켠다.
 
 [Vercel project](https://vercel.com/docs/projects), [environment variables](https://vercel.com/docs/environment-variables)
 
-### 4.2 환경 분리
+### 4.2 리전 설정의 의미와 배포 확인
+
+리전은 서버 함수가 실행되는 지역이다. `apps/web/vercel.json`의 `$schema`는 편집기에서 JSON 설정을 검사할 수 있게 하고, `regions`는 배포할 함수 지역 목록을 지정한다. 단일 `iad1`만 허용하며 함수별 다른 지역, 자동 failover와 멀티리전은 설정하지 않는다. JSON에는 주석이나 secret을 넣지 않는다.
+
+로컬 Next build는 Vercel의 실제 배치 위치를 검증하지 않는다. 다음 항목은 **프로젝트 생성 및 별도 배포 승인 후** 확인한다.
+
+1. Root Directory가 `apps/web`이며 위 설정 파일이 사용되는지 확인한다. 저장소 최상위로 루트를 바꾸려면 파일 위치·공유 패키지 빌드·정책 테스트도 재검토한다.
+2. CLI `--regions`, 함수별 override 또는 failover 설정으로 단일 리전 정책을 우회하지 않는다.
+3. 배포 상세에서 Functions의 실제 지역이 `iad1`인지 확인하고 해당 배포 SHA와 비밀값 없는 증거를 기록한다. 불일치하면 공개를 보류한다.
+4. 정적 파일의 CDN 배포 위치와 서버 함수 실행 지역은 다르다. 이 설정만으로 DB·로그·백업의 저장 위치나 국외 이전 고지 충족을 주장하지 않는다.
+
+[Vercel JSON 위치](https://vercel.com/docs/project-configuration/vercel-json), [Functions 리전 설정](https://vercel.com/docs/functions/configuring-functions/region)
+
+### 4.3 환경 분리
 
 - Production에는 production secret만 둔다.
 - Preview에는 production DB, Supabase project, OAuth credential, JWT private key를 넣지 않는다.

@@ -17,12 +17,11 @@ import {
 } from "./secret-scan.mjs";
 
 /**
- * Runs both repository-contract commands while keeping all child output private.
- *
- * @param {string} rootDir Resolved repository top-level directory.
- * @returns {void}
- * @throws {SecurityGateError} With a fixed diagnostic when either command cannot
- * start, exceeds its output buffer, or exits unsuccessfully.
+ * 저장소 구조 검증 테스트와 실제 구조 검사를 별도 Node 프로세스로 차례대로 실행한다.
+ * 자식 프로세스의 출력은 그대로 공개하지 않아 경로나 비밀값이 오류 로그에 섞이지 않게 한다.
+ * @param {string} rootDir 확인된 저장소 최상위 디렉터리.
+ * @returns {void} 두 검사가 성공하면 반환값 없이 종료한다.
+ * @throws {SecurityGateError} 실행 불가·출력 버퍼 초과·실패 종료이면 고정된 REPOSITORY_CHECK_FAILED 오류.
  */
 function runRepositoryChecks(rootDir) {
   const commands = [
@@ -67,17 +66,12 @@ const PRODUCTION_DEPENDENCIES = Object.freeze({
  */
 
 /**
- * Runs policy, repository-contract, and pushed-blob checks in fail-closed order.
- *
- * Production callers omit `dependencies`; tests and other controlled callers may
- * override individual functions while all unspecified functions retain the
- * production Task 2/3 implementations.
- *
- * @param {{mode: "pre-push"|"ci", rootDir: string, updates?: Array<{localRef: string, localSha: string, remoteRef: string, remoteSha: string}>, eventName?: string, targetRef?: string, base?: string, head?: string}} options Mode-specific policy inputs and repository root.
- * @param {Partial<SecurityGateDependencies>} [dependencies] Optional controlled overrides for policy, range, repository, blob, and secret operations.
- * @returns {{scannedBlobCount: number}} Non-sensitive verification summary.
- * @throws {SecurityGateError} When mode validation, branch policy, repository
- * checks, history/blob inspection, or secret detection fails closed.
+ * 브랜치 정책 → 저장소 구조 → 푸시할 이력의 파일 내용 → 비밀값 패턴 순서로 검사한다.
+ * 하나라도 실패하면 통과로 간주하지 않는다. 기본 구현은 Git 읽기와 구조 검사 프로세스를 실행하지만 푸시하지 않는다.
+ * @param {{mode: "pre-push"|"ci", rootDir: string, updates?: Array<{localRef: string, localSha: string, remoteRef: string, remoteSha: string}>, eventName?: string, targetRef?: string, base?: string, head?: string}} options 실행 모드에 맞는 정책 입력값과 저장소 루트.
+ * @param {Partial<SecurityGateDependencies>} [dependencies] 테스트 등 통제된 호출에서 대체할 함수들. 생략한 항목은 기본 구현을 사용한다.
+ * @returns {{scannedBlobCount: number}} 비밀값을 담지 않는 검사 대상 blob 수 요약.
+ * @throws {SecurityGateError} 모드·브랜치·구조·이력 조회가 잘못되거나 비밀값 패턴이 발견되면 발생한다.
  */
 export function runSecurityGate(options, dependencies = {}) {
   const operations = { ...PRODUCTION_DEPENDENCIES, ...dependencies };

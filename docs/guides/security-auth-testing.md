@@ -1,5 +1,113 @@
 # 인증 보안 테스트 가이드
 
+## 테스트 도구 보안 패치: 2026-09-14
+
+기준 `f7ba1e5`, 브랜치 `hotfix/vitest-security-20260914`. [실행 계획](../superpowers/plans/2026-09-14-vitest-security-patch.md)에 따라 Vitest와 coverage-v8의 `4.1.10`을 `4.1.11`로 함께 올린다. [공식 공지](https://github.com/vitest-dev/vitest/security/advisories/GHSA-82fw-gwwq-j7x9)의 개발 서버 파일 접근 취약점이 대상이며, 운영 금융 데이터 유출을 재현했다는 의미가 아니다.
+
+### 초급 개발자를 위한 변경 원리
+
+`package.json`은 프로젝트가 요구하는 도구와 버전을 선언한다. `pnpm-lock.yaml`은 그 도구가 필요로 하는 간접 패키지 버전과 다운로드 무결성도 고정한다. 따라서 선언만 바꾸지 않고 pnpm으로 lockfile을 함께 갱신해야 한다. coverage-v8은 테스트 실행기의 측정 플러그인이므로 Vitest와 같은 버전으로 맞춘다. 저장소 정책 테스트의 기대 버전도 동기화하되 검사 자체는 유지한다.
+
+설치 시 `--ignore-scripts`는 의존성 설치 스크립트 실행을 막는다. `--frozen-lockfile`은 선언과 lockfile이 어긋나면 실패하게 해 설치 재현성을 확인한다. `pnpm audit`은 개발 의존성까지 포함한 알려진 취약점을, `--prod`는 운영 의존성 범위를 검사한다. 감사 결과 0건은 알려진 공지와 현재 의존성 그래프 기준이지 모든 보안 결함이 없다는 보증이 아니다.
+
+### 실제 검증 기록
+
+- 패치 전 `pnpm test`: 종료 코드 0, 878개(legacy 54 + contracts 66 + database 15 + API 148 + web 510 + E2E preflight 85). `output/vitest-patch-baseline.log`.
+- 패치 전 전체 audit: 종료 코드 1, moderate 2건. 서로 다른 공격 2종이 아니라 같은 공지가 vitest/mocker 두 패키지에 잡힌 결과다. `output/vitest-patch-audit-before.json`.
+- 패치 후 전체 audit 및 운영 audit: 종료 코드 0, 알려진 취약점 0건. `output/vitest-patch-audit-after.json`, `output/vitest-patch-audit-prod.log`.
+- 패치 후 coverage: 웹 510개 테스트 통과, statements 760/809=93.94%, branches 734/799=91.86%, functions 163/169=96.44%, lines 631/645=97.82%. 이전 값과 같으며 branches 임계값 100% 미달로 **종료 코드 1**이다. `output/vitest-patch-coverage.log`. 기준값을 낮추거나 측정 대상을 제외하지 않았다.
+- 정책 테스트는 변경 전 실패를 먼저 실행하지 못했다. 대신 변경 후 이전 커밋의 테스트를 메모리에서 현재 저장소에 연결해 실행했고, 과거 기대값 4.1.10과 실제 4.1.11 불일치로 3개 통과/1개 실패·종료 코드 1을 확인했다. 동기화된 현재 테스트는 4개 통과·종료 코드 0이다. `output/vitest-patch-policy-old-expectation.log`, `output/vitest-patch-policy-green.log`. 이는 **사후 회귀 확인이지 test-first RED가 아니다**. 제품 코드 수정 없이 누락된 실행 순서를 문서화했다.
+- 전체 verify 최초 실행은 `route-wiring.test.ts:52`의 동적 import를 포함한 테스트가 기본 5초 제한을 넘겨 실패했다(웹 509/510). 같은 파일을 단독 실행하면 16/16 통과, 전체 1.71초였다. 코드·timeout 설정은 바꾸지 않았으며 일시적 부하 또는 cold import 지연 가설을 확정 원인으로 표시하지 않는다. `output/vitest-patch-verify.log`, `output/vitest-patch-route-focused.log`.
+- 동일 설정의 **최종 전체 `pnpm verify`는 종료 코드 0**이다. 878개 테스트(54+66+15+148+510+85), lint·6 workspace 타입 검사·API/웹 빌드가 통과했다. `output/vitest-patch-verify-final.log`. 첫 실패를 없던 일로 취급하지 않으며 재발 시 route 동적 import 지연을 별도 분석한다.
+
+위 로그는 Git 제외 경로에 보관한다. 새 제품 함수는 없으며 기존 한국어 함수·매개변수 주석도 변경하지 않는다. 실제 IdP·운영 DB·브라우저 전체 E2E·침투 테스트·배포 후 성능은 이번 검증 범위가 아니다.
+
+## Supabase 어댑터 역할 분리: 2026-09-10 R1
+
+기준 `66a2319`, 기능 브랜치 `feature/auth-adapter-role-split`. 사용자 승인 범위는 인증 동작을 유지한 파일 분리이며 timeout·인증 정책·DB·UI 변경은 포함하지 않는다. [실행 계획](../superpowers/plans/2026-09-10-auth-adapter-role-split.md)
+
+이번에는 기존 동작이 이미 구현돼 있으므로 GREEN(기존 테스트 통과) → 코드 이동 → GREEN(같은 동작 유지) 순서로 검사한다. 실패를 만들기 위해 정상 코드를 일부러 망가뜨리거나, 이동한 함수를 새로운 기능처럼 RED/GREEN으로 표시하지 않는다. 새 기능/결함 수정에는 기존 TDD 원칙을 그대로 적용한다.
+
+- 변경 전: Node 22.15.1/pnpm 11.9.0, web **26파일·510개 테스트 통과**.
+- 선택적 coverage 기준값: branches **733/799 = 91.73%**, 기존 100% threshold 미달로 명령 종료 코드 1. 이는 테스트 실패와 구분되는 기존 품질 격차다.
+- 기록: `output/r1-baseline.log`, `output/r1-baseline-tests.json`, `output/r1-baseline-coverage/coverage-final.json`(Git 제외).
+- 변경 후 최종 focused: 공개 어댑터/파서/오류/포트 4파일 **68/68 통과**, 웹 `tsc --noEmit` 종료 코드 0.
+- 변경 후 최종 web/coverage: **28파일·510/510 통과**. branches **734/799 = 91.86%**, statements 760/809, functions 163/169, lines 631/645. coverage 명령은 여전히 100% threshold 미달로 종료 코드 1이다. 기준값보다 branch 비율이 높아졌지만 테스트를 추가한 결과가 아니므로 보안 향상으로 해석하지 않는다.
+- 기존 어댑터의 24개 최상위 테스트 블록을 최종 TypeScript AST 프린터로 비교해 실행 구문이 모두 동일함을 확인했다. 확장된 64개 테스트 제목도 이동 전후 일치하며, 9개 연결 계약 + 34개 세션 검증 + 21개 오류 정책으로 나뉜다.
+- 공개 생성자/10메서드 시그니처와 이동한 기존 함수 21개의 본문이 구문상 동일하다. 모든 제품 6모듈의 server-only 및 모듈 사이 runtime 순환 참조 없음도 확인했다.
+- 최종 전체 `pnpm verify` 종료 코드0: **878 tests**(legacy54 + contracts66 + database15 + API148 + web510 + E2E preflight85), lint·6 workspace 타입 검사·API/웹 build 통과. 독립 리뷰 결과는 실행 계획에 기록한다. `output/r1-final-verify.log`, `output/r1-final-coverage.log`, `output/r1-final-tests.json`, `output/r1-final-coverage/coverage-final.json`은 Git 제외 로컬 증거다.
+
+기본 SDK 팩토리의 실호출 등 기존 테스트가 실행하지 않던 경로와 나머지 인증/저장소의 미검증 분기는 남아 있다. 파일이 분리됐다고 이 격차가 사라진 것은 아니다. 다음 품질 작업에서는 실제 SDK 전송 경계와 누락 분기를 별도 테스트 계획으로 다룬다. 이번에는 측정 대상을 삭제하거나 threshold를 낮춰 통과시키지 않았다.
+
+독립 task review와 최종 전체 review에서 Critical/Important는 없었다. 최종 리뷰의 Minor 1건은 fixture의 한계·입력/반환 주석이 축약된 부분이다. 한국어 JSDoc 11블록을 복원했고, 주석 제거 후 생성한 실행 코드가 동일하며 focused68/68이 다시 통과했다. 독립 재리뷰에서 해당 지적 해결과 새 결함 없음을 확인했다. 이는 실제 침투 테스트 통과나 보안 결함이 전혀 없다는 보증이 아니다.
+
+주석 복원까지 포함한 인계 대상 전체 `pnpm verify`도878tests·lint·타입·API/웹build 종료코드0을 확인했다. 최종 인계 로그는 `output/r1-handoff-verify.log`다. coverage 수치는 실행 코드가 같은 주석 복원 직전 측정이며, 주석 복원 후 전체 테스트도 그대로 통과했다. R1의 커밋·새 CI·배포 증거는 아직 없다.
+
+테스트의 읽기 순서는 다음과 같다.
+
+1. `supabase-auth-adapter.test.ts`: 공개 메서드의 URL·HTTP 본문/헤더·SDK 생성 옵션·입력 거부와 성공 흐름.
+2. `supabase/session-parser.test.ts`: 잘못된 JWT/사용자/만료값을 어댑터와 실제 이메일 서비스 경로에서 거부하고, 잘못된 응답에 앱 세션을 만들지 않는지 검사.
+3. `supabase/error-mapper.test.ts`: 제공자 오류 비노출, HTTP 상태 우선, 계정 존재 여부 은폐.
+4. `supabase/test-fixtures.ts`: 외부 네트워크 대신 정해진 SDK/HTTP 응답을 공급하는 준비물. JWT 모양 문자열은 실제 서명된 자격 증명이 아니다.
+
+각 테스트의 이름과 단언을 이동 전후 대조한다. 같은 개수라는 사실만으로 의미 보존을 단정하지 않는다. 커버리지에는 새 제품 모듈 5개도 포함하며 fixture만 제외한다. 파일 분리와 함수 추출은 계측 분모를 바꿀 수 있으므로 퍼센트뿐 아니라 빠진 조건과 테스트 시나리오를 함께 본다.
+
+로컬 모의 응답 검증은 실제 Google·Kakao·Naver 로그인, Supabase role/pooler/TLS, 폐기용 PostgreSQL 전체 인증 E2E 또는 침투 테스트의 대체물이 아니다. 이번 작업에서 해당 외부 환경 검증을 새로 수행했다고 표시하지 않는다.
+
+## DB 유휴 연결 오류 경계: 2026-09-09
+
+사용자 승인 A안으로 BFF의 Drizzle 풀과 API의 Nest DI 풀에 유휴 `error` 이벤트 수신을 추가했다. 기준 HEAD는 `afacc4c0f50cd6214bf7231065fa039240e6df9b`이며 검증 대상은 기존 리전 이전도 포함한 **미커밋 작업 트리**다. [상세 계획과 완료 상태](../superpowers/plans/2026-09-09-database-pool-error-boundary.md)
+
+- Baseline: database 12/12, API controller/replay-store 23/23 통과.
+- RED: 새 DB 테스트 3/3이 처리되지 않은 오류 이벤트로 실패했다. API는 테스트 생성자 대역의 비구성 가능 함수 오류를 먼저 수정한 후, 제품 누락에 의해 2개 실패·7개 통과를 확인했다. 대역 작성 오류는 제품 결함으로 계산하지 않는다.
+- GREEN: database 전체 15/15, API controller/replay-store 24/24, 종료 코드 0. 실제 lazy pg.Pool을 사용하되 쿼리·connect를 호출하지 않고 이벤트를 발생시켰다. 실제 네트워크 단절 실험은 아니다.
+- 검사 내용: 최초·반복·중첩 오류 수신, 풀별 독립 진단, 오류/client의 가짜 비밀값 비출력, console.error의 동기 실패 비전파, 기존 API 풀 설정·종료 1회 계약. 테스트 환경변수·spy·module/pool은 정리한다.
+- 전체 `pnpm verify` 종료 코드 0: **878 tests**(legacy/security 54 + contracts 66 + database 15 + API 148 + web 510 + E2E preflight 85), lint·6 workspace 타입 검사·API/웹 build 통과. Node 22.15.1/pnpm 11.9.0 사용.
+- 이번 작업의 DB 스키마·의존성·lockfile·UI 변경 없음. audit 재실행, 실제 DB 재시작/단절, 전체 DB-backed 인증 E2E, 브라우저/FCP, hosted OAuth, 새 CI·배포는 미실행이다. preflight는 실제 E2E의 대체 증거가 아니다.
+- 원시 출력: Git 제외 `output/database-pool-error-verify.log`. 커밋·푸시·PR·병합은 수행하지 않았다.
+- 독립 코드·최종 통합 리뷰에서 Critical·Important 없음. API 테스트 종료 자체가 reject할 경우 뒤의 spy/env 복구가 건너뛰어질 수 있다는 Minor 개선은 후속으로 남겼다. 연결 없는 lazy Pool 테스트에서 재현된 실패는 아니다.
+
+진단은 `DB_POOL_IDLE_ERROR source=bff` 또는 `DB_POOL_IDLE_ERROR source=api`만 풀마다 최초 1회 출력한다. 장애 원문과 client 인수는 읽지 않으며, 반복 로그를 세지 않으므로 장애 횟수 측정 수단으로 사용할 수 없다. 쿼리 실패 차단은 유지하고 자동 재시도·DB 복구 성공을 보장하지 않는다.
+
+## 리전 설정 이전: 2026-09-09
+
+사용자 A안 승인 및 Vercel 프로젝트 미생성 확인 후 향후 Root Directory를 `apps/web`으로 정했다. `feature/vercel-region-policy`에서 단일 `iad1`을 `apps/web/vercel.json`으로 옮기며 Node/dynamic/10초 route 정책과 HTTP·인증 계약은 유지한다. [상세 실행 계획](../superpowers/plans/2026-09-09-vercel-region-policy.md)
+
+이전 보안 업데이트 커밋 `afacc4c0f50cd6214bf7231065fa039240e6df9b`의 [security-gate](https://github.com/jawon0407/account-book/actions/runs/34307677601)는 성공했다. 이 결과는 해당 SHA의 폐기용 DB·인증 E2E·audit 증거이며 이번 미커밋 리전 변경의 CI 증거가 아니다. 아래 보안 업데이트 절에서 CI 확인을 남겨 둔 기록은 이 결과로 보충한다.
+
+리전 이전의 로컬 검증 결과:
+
+- RED: 새 JSON 설정 존재 검증 1개 실패, 기존 focused 테스트 15개 통과. 설정 추가 뒤에도 계획의 상대 경로 오류로 한 차례 실패했으며 실제 웹 루트를 가리키도록 정정했다. 이 중간 실패는 제품 결함으로 계산하지 않는다.
+- GREEN: focused 16/16, `pnpm verify` 종료 코드 0. 전체 874 tests(54 + 66 + 12 + 147 + 510 + 85), lint·6 workspace 타입 검사·API/웹 build 통과. `preferredRegion` deprecated 경고 없음.
+- 14 routes의 Node/dynamic/10초 정책과 기존 지원하지 않는 메서드의 405·no-store 응답 테스트를 유지했다. 신규 검사는 Vercel에 전달할 JSON 정책을 확인하며 hosted 실행을 모의하지 않는다.
+- 패키지·DB·UI 변경 없음. 이번 작업의 브라우저 UI/FCP·DB/전체 인증 E2E·audit 재실행은 하지 않았다. 실제 Vercel 배치, 실제 공급자 OAuth 및 한국망 응답 시간은 아직 검증하지 않았다.
+- 로컬 출력: Git 제외 `output/vercel-region-verify.log`. 새 변경의 커밋·푸시·CI·배포는 하지 않았다.
+
+## 최신 보안 의존성 검증: 2026-09-09
+
+이 절은 아래 과거 SHA별 기록보다 최신이다. 기준 `a36f719`에서 분기한 `hotfix/next-security-20260909`의 미커밋 작업 트리를 검사했다. 사용자 승인에 따라 Next 16.2.11 → 16.3.3, baseline-browser-mapping 2.10.43 → 2.11.0을 적용했다. 실제 운영 배포 증거는 아니다.
+
+- 기존 보안 정책: sharp optional 의존성 제외, PostCSS 8.5.23 및 다른 override 유지. React/Nest/Fastify·인증/DB 로직·디자인은 변경하지 않았다.
+- RED: 정책 테스트 수정 후 4개 중 2개 실패. 기존 Next 버전과 새 lock resolution 누락을 탐지했다. Next만 갱신한 중간 단계에는 baseline 취약 버전 잔존으로 1개가 실패했다.
+- GREEN: scoped baseline override 적용 후 정책 테스트 4/4 통과. 실패 로그에는 신규 테스트가 잠금파일 전체 대신 고정 안내와 boolean 결과를 출력한다.
+- 설치: Node 22.15.1/pnpm 11.9.0, `pnpm install --lockfile-only` 및 `pnpm install --frozen-lockfile` 종료 코드 0. 새 install script 허용은 추가하지 않았다.
+- Next build는 추적 중인 `apps/web/next-env.d.ts`에 생성 타입 `root-params.d.ts` import 1줄을 추가했다. 자동 생성 변경으로 파일 지도에 추가했으며 수동 인증 로직 변경은 없다.
+- `pnpm verify` 종료 코드 0: lint, 6 workspace 타입 검사, API/웹 production build, 테스트 873개(legacy/security 54 + contracts 66 + database unit 12 + API 147 + web 509 + E2E preflight 85).
+- `pnpm audit --prod --json` 종료 코드 0: 알려진 취약점 0건. 업데이트 전 Critical 2·Moderate 1건과 구분한다. 개발 의존성 전체 audit이나 모든 보안 결함 부재를 뜻하지 않는다.
+- `pnpm why`: Next 16.3.3, baseline-browser-mapping 2.11.0 확인. sharp 연결 없음.
+- 독립 변경분 리뷰: 차단 결함·무관한 의존성 변경 없음. 정책 테스트의 peer-qualified snapshot 개별 검사 강화는 선택적 개선으로 남겼다. frozen-lockfile 설치와 전체 검증이 실제 일치 여부를 추가 확인했다.
+- 공개 화면: 루프백 production 서버에서 5페이지/15개 화면 조합 HTTP 200, 가로 넘침 0·axe 위반 0·pageerror 0. 로그인 빈 입력 오류와 이메일 포커스, 공개 링크 이동 4회·콘솔 오류 0을 확인했다. UI 캡처에는 실제 계정·인증정보를 넣지 않았다.
+- FCP: 데스크톱 Chromium 149 화면 폭별 7회. 390px 중앙값/p75 32/32ms, 1440px 52/56ms. 이전 p75 36/40ms와 단순 비교할 수 있으나 warm loopback·CPU/네트워크 무제한 소수 표본이므로 회귀/개선을 단정하지 않는다. 실제 한국망·모바일 측정은 아니다.
+- 로컬 원시 결과: Git 제외 `output/playwright/next-security-20260909/browser-results.json` 및 같은 폴더 캡처. 이전 검사 소스를 재사용했고 별도 검사 의존성이나 테스트 파일은 추가하지 않았다.
+- 폐기용 PostgreSQL 5432 listener가 없어 `test:db`, `prepare:e2e`, 전체 인증 E2E는 미실행. preflight 통과를 그 대체 증거로 사용하지 않는다. 후속 요청으로 커밋/푸시가 승인됐으며 동일 SHA CI 결과를 별도로 확인해야 한다.
+- 전송 전 재검증: `pnpm verify` 및 `pnpm audit --prod --json`을 다시 실행해 종료 코드 0을 확인했다. 독립 전송 준비 리뷰에서 차단 결함은 발견되지 않았다. PR 생성·병합·배포와 리전 이전 구현은 이번 전송 승인에 포함하지 않는다.
+
+### 업데이트에서 새로 확인한 배포 전 검토 항목
+
+Next build가 `preferredRegion` route segment config deprecated 경고를 냈다. 공식 문서는 route export 제거를 안내하지만, 현재 `iad1` 지역 배치 정책의 대체 위치·실제 Vercel 동작을 검증하지 않았으므로 이번 작업에서 설정을 제거하지 않았다. 리전 설정 변경은 별도 계획·승인 후 수행하고, 이 경고와 hosted 검증 미완료 상태를 배포 전에 해소해야 한다. [공식 안내](https://nextjs.org/docs/messages/preferred-region-deprecated)
+
+검증과 잔여 작업의 상세 순서는 [승인된 실행 계획](../superpowers/plans/2026-09-09-next-security-update.md)에 기록했다.
+
 최종 인증·delegated-JWT 구현 SHA는 `93737d3c8278f92242670b403c30cb3beb05b0e2`다. 최종 evidence와 CI check는 `git rev-parse HEAD`의 동일 SHA여야 한다.
 
 GitHub `security-gate` [run 15](https://github.com/jawon0407/account-book/actions/runs/30214338261)는 이 SHA에서 disposable PostgreSQL migration·privilege·replay 검증, Chromium 인증 E2E, pinned Node 22, 전체 verify와 production audit를 통과했다. 같은 tree의 로컬 `pnpm test`도 legacy 53, contracts 22, database 12, API 113, web 479, E2E preflight 2 tests로 종료 코드 `0`이었다.
@@ -194,3 +302,43 @@ matrix는 BFF signer와 API verifier의 real classes, deterministic P-256 key/cl
 rate limit은 browser IP만을 principal로 쓰지 않는다. 인증 principal + route를 기본 key로 하고, 신뢰 가능한 platform-provided IP는 보조 신호로만 사용한다. 이 persistent rate-limit use case는 아직 구현되지 않았다. 담당자는 API owner이고, 기한은 **최초 hosted delegated mutation release 전** abuse test와 운영 관측을 추가하는 것이다. 재검토 조건은 rate-limit backend, route/scope, 또는 trusted platform IP 의미 변경이며 배포 전에 다시 검토한다. BFF 침해 시에도 이미 허용된 scope로 30초 이내 요청이 가능하다는 잔여 위험은 least-privilege scope, one-time replay, key rotation/kill switch, 이 rate-limit 설계로 줄일 뿐 제거하지 못한다.
 
 Fastify body-too-large 413 복구 allowlist는 Fastify `5.10.0`의 고정 message와 Nest `11.1.28` wrapper 동작에 결합돼 있다. 담당자는 API owner이며, 두 dependency 중 하나를 업그레이드하거나 parser/filter 동작을 바꾸기 **전** matrix의 oversized 413·forged 413 fail-closed regression을 다시 실행하고 allowlist를 재검토해야 한다. 이 조건이 충족되기 전 dependency upgrade를 배포하지 않는다.
+
+## 인증 제공자 작업당 5초 제한: 2026-09-15 로컬 증거
+
+이 절의 명령은 Node 22.15.1·pnpm 11.9.0을 PATH 앞에 고정한 동일 작업 트리에서 실행했다. RED에서는 설치된 Supabase SDK를 mock하지 않았고 외부 통신 대신, 주입 대상 fetch와 서로 다른 통제 전역 fallback을 두었다. 따라서 잘못된 팩토리가 실제 인터넷을 사용하지 않으면서도 어느 전송 경로를 선택했는지 구분했다.
+
+| 단계 | 시각(KST)·명령 | 실제 결과 |
+| --- | --- | --- |
+| Task 1 기준 | 구현자 focused deadline/operation, typecheck, lint | 19 tests 통과, 각 종료 코드 0; 요구사항·품질 리뷰 Approved |
+| Task 2 RED | 10:51, `pnpm --filter @account-book/web exec vitest run src/server/auth/supabase/provider-sdk-deadline.test.ts src/server/auth/supabase-auth-adapter-deadline.test.ts` | 2 files, 16 tests 중 15 failed·1 passed, exit 1. 주입 fetch는 0회이고 통제 fallback만 호출돼 SDK 주입 누락을 재현했으며 외부망 요청은 없었다. |
+| Task 2 GREEN | 10:53, RED와 동일 명령 | 2 files, 16/16 passed, exit 0 |
+| 통합·상위 정책 | 10:53, Supabase 디렉터리·adapter·deadline·email/password/session·controller focused 실행 | 11 files, 193/193 passed, exit 0 |
+| 정적 검사 | 10:54, web typecheck / workspace lint | 각각 exit 0 |
+| 전체 verify — 리뷰 round 1 전 | 컨트롤러 실행 | `pnpm verify` exit 0. lint·workspace typecheck·API/Next.js 16.3.3 build 통과; legacy 54 + contracts 66 + database 15 + API 148 + web 545 + E2E preflight 85 = 913 tests 통과 |
+| 전체 coverage — 리뷰 round 1 전 | 2026-09-15 11:01:42 KST, `pnpm --filter @account-book/web exec vitest run --coverage` | 7.41s, 32 files·545 tests 통과. statements 95.01% (839/883), branches 92.54% (757/818), functions 96.92% (189/195), lines 98.73% (704/713). branches 100% gate 미충족으로 exit 1 |
+| SDK pre-map mutation RED | 11:12:04 KST, `pnpm --filter @account-book/web exec vitest run src/server/auth/supabase/provider-sdk-deadline.test.ts -t "gives the real SDK a fixed 408"` | 1 file, 1 failed·1 passed·5 skipped, exit 1. 본문 버퍼링 우회 시 실제 SDK body 오류 status가 기대 408 대신 0인 차이만 실패 |
+| SDK pre-map GREEN | 11:12:32 KST, `pnpm --filter @account-book/web exec vitest run src/server/auth/supabase/provider-sdk-deadline.test.ts src/server/auth/supabase/provider-operation.test.ts` | 2 files, 22/22 passed, exit 0; 11:12:41 web typecheck와 11:12:52 workspace lint도 exit 0 |
+| 보완 전 verify — 리뷰 round 1 후 | 컨트롤러 재실행 | `pnpm verify` exit 0. lint·workspace typecheck·API/web build 통과; legacy 54 + contracts 66 + database 15 + API 148 + web 547 + E2E preflight 85 = 915 tests 통과. malformed JSON 최종 보완 전 증거 |
+| 보완 전 coverage — 리뷰 round 1 후 | 2026-09-15 11:16:03 KST, `pnpm --filter @account-book/web exec vitest run --coverage` | 7.45s, 32 files·547 tests 통과. statements 95.01% (839/883), branches 92.54% (757/818), functions 96.92% (189/195), lines 98.73% (704/713). branches 100% gate 미충족으로 exit 1. 최종 보완 전 증거 |
+| malformed JSON RED | 11:31:02 KST, SDK/operation/adapter-deadline 3파일 | 54 tests 중 8 failed·46 passed, exit 1. 실제 SDK HTTP 200 pre-map status 0·원문 일부, 400/401/429 parse 원문 및 429 분류 손실, 디코딩 마감 누락 재현 |
+| malformed JSON GREEN | 11:31:47 KST, 동일 명령 | 54/54 passed, exit 0. `provider-operation.ts`의 구문 보호만 제품 수정 |
+| 최종 보완 focused/정적 검사 | 11:32:34 KST, 빈 429 SDK 사례 추가 후 | 3 files·55/55 passed, web typecheck·workspace lint exit 0. 앞선 test-only TS2683은 `this: TextDecoder` 명시 후 해결 |
+| 최종 보완 인증/상위 정책 | 11:33:04 KST, Supabase·adapter·email/password/session·controller | 11 files·217/217 passed, exit 0 |
+| 보완 후 최종 verify | 컨트롤러 `pnpm verify` | exit 0. lint·workspace typecheck·API/web build 및 legacy 54 + contracts 66 + database 15 + API 148 + web 569 + E2E preflight 85 = 937 tests 통과 |
+| 보완 후 최종 coverage | 11:36:18 KST, 컨트롤러 `pnpm --filter @account-book/web exec vitest run --coverage` | 7.59s, 32 files·569/569 passed. statements 94.84% (846/892), branches 92.48% (763/825), functions 96.93% (190/196), lines 98.47% (711/722). branches 100% gate 때문에 exit 1 |
+
+실제 SDK 검사는 원시 전송 오류와 본문 읽기 오류 각각에서 unmocked SDK의 반환값을 adapter `dataOf`·오류 매핑 전에 직접 관찰한다. data는 정확히 `{ user: null, session: null }`, error는 status 408·message `AUTH_PROVIDER_UNAVAILABLE`이며 원시 canary가 message에 없고 `console.error` 호출도 없어야 한다. 이는 최종 adapter 오류만 확인하던 최초 테스트가 놓친 **SDK-facing safe response**를 직접 증명한다. 별도 사례는 주입된 작업 신호가 헤더·본문 정지 모두에서 정확히 5초에 abort되고, SDK refresh backoff가 남아 있어도 마감 뒤 전송 횟수가 늘지 않는지 확인한다.
+
+이 단언은 mock-only 검사가 아니다. `provider-operation.ts`의 본문 `arrayBuffer` 읽기와 안전한 응답 재생성을 임시로 우회한 뒤 실제 auth-js 2.110.7을 실행하자 transport 사례는 통과하고 body 사례만 status 0 대 408로 실패했다. 제품 파일은 apply-patch로 즉시 원복했고 전후 SHA-256 `760F0EB6080752E0525E3900A775507797F785F6C021FC62B0EE25D88D4711D2`가 일치했다.
+
+어댑터 검사는 가입·복구 요청·메일 확인·OAuth·복구 교환·로그인·갱신의 영구 대기를 표 기반으로 제한하고, 직접 HTTP는 정확히 1회, SDK 대역 경로의 별도 HTTP seam은 0회임을 확인한다. `setSession` 4초 후의 `signOut`·`updateUser`가 남은 1초만 사용하며, 6초에 끝난 늦은 `setSession`은 후속 호출을 시작하지 않는다. 기존 사용자 불일치, 429, 메일 미확인, PKCE, 계정 열거 방지와 상위 claim/세션 폐기/회전 정책 테스트는 삭제하거나 완화하지 않았다.
+
+review round 1 전 전체 verify 원본 로그는 `.superpowers/sdd/2026-09-15-auth-provider-deadline/full-verify.log`, coverage 원본 로그는 같은 디렉터리의 `coverage.log`다. 인계용 복사본은 `output/auth-provider-deadline-full-verify.log`와 `output/auth-provider-deadline-coverage.log`이며 913개·545개는 수정 전 역사다. round 1 뒤 `output/auth-provider-deadline-final-verify.log`와 `output/auth-provider-deadline-final-coverage.log`의 915개·547개도 malformed JSON 최종 보완 전 결과다. 파일명에 final이 있어도 보완 후 소스의 검증으로 재사용하지 않는다.
+
+최종 보완 회귀의 fixture는 스트림이 정상 종료된 실제 `Response`의 JSON 구문만 손상시킨다. SDK 모듈은 그대로 실행하고 adapter 매핑 전에 SDK 결과를 별도로 관찰하므로 mock 반환값 자체를 검사하지 않는다. 잘못된 비-429 본문은 SDK에 고정 408·`AUTH_PROVIDER_UNAVAILABLE`만 전달되고 실제 429는 잘못된/빈 본문에도 고정 429·`AUTH_RATE_LIMITED`를 유지한다. 직접 HTTP 가입/복구의 malformed 429도 제한 오류로 남는다. 별도 정상 fixture는 유효 JSON 로그인·자격 증명/미인증 분류, 빈 200/204/205 logout, 304 무본문, 원본 JSON 바이트 보존을 확인한다. 디코딩 시 단조 시계를 정확히 5초로 옮기는 테스트는 SDK에 원래 성공 응답을 넘기지 않는지 확인한다. 새 endpoint 스키마·크기 제한·의존성은 없다. 정확한 RED/GREEN 명령과 출력은 `.superpowers/sdd/2026-09-15-auth-provider-deadline/final-fix-report.md`를 따른다.
+
+보완 전 coverage 명령의 테스트 자체는 모두 통과했지만 gate는 실패했다. 당시 branches 92.54%는 과거 91.86%보다 개선됐어도 100% 기준에는 미달했고 기준을 낮추지 않았다. 당시 신규 `provider-operation.ts`도 branch coverage 90%여서 남은 격차 전체를 기존 코드 탓으로 설명하지 않았다.
+
+현재 보완 후 최종 근거는 `output/auth-provider-deadline-json-guard-verify.log`와 `output/auth-provider-deadline-json-guard-coverage.log`다. 전체 verify 937개는 통과했지만 coverage branches는 92.48% (763/825)로 100% gate를 여전히 충족하지 못한다. `provider-operation.ts` 자체도 branches 94.11%·lines 100%이므로 새로운 분기 격차를 숨기지 않는다. coverage 실패는 테스트 실패가 아니라 유지된 기준 미달이다. scoped 최종 재검토는 APPROVED이며 malformed JSON Important finding은 해결됐다. 새 결함이나 범위 밖 변경은 없다는 판정이고 coverage gate 실패는 면제되지 않았다.
+
+이 증거는 fake timer와 통제된 fetch를 사용한 로컬 회귀 검사와 전체 정적·단위·사전 검증이다. 실제 hosted IdP/DB 전체 E2E, 배포 네트워크의 취소, 실제 브라우저 여정, 한국망 지연 p95, 의존성 audit를 이번 실행에서 측정했다고 주장하지 않는다. 구현 전 64개 인증·94개 상위 정책 기준선도 현재 통합 소스의 전체 성공 증거가 아니라 역사적 비교값으로만 보존한다.

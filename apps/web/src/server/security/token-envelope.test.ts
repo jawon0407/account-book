@@ -14,16 +14,39 @@ const recordId = "123e4567-e89b-12d3-a456-426614174000";
 const context: TokenContext = { recordId, tokenKind: "access" };
 const keyring: TokenKeyring = { currentKeyId: "current.key", keys: new Map([["current.key", randomBytes(32)]]) };
 
+/**
+ * 암호화 함수가 존재하는지 먼저 확인하고 기본 테스트 컨텍스트·키로 호출합니다.
+ * @param plaintext 암호화할 테스트 토큰.
+ * @param tokenContext 암호문을 묶을 레코드·용도.
+ * @param keys 테스트 암호화 키 보관함.
+ * @returns 생성된 토큰 봉투.
+ * @throws 실제 암호화 함수의 검증 오류.
+ */
 function encrypt(plaintext = "provider-token", tokenContext = context, keys = keyring): TokenEnvelope {
   expect(encryptToken).toBeTypeOf("function");
   return encryptToken?.(plaintext, tokenContext, keys) as TokenEnvelope;
 }
 
+/**
+ * 복호화 함수의 존재를 확인하고 지정 컨텍스트·키로 봉투를 해독합니다.
+ * @param envelope 시험할 암호화 봉투.
+ * @param tokenContext 복호화에 요구할 레코드·용도.
+ * @param keys 테스트 복호화 키 보관함.
+ * @returns 복원된 원문.
+ * @throws 실제 복호화 함수의 검증 오류.
+ */
 function decrypt(envelope: unknown, tokenContext = context, keys = keyring): string {
   expect(decryptToken).toBeTypeOf("function");
   return decryptToken?.(envelope, tokenContext, keys) as string;
 }
 
+/**
+ * 고정 봉투 오류 타입·메시지와 민감값 비노출을 함께 검사합니다. 여러 assertion에서 작업을 반복 실행합니다.
+ * @param action 실패해야 하는 동기 암호화/복호화 작업.
+ * @param values 오류 메시지에서 제외되어야 하는 값 목록.
+ * @returns 검증 후 값 없이 종료합니다.
+ * @throws 예상 오류나 비노출 조건과 다르면 테스트 실패.
+ */
 function expectSafeFailure(action: () => unknown, ...values: string[]): void {
   expect(TokenEnvelopeError).toBeTypeOf("function");
   expect(action).toThrow(TokenEnvelopeError);
@@ -38,6 +61,11 @@ function expectSafeFailure(action: () => unknown, ...values: string[]): void {
   }
 }
 
+/**
+ * 암호문 구성요소 끝 문자를 바꾸어 손상된 봉투 사례를 만듭니다.
+ * @param value 변조할 base64url 문자열.
+ * @returns 마지막 글자가 바뀐 문자열.
+ */
 function mutateBase64url(value: string): string {
   const last = value.at(-1);
   return `${value.slice(0, -1)}${last === "A" ? "B" : "A"}`;

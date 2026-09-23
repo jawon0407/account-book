@@ -36,14 +36,20 @@ export type DelegatedRequestInput = Readonly<{
   requestId: string;
 }>;
 
+/**
+ * 요청 정규화 실패를 입력 내용 없는 하나의 오류로 통일한다.
+ * @returns 정상 반환하지 않는다.
+ * @throws 항상 DELEGATED_REQUEST_INVALID 오류.
+ */
 function invalid(): never {
   throw new Error("DELEGATED_REQUEST_INVALID");
 }
 
 /**
- * Normalizes the only content types accepted by protected internal APIs to prevent ambiguous request bindings.
- * @param value Raw `Content-Type` header value, or `null` when the header is absent.
- * @returns The canonical content type used in the delegated request binding.
+ * 같은 JSON 콘텐츠 유형의 허용 표기를 통일해 BFF와 API가 같은 서명 대상 문자열을 만들게 한다.
+ * @param value - 원시 Content-Type 헤더. 헤더가 없으면 null.
+ * @returns 부재는 빈 문자열, 허용 JSON은 application/json. 입력은 변경하지 않는다.
+ * @throws 제어문자, 지원하지 않는 유형이나 매개변수이면 DELEGATED_REQUEST_INVALID 오류.
  */
 export function normalizeDelegatedContentType(value: string | null): "" | "application/json" {
   if (value === null) return "";
@@ -54,9 +60,11 @@ export function normalizeDelegatedContentType(value: string | null): "" | "appli
 }
 
 /**
- * Builds the cross-runtime request-binding string without hashing or reading secrets, rejecting ambiguous inputs.
- * @param input Validated request data to bind to a delegated JWT.
- * @returns The newline-delimited canonical request representation.
+ * 메서드·정규화 URL·콘텐츠 유형·본문 해시·요청 ID를 줄바꿈으로 이어 요청 결합 문자열을 만든다.
+ * URL 쿼리 키를 정렬해 런타임 양쪽이 같은 표현을 사용하게 하며 외부 호스트와 fragment는 거부한다.
+ * @param input - 위임 JWT에 묶을 요청 정보. 본문 해시는 호출자가 이미 계산해야 한다.
+ * @returns 다섯 필드를 줄바꿈으로 연결한 문자열. 이 함수는 해시나 서명을 계산하지 않는다.
+ * @throws 메서드·해시·UUID·URL·콘텐츠 유형이 허용 범위를 벗어나면 고정 요청 오류.
  */
 export function canonicalDelegatedRequest(input: DelegatedRequestInput): string {
   const method = MethodSchema.safeParse(input.method);

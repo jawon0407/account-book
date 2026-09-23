@@ -8,12 +8,24 @@ const oauthStartMutationOptions = module.oauthStartMutationOptions as ((client: 
 
 const user = { id: "123e4567-e89b-12d3-a456-426614174001", email: "person@example.test", emailVerified: true };
 
+/**
+ * 인증 조회의 성공 JSON 또는 실패 Promise를 재현하는 HTTP 응답 대역이다.
+ * @param value 성공 응답 값 또는 reject할 오류 객체.
+ * @param failure true이면 json()을 거절하고 false이면 값을 반환한다.
+ * @returns 호출 기록을 보유한 mock json 메서드. 실제 HTTP는 발생하지 않는다.
+ */
 function result(value: unknown, failure = false) {
   return { json: vi.fn(async () => failure ? Promise.reject(value) : value) };
 }
 
+/**
+ * 인증 갱신 분기를 검사할 공개 오류 응답을 Error에 붙인다.
+ * @param code 테스트할 공개 인증 오류 코드. 대응하는 고정 메시지를 선택한다.
+ * @param status 합성 Response의 HTTP 상태 번호.
+ * @returns response 속성이 붙은 Error. 운영 오류 생성 함수가 아닌 테스트 도우미다.
+ */
 function apiFailure(code: string, status: number) {
-  return Object.assign(new Error("untrusted"), { response: new Response(JSON.stringify({ code, message: "Safe message", requestId: "request-123", retryable: false, fieldErrors: [] }), { status, headers: { "Content-Type": "application/json" } }) });
+  return Object.assign(new Error("untrusted"), { response: new Response(JSON.stringify({ code, message: code === "AUTH_SESSION_EXPIRED" ? "The session has expired." : code === "AUTH_SESSION_REFRESH_REQUIRED" ? "The session must be refreshed." : code === "AUTH_CSRF_REJECTED" ? "The request could not be verified." : "The authentication input was rejected.", requestId: "123e4567-e89b-12d3-a456-426614174011", retryable: false, fieldErrors: [] }), { status, headers: { "Content-Type": "application/json" } }) });
 }
 
 describe("authentication queries", () => {

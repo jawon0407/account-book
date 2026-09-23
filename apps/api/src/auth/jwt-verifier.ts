@@ -41,6 +41,7 @@ export type DelegatedJwtVerifierOptions = Readonly<{
   acceptedKids: readonly string[];
   keyring: Readonly<Record<string, VerificationKey>>;
   replayStore: ReplayStore;
+  /** @returns 검증에 사용할 현재 시각. 생략하면 시스템 시계를 사용하며 테스트에서 고정할 수 있다. */
   now?: () => Date;
 }>;
 
@@ -50,17 +51,18 @@ export const ACCESS_TOKEN_VERIFIER = Symbol("ACCESS_TOKEN_VERIFIER");
 /** Request-principal verification port accepting only a token bound to the current request. */
 export interface AccessTokenVerifier {
   /**
-   * Verifies a request-bound delegated token.
-   * @param input - Delegated token and the one HTTP request it authorizes.
-   * @returns A frozen verified principal.
-   * @throws A fixed invalid-token or unavailable error without token-derived detail.
+   * 현재 요청에 묶인 위임 토큰을 검증하는 공개 호출 규약이다.
+   * @param input - 토큰, 실제 HTTP 요청 정보, 경로가 요구하는 권한.
+   * @returns 검증이 완료된 동결된 사용자·세션·권한·요청 ID 정보.
+   * @throws 토큰 오류 또는 검증 불가 오류. 토큰 내부 내용은 오류에 포함하지 않는다.
+   * @remarks 구현은 성공 전에 재사용 차단 저장소에 토큰 사용 사실을 기록한다.
    */
   verify(input: VerifyDelegatedTokenInput): Promise<AuthPrincipal>;
 }
 
 /** Fixed non-secret failure used for malformed, invalid, expired, mismatched, or replayed delegated tokens. */
 export class InvalidAccessTokenError extends Error {
-  /** Creates a detail-free invalid-token failure suitable for safe HTTP mapping. */
+  /** 토큰이나 클레임 내용을 담지 않는 고정 인증 실패 객체를 만든다. */
   public constructor() {
     super("AUTH_ACCESS_TOKEN_INVALID");
     this.name = "InvalidAccessTokenError";
@@ -69,14 +71,21 @@ export class InvalidAccessTokenError extends Error {
 
 /** Fixed non-secret failure used when verification is disabled or a required dependency cannot operate. */
 export class AccessTokenVerificationUnavailableError extends Error {
-  /** Creates a detail-free unavailable failure without preserving dependency details. */
+  /** 내부 의존성 오류를 담지 않는 고정 검증 불가 객체를 만든다. */
   public constructor() {
     super("AUTH_VERIFICATION_UNAVAILABLE");
     this.name = "AccessTokenVerificationUnavailableError";
   }
 }
 
-/** Decodes one canonical base64url field to its exact expected byte length. */
+/**
+ * base64url 값을 디코딩하고 다시 인코딩해 같은 바이트의 다른 표기를 거부한다.
+ * @param value - 토큰에서 읽은 미검증 필드값.
+ * @param pattern - 해당 필드에 허용할 문자와 문자열 길이 정규식.
+ * @param byteLength - 디코딩된 결과가 정확히 가져야 할 바이트 수.
+ * @returns 표기와 길이 검증을 통과한 바이트 배열.
+ * @throws 검사 실패 시 InvalidAccessTokenError.
+ */
 function decodeCanonicalBase64url(value: unknown, pattern: RegExp, byteLength: number): Uint8Array {
   if (typeof value !== "string" || !pattern.test(value)) throw new InvalidAccessTokenError();
   const bytes = Buffer.from(value, "base64url");
@@ -84,7 +93,13 @@ function decodeCanonicalBase64url(value: unknown, pattern: RegExp, byteLength: n
   return bytes;
 }
 
-/** Validates strict scalar, canonical claims after JOSE authenticates the payload. */
+/**
+ * 서명이 검증된 JWT 내용도 다시 검사해 발급자·수신자·30초 수명·식별자·경로 권한을 제한한다.
+ * @param payload - JOSE 서명 검증을 거친 토큰 내용. 필수 필드는 별도 검사한다.
+ * @param requiredScope - 이 경로에 필요한 정확한 위임 권한.
+ * @returns 토큰 ID, 요청 결합 해시, 발급 시각, 동결된 사용자 정보.
+ * @throws 필수 값, UUID, 시간 관계, 권한, 인코딩이 맞지 않으면 InvalidAccessTokenError.
+ */
 function validateClaims(payload: Record<string, unknown>, requiredScope: DelegatedScope): Readonly<{ jti: string; binding: Uint8Array; principal: AuthPrincipal; iat: number }> {
   const required = ["aud", "exp", "iat", "iss", "jti", "nbf", "rbh", "rid", "scp", "sid", "sub"];
   if (!required.every((claim) => Object.hasOwn(payload, claim))) throw new InvalidAccessTokenError();
@@ -119,7 +134,12 @@ function validateClaims(payload: Record<string, unknown>, requiredScope: Delegat
   };
 }
 
-/** Builds the exact SHA-256 request-binding digest from the request without accepting ambiguous forms. */
+/**
+ * 실제 본문의 SHA-256을 계산하고 정규 요청 문자열을 다시 SHA-256으로 해시한다.
+ * @param request - 메서드, URL, 콘텐츠 유형, 원문 바이트, 요청 ID.
+ * @returns JWT의 rbh와 비교할 32바이트 해시. 요청이나 저장소는 변경하지 않는다.
+ * @throws 요청 정규화가 실패하면 원래 오류 대신 InvalidAccessTokenError.
+ */
 function requestBinding(request: DelegatedRequestDescriptor): Uint8Array {
   try {
     const bodySha256 = createHash("sha256").update(request.body).digest("base64url");
@@ -138,23 +158,29 @@ function requestBinding(request: DelegatedRequestDescriptor): Uint8Array {
   }
 }
 
-/** Recognizes JOSE errors caused by attacker-controlled token data rather than local dependency failure. */
+/**
+ * JOSE 계열 오류인지 분류해 토큰 거부와 운영 장애의 응답 구분에 사용한다.
+ * @param error - JWT 검증 중 발생한 임의의 오류.
+ * @returns JOSEError의 인스턴스이면 true.
+ */
 function isInvalidJoseError(error: unknown): boolean {
   return error instanceof errors.JOSEError;
 }
 
 /**
- * Verifies static-key ES256 delegated JWTs against exactly one bound request and consumes their replay identifier once.
- * @param options - Kill switch, immutable key snapshot source, replay store, and injected wall clock.
- * @returns A verifier that fails closed without contacting an identity provider.
- * @throws Construction does not retain mutable keyring or accepted-kid views.
+ * 로컬 공개키로 ES256 위임 JWT를 검증하고 실제 요청과 일치할 때 토큰 사용을 한 번만 허용한다.
+ * 인증 제공자에 조회하지 않으며 DB 재사용 차단까지 성공해야 사용자 정보를 돌려준다.
  */
 export class DelegatedJwtVerifier implements AccessTokenVerifier {
   private readonly acceptedKids: ReadonlySet<string>;
   private readonly keyring: ReadonlyMap<string, VerificationKey>;
   private readonly now: () => Date;
 
-  /** Captures immutable snapshots of all server-owned verifier dependencies. */
+  /**
+   * 허용 키 목록과 공개키 맵을 복사해 이후 원본 목록 변경이 검증에 영향을 주지 않게 한다.
+   * @param options - 인증 중지 스위치, 키 설정, 재사용 차단 저장소, 선택적 시계.
+   * @remarks 저장소와 options 자체는 참조하며 생성 시 DB에 쓰거나 토큰을 검증하지 않는다.
+   */
   public constructor(private readonly options: DelegatedJwtVerifierOptions) {
     this.acceptedKids = new Set(options.acceptedKids);
     this.keyring = new Map(Object.entries(options.keyring));
@@ -162,10 +188,11 @@ export class DelegatedJwtVerifier implements AccessTokenVerifier {
   }
 
   /**
-   * Validates header, signature, strict claims, request binding, then atomically consumes the replay identifier.
-   * @param input - A delegated token with the request it must authorize.
-   * @returns A frozen principal only after replay storage accepts the token exactly once.
-   * @throws Fixed invalid-token failures for all token problems and fixed unavailable failures for disabled/operational state.
+   * 헤더 → ES256 서명 → 필수 클레임 → 실제 요청 해시 → 토큰 재사용 차단 순서로 검사한다.
+   * @param input - 위임 토큰과 그 토큰이 승인해야 하는 실제 요청 및 경로 권한.
+   * @returns 재사용 저장소가 최초 사용을 인정한 뒤의 동결된 사용자 정보.
+   * @throws 잘못된 토큰·불일치·재사용은 InvalidAccessTokenError, 중지 스위치·운영 장애는 검증 불가 오류.
+   * @remarks 성공 시 토큰 ID의 SHA-256을 DB에 기록한다. 컨트롤러 처리 전부터 같은 토큰을 다시 쓸 수 없다.
    */
   public async verify(input: VerifyDelegatedTokenInput): Promise<AuthPrincipal> {
     if (this.options.authDisabled) throw new AccessTokenVerificationUnavailableError();

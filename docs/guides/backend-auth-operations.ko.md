@@ -1,5 +1,7 @@
 # How to: 인증 백엔드와 DB 경계를 검증하는 방법
 
+> 2026-09-08: 아래 coverage·Task별 수치는 당시 결과다. 현재 확인한 HEAD CI는 899개 테스트 기록이며 [문서 지도](../README.md)에서 최신 범위를 확인한다. 이번 문서·주석 작업은 운영 DB나 브라우저/실제 기기 테스트를 실행하지 않는다. 이 가이드의 명령은 별도의 검증 작업 시 사용하는 절차다.
+
 > **English Summary:** Validate the implemented 14-route Next.js authentication BFF and delegated-JWT API with the pinned runtime, strict server configuration, tests, production builds, and security gates. Same-SHA disposable PostgreSQL and Chromium CI evidence exists; hosted Supabase, provider OAuth, and production operations remain release blockers. Optional branch coverage is currently 91.78%.
 
 이 가이드는 현재 구현된 server auth domain, persistence adapter, Next.js same-origin BFF와 browser client를 재현 가능하게 검증하는 절차다. 실제 credential이나 production data를 사용하는 live smoke 절차는 제공하지 않는다.
@@ -149,7 +151,7 @@ pnpm --filter @account-book/web build
 pnpm --filter @account-book/web test:coverage
 ```
 
-최종 full web 검증은 25개 파일, 479개 test가 통과했다. 별도 coverage 명령의 최신 기록은 기존 Task 5~9 instrumentation 범위에서 branch `91.78%`(`670/730`)이며 global 100% threshold 때문에 종료 코드 `1`이다. 이후 controller/container/route/client와 delegated-JWT 파일 일부는 아직 coverage include 밖이다. 이를 “test 실패”나 “100% 통과”로 기록하지 말고 coverage gate 미충족으로 분리한다.
+Task 13 당시 full web 검증은 25개 파일, 479개 test였다. 2026-09-08 기준 HEAD의 web 테스트 기록은 509개이며 이번 문서 작업에서 새 coverage 측정은 하지 않았다. 과거 optional coverage는 Task 5~9 instrumentation 범위에서 branch `91.78%`(`670/730`), global 100% threshold 때문에 종료 코드 `1`이었다. 이후 추가 파일을 포함한 현재 전체 coverage로 확대 해석하지 않는다.
 
 ## 5. security gate 실행
 
@@ -203,7 +205,7 @@ git config --local --get core.hooksPath
 
 ### 현재 test coverage
 
-이 명령은 migration **001만** 읽어 실행한다. 다음을 실제 PostgreSQL에서 검사한다.
+foundation·replay migration의 권한/제약과 replay 동작을 두 DB 테스트 파일에서 검사한다. foundation 검사 항목은 다음과 같다.
 
 - 초기 네 table과 column
 - browser-facing role과 `PUBLIC` 권한 거부
@@ -211,7 +213,7 @@ git config --local --get core.hooksPath
 - default privilege가 미래 table 권한을 자동 부여하지 않음
 - 초기 session/OAuth/recovery/rate-limit constraint
 
-002의 final exact return path, staged recovery, confirmation table과 003의 issuance gate는 package의 정적 source test만 있다. 001→002→003 전체 live migration 검증으로 오해하지 않는다.
+별도 `tests/database/prepare-auth-e2e.ts`는 인증 001→002→003→202607230001 replay 전체를 폐기용 DB에 적용하고 CI의 Chromium 인증 체인에 연결한다. 이는 실제 Supabase hosted 권한·pooler 검증은 아니다.
 
 ### 환경 변수가 없을 때
 
@@ -236,7 +238,7 @@ Provider별 hosted smoke 결과는 **미실행**이며 운영 출시와 인증 �
 
 ## 8. migration 적용 전 운영 체크리스트
 
-저장소에는 현재 migration 적용 script가 없다. 운영 도구의 명령을 추정해 문서에 넣지 말고, 승인된 Supabase/PostgreSQL migration runner가 파일명 순서대로 001→002→003을 적용하게 한다.
+현재 폐기용 E2E DB 준비 script는 있지만 production migration workflow는 미구현이다. 운영은 승인된 실행자가 SHA 고정 GitHub Actions one-off 또는 Heroku one-off에서 production migration secret만 사용해 인증 001→002→003→replay를 파일명 순서대로 적용할 계획이다. 구체 runner·승인·실행 로그를 구축하기 전에는 앱 시작 시 자동 실행하거나 E2E 파괴적 준비 script를 운영에 사용하지 않는다.
 
 ### 적용 전
 
@@ -252,7 +254,8 @@ Provider별 hosted smoke 결과는 **미실행**이며 운영 출시와 인증 �
 
 ### 적용 후
 
-- [ ] `app_private`에 최종 6개 table이 존재한다.
+- [ ] `app_private`에 인증 6개 table과 `api_jwt_replays`가 존재한다.
+- [ ] `app_api`는 replay INSERT만 가능하고 BFF 인증 table 접근은 거부되며, BFF는 replay table에 접근하지 못한다.
 - [ ] 32바이트 digest check, exact provider/return path, recovery stage/order, nonnegative minimum/version/count constraint가 존재한다.
 - [ ] active provider session partial unique index가 존재한다.
 - [ ] `app_session_bff`는 schema usage와 여섯 table CRUD만 가지며 schema create, truncate, references, trigger 권한은 없다.

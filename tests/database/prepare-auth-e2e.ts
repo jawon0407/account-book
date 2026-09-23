@@ -49,17 +49,19 @@ type DatabaseAdmin = Readonly<{
 
 type CreateAdmin = (connectionString: string) => DatabaseAdmin;
 
+/**
+ * 폐기용 DB 준비에 사용할 pg Client를 생성한다.
+ * @param connectionString - prepareAuthE2e가 허용한 로컬 테스트 DB 접속 문자열이다.
+ * @returns 아직 connect하지 않은 관리자 클라이언트. 실제 연결은 호출자가 시작한다.
+ */
 const createPostgresAdmin: CreateAdmin = (connectionString) => new Client({ connectionString });
 
 /**
- * Rebuilds only the exact local disposable authentication schema, roles, and ordered migrations.
- * The guarded local database receives a fixed synthetic `app_api` password only after its
- * postgres owner and exact database name have been verified; no production credential is accepted.
- * @param environment - Must contain the exact disposable flag and reviewed local test database URL.
- * @param createAdmin - Injectable PostgreSQL admin factory used by focused tests; production code uses `pg.Client`.
- * @returns Nothing after migrations and the disposable-only runtime password are applied.
- * @throws Fixed configuration/admin errors before destructive work; database failures propagate only
- * to the CLI's fixed stderr boundary without being logged here.
+ * 정확히 지정된 폐기용 DB의 인증 schema·역할을 재생성하고 migration을 순서대로 적용한다.
+ * @param environment - TEST_DATABASE_DISPOSABLE=true와 고정 로컬 TEST_DATABASE_URL이 필요하다.
+ * @param createAdmin - DB 관리자 생성 함수. 기본 pg Client, 테스트에서는 대역을 주입한다.
+ * @returns 준비 완료 Promise. 계정/DB 이름을 확인한 뒤 schema 삭제와 역할 재생성, 테스트 비밀번호 설정을 수행한다.
+ * @throws 설정 불일치·postgres 소유자 불일치는 파괴적 작업 전에 거부한다. DB 오류를 전파하며 finally에서 연결을 닫는다.
  */
 export async function prepareAuthE2e(
   environment: Readonly<Record<string, string | undefined>> = process.env,

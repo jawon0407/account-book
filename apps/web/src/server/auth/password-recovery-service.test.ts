@@ -40,11 +40,22 @@ class RecoveryRepository {
   public events: string[] = [];
   public revokedSessions = 0;
 
+  /**
+   * 복구 저장 순서를 기록하고 식별자 해시를 복사해 초기 레코드를 보관합니다.
+   * @param record 저장할 초기 복구 레코드.
+   * @returns 값 없이 완료합니다.
+   */
   public async createRecoveryTransaction(record: RecoveryRecord): Promise<void> {
     this.events.push("create");
     this.record = { ...record, interactionHash: Uint8Array.from(record.interactionHash) };
   }
 
+  /**
+   * 브라우저·기한·대기 상태를 비교해 코드 교환을 한 번 선점하는 메모리 대역입니다.
+   * @param interactionHash 기대 브라우저 해시.
+   * @param claimedAt 선점 시각.
+   * @returns 선점 레코드 또는 조건 불일치 시 null.
+   */
   public async claimRecoveryExchange(interactionHash: Uint8Array, claimedAt: Date): Promise<RecoveryRecord | null> {
     this.events.push("claim-exchange");
     const row = this.record;
@@ -57,6 +68,11 @@ class RecoveryRepository {
     return this.record;
   }
 
+  /**
+   * 기대 선점 시각과 단계를 검사한 뒤 PKCE 비밀값을 지우고 복구 자격 증명을 저장합니다.
+   * @param input 대상 ID·기대 선점 시각·사용자·암호문·완료 시각.
+   * @returns 상태가 변경되면 true, 조건이 다르면 false.
+   */
   public async promoteRecoveryExchange(input: { transactionId: string; expectedExchangeClaimedAt: Date; userId: string; encryptedRecoveryToken: TokenEnvelope; now: Date }): Promise<boolean> {
     this.events.push("promote");
     const row = this.record;
@@ -65,6 +81,12 @@ class RecoveryRepository {
     return true;
   }
 
+  /**
+   * 코드 교환이 끝난 유효 레코드의 비밀번호 변경을 한 번 선점합니다.
+   * @param interactionHash 기대 브라우저 해시.
+   * @param claimedAt 갱신 선점 시각.
+   * @returns 선점 레코드 또는 null.
+   */
   public async claimRecoveryPasswordUpdate(interactionHash: Uint8Array, claimedAt: Date): Promise<RecoveryRecord | null> {
     this.events.push("claim-update");
     const row = this.record;
@@ -77,6 +99,11 @@ class RecoveryRepository {
     return this.record;
   }
 
+  /**
+   * 복구 ID·사용자·선점 시각·기한을 확인해 소비하고 세션 폐기 횟수에 3을 더해 외부 부작용을 모사합니다.
+   * @param input 복구 소비 조건과 기준 시각.
+   * @returns 소비 성공 시 true; 조건 불일치 시 false.
+   */
   public async consumeRecoveryAndRevokeSessions(input: { transactionId: string; userId: string; expectedPasswordUpdateClaimedAt: Date; now: Date }): Promise<boolean> {
     this.events.push("consume-and-revoke");
     const row = this.record;
@@ -87,6 +114,10 @@ class RecoveryRepository {
   }
 }
 
+/**
+ * 고정 난수와 메모리 복구 저장소, 단계별 실패를 지정할 수 있는 제공자 대역을 연결합니다.
+ * @returns 복구 서비스·저장소·제공자와 요청 컨텍스트.
+ */
 function setup() {
   const repository = new RecoveryRepository();
   const provider = {
@@ -95,17 +126,35 @@ function setup() {
     updateFailure: null as AuthProviderError | null,
     recoveryResult: { accessToken, refreshToken, user: { id: userId, email: "person@example.test", emailVerified: true } } as unknown,
     calls: { request: [] as unknown[], exchange: [] as unknown[], update: [] as unknown[] },
+    /**
+     * 복구 메일 요청 인자와 실행 순서를 기록하고 선택한 실패를 재현합니다.
+     * @param args 이메일·콜백 URL·PKCE 챌린지 인자 목록.
+     * @returns 실패 설정이 없으면 값 없이 완료합니다.
+     * @throws requestFailure에 지정한 오류.
+     */
     requestPasswordReset: vi.fn(async (...args: unknown[]) => {
       repository.events.push("provider-request");
       provider.calls.request.push(args);
       if (provider.requestFailure) throw provider.requestFailure;
     }),
+    /**
+     * 복구 코드 교환 입력과 순서를 기록하며 미리 지정한 복구 결과를 반환합니다.
+     * @param input 복구 코드와 PKCE 검증값.
+     * @returns recoveryResult 테스트 응답.
+     * @throws exchangeFailure에 지정한 오류.
+     */
     exchangeRecoveryCode: vi.fn(async (input: unknown) => {
       repository.events.push("provider-exchange");
       provider.calls.exchange.push(input);
       if (provider.exchangeFailure) throw provider.exchangeFailure;
       return provider.recoveryResult;
     }),
+    /**
+     * 비밀번호 변경 요청과 실행 순서를 기록하는 대역이며 실제 비밀번호는 바꾸지 않습니다.
+     * @param input 복구 토큰·사용자·새 비밀번호.
+     * @returns 실패가 없으면 값 없이 완료합니다.
+     * @throws updateFailure에 지정한 오류.
+     */
     updatePassword: vi.fn(async (input: unknown) => {
       repository.events.push("provider-update");
       provider.calls.update.push(input);
@@ -118,6 +167,12 @@ function setup() {
   return { repository, provider, service, context };
 }
 
+/**
+ * 복구 시작과 코드 교환을 순서대로 실행해 비밀번호 변경 직전 상태를 준비합니다.
+ * @param subject setup이 만든 테스트 환경.
+ * @returns 코드 교환 완료 후 값 없이 종료합니다.
+ * @throws 준비 과정의 서비스 오류.
+ */
 async function exchanged(subject: ReturnType<typeof setup>): Promise<void> {
   await subject.service.start("person@example.test", subject.context);
   await subject.service.exchange({ code: "recovery-code" }, { ...subject.context, now: new Date(now.getTime() + 1_000) });

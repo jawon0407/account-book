@@ -19,8 +19,8 @@ const eslintConfigPath = join(rootDir, "eslint.config.mjs");
 
 const expectedDevDependencies = {
   typescript: "6.0.3",
-  vitest: "4.1.10",
-  "@vitest/coverage-v8": "4.1.10",
+  vitest: "4.1.11",
+  "@vitest/coverage-v8": "4.1.11",
   eslint: "10.7.0",
   "@eslint/js": "10.0.1",
   "typescript-eslint": "8.64.0",
@@ -50,8 +50,9 @@ const approvedPackageLocalSkipLibCheck = [
 ];
 
 const expectedWorkspaceOverrides = {
-  "next@16.2.11>sharp": "-",
-  "next@16.2.11>postcss": "8.5.23",
+  "next@16.3.3>sharp": "-",
+  "next@16.3.3>postcss": "8.5.23",
+  "next@16.3.3>baseline-browser-mapping": "2.11.0",
   "nanoid@3.3.16": "3.3.18",
   "find-my-way@9.6.0": "9.7.0",
   "@nestjs/platform-fastify@11.1.28>fastify": "5.12.3",
@@ -59,6 +60,11 @@ const expectedWorkspaceOverrides = {
   "fast-uri@4.1.2": "4.1.4",
 };
 
+/**
+ * 디렉터리를 재귀 탐색해 tsconfig 이름 패턴에 맞는 파일을 모은다.
+ * @param directory - 탐색할 시작 디렉터리.
+ * @returns 일치한 파일 경로 목록. 읽기 실패는 파일 시스템 오류로 전파된다.
+ */
 function tsconfigFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name);
@@ -69,15 +75,18 @@ function tsconfigFiles(directory) {
   });
 }
 
+/**
+ * apps·packages·tests 아래의 TypeScript 설정을 모두 모아 우회 설정을 검사할 준비를 한다.
+ * @returns 저장소 하위 tsconfig 파일 경로 목록.
+ */
 function workspaceTsconfigFiles() {
   return ["apps", "packages", "tests"].flatMap((directory) => tsconfigFiles(join(rootDir, directory)));
 }
 
 /**
- * Extracts the top-level scalar entries from the workspace `overrides` map.
- *
- * @param {string} workspace The pnpm workspace YAML source to inspect.
- * @returns {Record<string, string>} The exact quoted selector-to-value entries in `overrides`.
+ * overrides 블록의 따옴표로 둘러싼 단순 키·값을 읽어 의존성 강제 버전을 비교한다.
+ * @param {string} workspace 검사할 pnpm 워크스페이스 YAML 원문.
+ * @returns {Record<string, string>} 선택자와 강제값의 맵. 블록 누락이나 예상 밖 문법은 테스트 실패.
  */
 function workspaceScalarOverrides(workspace) {
   const overrideBlock = workspace.match(/^overrides:\r?\n((?: {2}[^\r\n]+\r?\n?)*)/mu)?.[1];
@@ -96,11 +105,9 @@ function workspaceScalarOverrides(workspace) {
 }
 
 /**
- * Verifies that both lockfile graphs resolve the production dependencies to
- * reviewed patch versions and retain no package entry for the vulnerable versions.
- *
- * @param {string} lockfile The generated pnpm lockfile source.
- * @returns {void}
+ * lockfile의 packages·snapshots 양쪽에서 검토한 패치 버전이 있고 취약 버전 표기가 없는지 단언한다.
+ * @param {string} lockfile 생성된 pnpm lockfile 원문. 이 함수는 파일을 변경하지 않는다.
+ * @returns {void} 일치하면 반환값 없이 종료한다. 섹션 누락·버전 불일치는 테스트 실패.
  */
 function assertPatchedProductionResolutions(lockfile) {
   const packagesStart = lockfile.indexOf("packages:");
@@ -152,7 +159,7 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
 
   assert.deepEqual(pkg.devDependencies, expectedDevDependencies);
   assert.equal(apiPackage.dependencies.fastify, "5.12.3");
-  assert.equal(webPackage.dependencies.next, "16.2.11");
+  assert.equal(webPackage.dependencies.next, "16.3.3");
   assert.equal(
     e2ePackage.scripts["test:preflight"],
     "tsx --test production-fake-startup.test.ts playwright-environment.test.ts playwright-config.test.ts auth-response-policy.test.ts ui-facade-boundary.test.ts support/safe-ui-error.test.ts support/transport-tripwire.test.ts support/safe-ui-test.test.ts",
@@ -208,7 +215,7 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
       }),
   );
   assert.deepEqual(allowBuilds, { esbuild: true });
-  // Next 16.2.11 pulls sharp 0.34.5 only as an optional image optimizer.
+  // Next 16.3.3 declares sharp only as an optional image optimizer.
   // The app has no next/image usage, so keep that unused native dependency absent.
   // Its production PostCSS dependency and Fastify stack are pinned to patched releases.
   assert.deepEqual(workspaceScalarOverrides(workspace), expectedWorkspaceOverrides);
@@ -227,6 +234,16 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
   assert.doesNotMatch(eslintConfig, /\.\.\.tseslint\.configs\.recommended,\s/);
   assert.equal(existsSync(join(rootDir, "packages", "config", "package.json")), false);
   assert.match(readFileSync(configReadmePath, "utf8"), /non-package placeholder/i);
+});
+
+test("Next security update excludes audited vulnerable resolutions", () => {
+  // 생성된 잠금파일을 검사해 승인 버전 누락·취약 버전 또는 불필요한 이미지 의존성 재유입을 막는다.
+  // 콜백 매개변수는 없으며 파일 읽기 외에 설치나 네트워크 부작용은 없다.
+  const lockfile = readFileSync(lockfilePath, "utf8");
+  assert.equal(/^ {2}next@16\.3\.3:/mu.test(lockfile), true, "patched Next resolution must exist");
+  assert.equal(/^ {2}next@16\.2\.11:/mu.test(lockfile), false, "audited vulnerable Next must be absent");
+  assert.equal(/^ {2}baseline-browser-mapping@2\.10\.43:/mu.test(lockfile), false, "audited vulnerable browser mapping must be absent");
+  assert.equal(/^ {2}sharp@/mu.test(lockfile), false, "unused native image optimizer must remain absent");
 });
 
 test("workspace policy detects unapproved local TypeScript config overrides", () => {

@@ -20,6 +20,13 @@ const user = { id: "123e4567-e89b-12d3-a456-426614174001", email: "person@exampl
 const delegatedRequestId = "123e4567-e89b-42d3-a456-426614174004";
 const delegatedToken = "delegated-fixture-token";
 
+/**
+ * POST이면 기본 CSRF·출처 헤더를 채우고 호출자가 준 헤더로 덮어씁니다. URL은 일부러 다른 출처로 만들어 컨트롤러가 설정 출처만 신뢰하는지 시험합니다.
+ * @param path 요청 경로.
+ * @param init 메서드·본문·덮어쓸 헤더 등 Request 설정.
+ * @param selected 기본 상호작용 쿠키 식별자; 빈 문자열이면 넣지 않습니다.
+ * @returns ReadableStream의 duplex 설정까지 적용한 테스트 Request.
+ */
 function request(path: string, init: RequestInit = {}, selected = selector): Request {
   const headers = new Headers();
   if (init.method === "POST") {
@@ -36,44 +43,125 @@ function request(path: string, init: RequestInit = {}, selected = selector): Req
   return new Request(`https://spoofed.example.test${path}`, { ...init, ...duplex, headers } as RequestInit & { duplex?: "half" });
 }
 
+/**
+ * 청크를 순서대로 내보내고 취소 여부를 조회할 수 있는 본문 스트림을 만듭니다.
+ * @param chunks 내보낼 바이트 청크 목록.
+ * @returns body 스트림과 현재 취소 상태를 반환하는 wasCanceled 함수.
+ */
 function trackedStream(chunks: readonly Uint8Array[]) {
   let index = 0;
   let canceled = false;
   const body = new ReadableStream<Uint8Array>({
+    /**
+     * 다음 청크를 전달하고 더 이상 청크가 없으면 스트림을 닫는 대역입니다.
+     * @param controller 청크 추가·종료를 제어하는 스트림 컨트롤러.
+     * @returns 청크 처리 후 값 없음.
+     */
     pull(controller) {
       const chunk = chunks[index++];
       if (chunk === undefined) controller.close();
       else controller.enqueue(chunk);
     },
+    /**
+     * 읽기 취소가 호출됐음을 기록해 본문 크기 초과 시 취소 동작을 검증합니다.
+     * @returns 취소 플래그를 바꾼 뒤 값 없음.
+     */
     cancel() { canceled = true; },
   });
   return { body, wasCanceled: () => canceled };
 }
 
+/**
+ * 고정 시각·쿠키 생성기와 이메일·OAuth·복구·세션·제공자 대역을 실제 컨트롤러에 연결합니다.
+ * @param overrides 오류·설정 경계 시험을 위해 바꿀 의존성.
+ * @returns 컨트롤러·각 대역·실행 순서 기록 배열.
+ */
 function setup(overrides: Record<string, unknown> = {}) {
   const events: string[] = [];
   const email = {
+    /**
+     * 가입 호출 순서를 기록하고 전달된 컨텍스트를 응답에 보존하는 대역입니다.
+     * @param _input 사용하지 않는 가입 입력.
+     * @param context 서비스에 전달된 콜백 컨텍스트.
+     * @returns 접수 표시와 컨텍스트.
+     */
     signUp: vi.fn(async (_input, context) => { events.push("sign-up"); return { accepted: true, context }; }),
+    /**
+     * 외부 로그인 없이 정상 공개 세션 결과를 반환하는 대역입니다.
+     * @returns 고정 사용자·새 식별자·2분 접근 만료·하루 절대 만료 정보.
+     */
     signIn: vi.fn(async () => ({ selector: freshSelector, user, accessTokenExpiresAt: new Date(now.getTime() + 120_000), absoluteExpiresAt: new Date(now.getTime() + 86_400_000) })),
+    /**
+     * 외부 메일 확인 없이 정상 공개 세션 결과를 반환합니다.
+     * @returns 고정 사용자·새 식별자·만료 정보.
+     */
     confirmEmail: vi.fn(async () => ({ selector: freshSelector, user, accessTokenExpiresAt: new Date(now.getTime() + 120_000), absoluteExpiresAt: new Date(now.getTime() + 86_400_000) })),
   };
   const oauth = {
+    /**
+     * OAuth 시작 순서를 기록하고 테스트 인증 URL과 받은 컨텍스트를 반환합니다.
+     * @param _provider 사용하지 않는 제공자 ID.
+     * @param context 서버가 만든 OAuth 시작 컨텍스트.
+     * @returns 테스트 인증 URL과 컨텍스트.
+     */
     start: vi.fn(async (_provider, context) => { events.push("oauth-start"); return { authorizationUrl: new URL("https://provider.example.test/authorize?state=provider-secret-state"), context }; }),
+    /**
+     * 실제 코드 교환 없이 앱 복귀 경로가 포함된 정상 OAuth 결과를 만듭니다.
+     * @returns 공개 세션 정보와 /app 복귀 경로.
+     */
     complete: vi.fn(async () => ({ selector: freshSelector, user, accessTokenExpiresAt: new Date(now.getTime() + 120_000), absoluteExpiresAt: new Date(now.getTime() + 86_400_000), returnPath: "/app" })),
   };
   const recovery = {
+    /**
+     * 복구 시작 순서를 기록하고 요청 컨텍스트를 돌려주는 대역입니다.
+     * @param _email 사용하지 않는 이메일.
+     * @param context 서비스에 전달된 복구 컨텍스트.
+     * @returns 접수 표시와 컨텍스트.
+     */
     start: vi.fn(async (_email, context) => { events.push("reset-start"); return { accepted: true, context }; }),
+    /**
+     * 실제 복구 코드 교환 없이 준비 완료 결과를 반환합니다.
+     * @returns ready: true.
+     */
     exchange: vi.fn(async () => ({ ready: true })),
+    /**
+     * 실제 비밀번호 변경 없이 성공 결과를 반환합니다.
+     * @returns updated: true.
+     */
     update: vi.fn(async () => ({ updated: true })),
   };
   const sessions = {
+    /**
+     * 컨트롤러 응답에 비밀값이 섞이지 않는지 시험하도록 서버 전용 가짜 토큰을 포함한 세션을 반환합니다.
+     * @returns 가짜 접근·갱신 토큰과 정상 내부 세션 메타데이터.
+     */
     resolve: vi.fn(async () => ({ accessToken: "server-access-jwt", refreshToken: "server-refresh-token", sessionId: "123e4567-e89b-12d3-a456-426614174002", userId: user.id, supabaseSessionId: "123e4567-e89b-12d3-a456-426614174003", accessTokenExpiresAt: new Date(now.getTime() + 120_000), rotationVersion: 0 })),
+    /**
+     * 실제 제공자 갱신 없이 성공 상태를 반환합니다.
+     * @returns status가 refreshed인 결과.
+     */
     refresh: vi.fn(async () => ({ status: "refreshed" })),
+    /**
+     * 로컬 폐기 호출 순서를 기록하고 성공을 반환합니다. 실제 저장소는 변경하지 않습니다.
+     * @returns true.
+     */
     revokeCurrent: vi.fn(async () => { events.push("local-revoke"); return true; }),
+    /**
+     * 제공자 폐기 실패 후 보류 기록이 호출된 순서를 남깁니다.
+     * @returns 기록 후 값 없음.
+     */
     markRevocationPending: vi.fn(async () => { events.push("pending"); }),
   };
+  /**
+   * signOut 대역은 외부 로그아웃 대신 provider-sign-out 이벤트를 기록합니다. 로컬 폐기와 외부 폐기의 순서를 검사하기 위한 객체입니다.
+   */
   const provider = { signOut: vi.fn(async () => { events.push("provider-sign-out"); }) };
   const delegatedApiClient = {
+    /**
+     * 내부 API 요청을 기록하고 사용자 JSON을 반환합니다. 금지된 상위 Set-Cookie를 일부러 넣어 그대로 전달되지 않는지 시험합니다.
+     * @param input 컨트롤러가 만든 위임 API 요청.
+     * @returns 사용자 JSON과 테스트용 Set-Cookie를 가진 Response.
+     */
     request: vi.fn(async (input: DelegatedApiRequest) => {
       void input;
       return new Response(JSON.stringify(user), { status: 200, headers: { "Content-Type": "application/json", "Set-Cookie": "upstream=forbidden" } });
@@ -97,11 +185,23 @@ function setup(overrides: Record<string, unknown> = {}) {
   return { controller, email, oauth, recovery, sessions, provider, delegatedApiClient, events };
 }
 
+/**
+ * 세션 쿠키가 필요한 세 엔드포인트를 동일 조건으로 호출합니다. refresh에만 POST와 빈 JSON을 사용합니다.
+ * @param subject 컨트롤러 테스트 환경.
+ * @param endpoint session·me·refresh 중 시험할 작업.
+ * @returns 선택한 엔드포인트의 Response.
+ */
 async function callSessionEndpoint(subject: ReturnType<typeof setup>, endpoint: "session" | "me" | "refresh"): Promise<Response> {
   if (endpoint === "refresh") return subject.controller.refresh!(request("/api/auth/session/refresh", { method: "POST", body: "{}", headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
   return subject.controller[endpoint]!(request(endpoint === "me" ? "/api/me" : "/api/auth/session", { headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
 }
 
+/**
+ * 인증 응답의 캐시 방지 헤더가 모두 정확한지 확인합니다.
+ * @param response 검사할 컨트롤러 응답.
+ * @returns 검증 후 값 없음.
+ * @throws 헤더가 다르면 테스트 실패.
+ */
 function expectNoStore(response: Response): void {
   expect(response.headers.get("Cache-Control")).toBe("private, no-store");
   expect(response.headers.get("Pragma")).toBe("no-cache");
@@ -337,10 +437,15 @@ describe("AuthController", () => {
     expect(malformed.status).toBe(502);
     expect(await malformed.json()).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: false });
 
-    subject.delegatedApiClient.request.mockResolvedValueOnce(new Response(JSON.stringify({ code: "AUTH_SESSION_EXPIRED", message: "Upstream message", requestId: "upstream-request", retryable: false, fieldErrors: [] }), { status: 418 }));
+    subject.delegatedApiClient.request.mockResolvedValueOnce(new Response(JSON.stringify({ code: "AUTH_SESSION_EXPIRED", message: "The session has expired.", requestId: "123e4567-e89b-12d3-a456-426614174010", retryable: false, fieldErrors: [] }), { status: 418 }));
     const unexpectedStatus = await subject.controller.me!(request("/api/me", { headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
     expect(unexpectedStatus.status).toBe(401);
     expect(await unexpectedStatus.json()).toMatchObject({ code: "AUTH_SESSION_EXPIRED", retryable: false });
+
+    subject.delegatedApiClient.request.mockResolvedValueOnce(new Response(JSON.stringify({ code: "LEDGER_NOT_FOUND", message: "The requested ledger resource was not found.", requestId: "123e4567-e89b-12d3-a456-426614174010", retryable: false, fieldErrors: [] }), { status: 404 }));
+    const ledgerError = await subject.controller.me!(request("/api/me", { headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
+    expect(ledgerError.status).toBe(502);
+    expect(await ledgerError.json()).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: false });
 
     subject.delegatedApiClient.request.mockRejectedValueOnce(new Error("internal network detail"));
     const unavailable = await subject.controller.me!(request("/api/me", { headers: { Cookie: `__Host-ab_session=${selector}` } }, ""));
