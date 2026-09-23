@@ -63,8 +63,8 @@
 
 **Interfaces:** `requestSupabaseAuth(config, fetcher, url, body)`, `safeUrl(value, allowDevelopmentHttp)`, `mappedProviderError(value, status?, pkce?)`, `runProviderOperation(fetcher, work)`, `accepted(value)`, `tokenPair(value)`를 기존 export 그대로 호출한다.
 
-- [ ] 기준 coverage 명령을 실행해 종료 코드 1과 분기 목록을 저장한다. 이미 존재하는 동작의 보완 테스트는 처음부터 통과할 수 있다. 이를 새 기능의 RED라고 부르지 않는다.
-- [ ] 새 HTTP 테스트에 다음 독립 기대값을 사용한다. 이 테스트는 성공 JSON 파싱 실패를 허용하거나 실패 상태를 잃으면 깨져야 한다.
+- [x] 기준 coverage 명령을 실행해 종료 코드 1과 분기 목록을 저장한다. 이미 존재하는 동작의 보완 테스트는 처음부터 통과할 수 있다. 이를 새 기능의 RED라고 부르지 않는다.
+- [x] 새 HTTP 테스트에 다음 독립 기대값을 사용한다. 이 테스트는 성공 JSON 파싱 실패를 허용하거나 실패 상태를 잃으면 깨져야 한다.
 
 ```typescript
 import { expect, it, vi } from "vitest";
@@ -82,11 +82,11 @@ it.each([200, 503])("handles malformed JSON with status %s", async (status) => {
 });
 ```
 
-- [ ] `safeUrl("not-a-url", false)`가 `AUTH_PROVIDER_UNAVAILABLE`로 거부되는 사례를 추가한다.
-- [ ] `providerCode`에 null/배열/문자열/숫자 code를 넣어 빈 코드로 처리되는지 검사한다. `mappedProviderError({code:"same_password"})`는 `AUTH_OAUTH_TRANSACTION_INVALID`; 상태·code 없는 객체는 `AUTH_PROVIDER_UNAVAILABLE`이다.
-- [ ] `accepted({error:{status:429}})`가 rate-limit 오류인지, `accepted({})`가 오류 없이 끝나는지 검사한다. JWT 헤더/서명 구간 `"A"`(빈 디코드)와 `"Zh"`(비정규 재인코딩)를 정상 session fixture에 각각 넣고 고정 오류로 거부한다.
-- [ ] `Request`에 controller.signal을 넣고 init 인자를 생략해 `operation.fetch(request)`를 호출한다. fetch 대기 중 controller.abort()를 호출하고 고정 오류·내부 전송 취소·타이머 정리를 확인한다. 원래 Request/controller를 구현이 임의로 변경하지 않아야 한다.
-- [ ] `pnpm --filter @account-book/web exec vitest run src/server/auth/supabase` 실행 후 coverage 재측정. 변경한 기대값과 실제 오류·부수효과를 대조하고 커밋한다.
+- [x] `safeUrl("not-a-url", false)`가 `AUTH_PROVIDER_UNAVAILABLE`로 거부되는 사례를 추가한다.
+- [x] `providerCode`에 null/배열/문자열/숫자 code를 넣어 빈 코드로 처리되는지 검사한다. `mappedProviderError({code:"same_password"})`는 `AUTH_OAUTH_TRANSACTION_INVALID`; 상태·code 없는 객체는 `AUTH_PROVIDER_UNAVAILABLE`이다.
+- [x] `accepted({error:{status:429}})`가 rate-limit 오류인지, `accepted({})`가 오류 없이 끝나는지 검사한다. JWT 헤더/서명 구간 `"A"`(빈 디코드)와 `"Zh"`(비정규 재인코딩)를 정상 session fixture에 각각 넣고 고정 오류로 거부한다.
+- [x] `Request`에 controller.signal을 넣고 init 인자를 생략해 `operation.fetch(request)`를 호출한다. fetch 대기 중 controller.abort()를 호출하고 고정 오류·내부 전송 취소·타이머 정리를 확인한다. 원래 Request/controller를 구현이 임의로 변경하지 않아야 한다.
+- [x] `pnpm --filter @account-book/web exec vitest run src/server/auth/supabase` 실행 후 coverage 재측정. 변경한 기대값과 실제 오류·부수효과를 대조하고 커밋한다.
 
 ## Task 2 — 인증 서비스·어댑터·세션 경계 (25개 분기)
 
@@ -98,7 +98,7 @@ it.each([200, 503])("handles malformed JSON with status %s", async (status) => {
 
 **Interfaces:** 기존 `setup()`/`subject()` 및 생성자 주입점을 사용한다. production private 함수를 export하거나 테스트 전용 메서드를 제품 클래스에 넣지 않는다.
 
-- [ ] email 테스트의 기존 setup/validInput을 사용해 callback 거부를 고정한다.
+- [x] email 테스트의 기존 setup/validInput을 사용해 callback 거부를 고정한다.
 
 ```typescript
 it.each([
@@ -113,14 +113,14 @@ it.each([
 });
 ```
 
-- [ ] URL 대신 문자열을 넘기는 비정상 런타임 입력, 잘못된 Date, 잘못된 interaction selector, 잘못된 생성 UUID, 최대 Date+15분 오버플로를 각 생성자/공개 메서드에서 검증한다. 정상 localhost HTTP도 허용되는 경로를 확인한다.
-- [ ] 가입·로그인의 잘못된 입력은 `AUTH_INVALID_CREDENTIALS`; 메일 확인의 없는 transaction/다른 interactionHash/잘못된 consumedAt/15분이 아닌 수명은 `AUTH_OAUTH_TRANSACTION_INVALID`인지 확인한다. 세션 생성이 없어야 한다.
-- [ ] 가입의 `AUTH_EMAIL_VERIFICATION_REQUIRED`도 `{accepted:true}`로 계정 존재를 숨기는지 검사한다. 알 수 없는 하위 오류는 원문을 노출하지 않아야 한다.
-- [ ] 가짜 제공자의 필수 result null, bridge의 401·누락 Content-Type·잘못된 JSON/사용자·만료 토큰을 검사한다. 기본 fetch 경로는 `vi.stubGlobal("fetch", controlledFetcher)`로 제한하고 반드시 restore한다. 실제 네트워크는 사용하지 않는다.
-- [ ] Supabase adapter의 잘못된 가입 이메일, 복구 이메일, 짧은 새 비밀번호를 넣어 provider 호출 전에 고정 오류가 나는지 검사한다.
-- [ ] SessionService refresher가 null/문자열을 throw하면 unavailable로 정규화되는지 검사한다. 생성자 clock을 생략하고 fake system time에서 refresh를 실행해 완료 시각 기반 만료 처리를 검사한다.
-- [ ] 기본 시계 및 기본 ID 생성 경로는 실제 전역 시간을 고정해 재현하고 테스트 후 복원한다. default 경로만 밟고 결과를 검사하지 않는 테스트는 쓰지 않는다.
-- [ ] 해당 테스트 파일들을 실행하고 coverage 재측정 후 커밋한다. 발견한 제품 결함은 재현 테스트를 먼저 남기고 별도 범위를 보고한다.
+- [x] URL 대신 문자열을 넘기는 비정상 런타임 입력, 잘못된 Date, 잘못된 interaction selector, 잘못된 생성 UUID, 최대 Date+15분 오버플로를 각 생성자/공개 메서드에서 검증한다. 정상 localhost HTTP도 허용되는 경로를 확인한다.
+- [x] 가입·로그인의 잘못된 입력은 `AUTH_INVALID_CREDENTIALS`; 메일 확인의 없는 transaction/다른 interactionHash/잘못된 consumedAt/15분이 아닌 수명은 `AUTH_OAUTH_TRANSACTION_INVALID`인지 확인한다. 세션 생성이 없어야 한다.
+- [x] 가입의 `AUTH_EMAIL_VERIFICATION_REQUIRED`도 `{accepted:true}`로 계정 존재를 숨기는지 검사한다. 알 수 없는 하위 오류는 원문을 노출하지 않아야 한다.
+- [x] 가짜 제공자의 필수 result null, bridge의 401·누락 Content-Type·잘못된 JSON/사용자·만료 토큰을 검사한다. 기본 fetch 경로는 `vi.stubGlobal("fetch", controlledFetcher)`로 제한하고 반드시 restore한다. 실제 네트워크는 사용하지 않는다.
+- [x] Supabase adapter의 잘못된 가입 이메일, 복구 이메일, 짧은 새 비밀번호를 넣어 provider 호출 전에 고정 오류가 나는지 검사한다.
+- [x] SessionService refresher가 null/문자열을 throw하면 unavailable로 정규화되는지 검사한다. 생성자 clock을 생략하고 fake system time에서 refresh를 실행해 완료 시각 기반 만료 처리를 검사한다.
+- [x] 기본 시계 및 기본 ID 생성 경로는 실제 전역 시간을 고정해 재현하고 테스트 후 복원한다. default 경로만 밟고 결과를 검사하지 않는 테스트는 쓰지 않는다.
+- [x] 해당 테스트 파일들을 실행하고 coverage 재측정 후 커밋한다. 발견한 제품 결함은 재현 테스트를 먼저 남기고 별도 범위를 보고한다.
 
 ## Task 3 — DB 결과·복구 트랜잭션 경계 (26개 분기)
 
@@ -131,13 +131,13 @@ it.each([
 
 **Interfaces:** 기존 FakeDatabase/subject/query 및 session fixture를 테스트 전용 파일로 이동한다. 동일 이름과 호출 계약을 유지한다. 기존 파일은 세션 저장·회전 테스트를 유지하고 OAuth/email/recovery 테스트를 새 거래 테스트 파일로 옮긴다. `*.test-fixtures.ts`는 제품 import가 없어야 한다.
 
-- [ ] 기존 테스트를 변경 없이 실행해 기준 결과를 기록한다.
-- [ ] fixture와 거래 테스트를 기계적으로 분리한 후 동일 테스트 수와 통과를 확인한다. 테스트 추가는 분리 검증 후에 진행한다.
-- [ ] 잘못된 DB 값 null/배열/문자열, 유효한 행이 0개 또는 2개인 결과를 각각 주입하고 null 반환을 확인한다.
-- [ ] 생성 함수의 consumedAt null/Date 저장값과 복사 여부를 검사한다. DB 소비 결과의 consumedAt null/Date 양쪽도 실제 매핑 결과로 검증한다.
-- [ ] 유효하지 않은 digest/now/transactionId/userId/expected claim 시각을 claim·promote·consume에 넣는다. 결과 null/false와 SQL 쓰기가 없음을 함께 검사한다.
-- [ ] 복구 상태의 시간 순서를 표로 검사한다: 소비가 password claim보다 이른 값, 만료 시각과 같은 값, 단계별 날짜 대신 문자열, 비밀번호 claim 없이 소비된 상태. 각 case는 null이어야 한다. 정상 소비 상태의 모든 날짜 복사도 확인한다.
-- [ ] 다음 실패 경로는 사용자 보안 상태 잠금 누락 시 세션 폐기를 진행하면 깨지는 테스트다. 기존 subject/상수를 이동한 fixture에서 import한다.
+- [x] 기존 테스트를 변경 없이 실행해 기준 결과를 기록한다.
+- [x] fixture와 거래 테스트를 기계적으로 분리한 후 동일 테스트 수와 통과를 확인한다. 테스트 추가는 분리 검증 후에 진행한다.
+- [x] 잘못된 DB 값 null/배열/문자열, 유효한 행이 0개 또는 2개인 결과를 각각 주입하고 null 반환을 확인한다.
+- [x] 생성 함수의 consumedAt null/Date 저장값과 복사 여부를 검사한다. DB 소비 결과의 consumedAt null/Date 양쪽도 실제 매핑 결과로 검증한다.
+- [x] 유효하지 않은 digest/now/transactionId/userId/expected claim 시각을 claim·promote·consume에 넣는다. 결과 null/false와 SQL 쓰기가 없음을 함께 검사한다.
+- [x] 복구 상태의 시간 순서를 표로 검사한다: 소비가 password claim보다 이른 값, 만료 시각과 같은 값, 단계별 날짜 대신 문자열, 비밀번호 claim 없이 소비된 상태. 각 case는 null이어야 한다. 정상 소비 상태의 모든 날짜 복사도 확인한다.
+- [x] 다음 실패 경로는 사용자 보안 상태 잠금 누락 시 세션 폐기를 진행하면 깨지는 테스트다. 기존 subject/상수를 이동한 fixture에서 import한다.
 
 ```typescript
 it("stops session revocation if the user security gate cannot be locked", async () => {
@@ -151,9 +151,9 @@ it("stops session revocation if the user security gate cannot be locked", async 
 });
 ```
 
-- [ ] consume 결과 0행/2행이면 false이며 user security state/session 쓰기가 없어야 한다.
-- [ ] 단위 대역은 실제 롤백·동시성을 보장하지 않음을 기록한다. 별도 disposable PostgreSQL 통합 테스트는 최종 CI에서 실행한다.
-- [ ] 두 repository 테스트 파일 실행 및 coverage 100% 확인 후 커밋한다. 도달 불가능 분기가 남으면 증거와 원인을 보고하고 기준 제외/제품 변경으로 임의 우회하지 않는다.
+- [x] consume 결과 0행/2행이면 false이며 user security state/session 쓰기가 없어야 한다.
+- [x] 단위 대역은 실제 롤백·동시성을 보장하지 않음을 기록한다. 별도 disposable PostgreSQL 통합 테스트는 최종 CI에서 실행한다.
+- [x] 두 repository 테스트 파일 실행 및 coverage 100% 확인 후 커밋한다. 도달 불가능 분기가 남으면 증거와 원인을 보고하고 기준 제외/제품 변경으로 임의 우회하지 않는다.
 
 ## Task 4 — CI 재발 방지·문서·전체 검증
 
@@ -165,18 +165,18 @@ it("stops session revocation if the user security gate cannot be locked", async 
 
 **Interfaces:** 기존 `@account-book/web test:coverage` 스크립트를 그대로 소비한다. 새 의존성이나 root verify 중복 실행은 추가하지 않는다.
 
-- [ ] repository verification 다음에 아래 step을 추가한다. `continue-on-error`나 이벤트별 생략 조건을 넣지 않는다.
+- [x] repository verification 다음에 아래 step을 추가한다. `continue-on-error`나 이벤트별 생략 조건을 넣지 않는다.
 
 ```yaml
       - name: Enforce authentication branch coverage
         run: pnpm --filter @account-book/web test:coverage
 ```
 
-- [ ] `pnpm --filter @account-book/web test:coverage`: exit 0, 대상 분기 100%.
-- [ ] `pnpm verify`: lint/typecheck/전체 테스트/빌드 모두 exit 0. 기존 실패도 숨기지 않는다.
-- [ ] `git diff --check`와 변경 파일 목록 확인. 사용자 .gitignore와 생성 coverage 결과가 커밋에 없는지 검사한다.
-- [ ] 실제 결함을 수정했다면 RED→GREEN 및 현실적인 변경으로 테스트가 깨지는 이유를 기록한다. 기존 동작 보완에는 baseline coverage RED→coverage GREEN과 테스트 내용 검토를 구별해 기록한다.
-- [ ] 한국어 보고서에 파일 수/추가·삭제 줄 수/테스트 수/분기 수/실행 명령/종료 코드/미실행 항목을 적는다. 100% coverage가 취약점 부재나 실서비스 안전성 보증은 아니라고 설명한다.
+- [x] `pnpm --filter @account-book/web test:coverage`: exit 0, 대상 분기 100%.
+- [x] `pnpm verify`: lint/typecheck/전체 테스트/빌드 모두 exit 0. 기존 실패도 숨기지 않는다.
+- [x] `git diff --check`와 변경 파일 목록 확인. 사용자 .gitignore와 생성 coverage 결과가 커밋에 없는지 검사한다.
+- [x] 실제 결함을 수정했다면 RED→GREEN 및 현실적인 변경으로 테스트가 깨지는 이유를 기록한다. 기존 동작 보완에는 baseline coverage RED→coverage GREEN과 테스트 내용 검토를 구별해 기록한다.
+- [x] 한국어 보고서에 파일 수/추가·삭제 줄 수/테스트 수/분기 수/실행 명령/종료 코드/미실행 항목을 적는다. 100% coverage가 취약점 부재나 실서비스 안전성 보증은 아니라고 설명한다.
 
 ## PR 반영 순서
 
@@ -195,7 +195,7 @@ it("stops session revocation if the user security gate cannot be locked", async 
 - [x] 테스트 보완·파일 규모·브랜치 적용·CI 누락을 계획에 포함.
 - [x] 기본 coverage 기준을 낮추지 않으며 실제 계정/키가 필요 없음을 확인.
 - [x] 사용자가 상세 계획과 실행 방식 확인: 현재 세션 순차 구현 + 마지막 독립 리뷰.
-- [ ] 테스트/CI 구현 및 전체 검증.
+- [x] 테스트/CI 구현 및 전체 검증.
 - [ ] PR #12 병합 → PR #13 대상 변경 → 경고 재확인.
 
 권장 실행 방식: **현재 세션 순차 구현 + 마지막 독립 리뷰**. 기존 fixture를 공유하는 보완 작업이므로 구현을 순서대로 진행하면 중복 fixture·충돌을 줄인다. 작업별 독립 구현/리뷰 방식도 가능하지만 문맥 전달·검토 비용이 더 든다. 이 문서는 실행 계획이며 구현 완료 보고가 아니다.
