@@ -159,6 +159,7 @@ it("stops session revocation if the user security gate cannot be locked", async 
 
 **Files:**
 - Modify: `.github/workflows/security-gate.yml`
+- Modify: `scripts/security/workflow-policy.test.mjs` — 실행 중 확인한 원문 해시와 필수 단계 순서 검증을 승인된 CI 추가에 맞춰 갱신한다. 기존 보호 정책은 유지한다.
 - Create: `docs/status/2026-09-23-auth-coverage-completion.ko.md`
 - Update: 이 계획의 체크리스트, Notion 10-A 진행 기록.
 

@@ -16,7 +16,7 @@ const approvedActions = [
   "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
 ];
 const reviewedWorkflowSha256 =
-  "ab850644c3dcfbed88aeaba3298ddb4accbc4ad548dbf1afd3bad00505914583";
+  "ced83548a6edcfca6d95dbb4ea72687de446177c9331cf533e7f0f4a52dc761b";
 const disposableDatabaseUrl =
   "postgresql://postgres:postgres@127.0.0.1:5432/account_book_test";
 const postgresImage =
@@ -350,6 +350,7 @@ test("security workflow runs install and every security gate in reviewed order",
     "corepack enable",
     "pnpm install --frozen-lockfile",
     "pnpm run verify",
+    "pnpm --filter @account-book/web test:coverage",
     "pnpm test:db",
     "pnpm --filter @account-book/database-tests prepare:e2e",
     "pnpm --filter @account-book/e2e exec playwright install --with-deps chromium",
