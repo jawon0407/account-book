@@ -25,3 +25,5 @@ export { CategoryKindSchema, CreateCategoryInputSchema, UpdateCategoryInputSchem
 export type { CategoryKind, CreateCategoryInput, UpdateCategoryInput, ArchiveCategoryInput, Category, CategoryListQuery, CategoryListResponse } from "./categories.js";
 export { TransactionInputTypeSchema, CreateTransactionInputSchema, UpdateTransactionInputSchema, DeleteTransactionInputSchema, TransactionSchema, TransactionTombstoneSchema, CreateTransferInputSchema, CreateTransferResultSchema, TransactionListQuerySchema, TransactionListResponseSchema } from "./transactions.js";
 export type { TransactionInputType, CreateTransactionInput, UpdateTransactionInput, DeleteTransactionInput, Transaction, TransactionTombstone, CreateTransferInput, CreateTransferResult, TransactionListQuery, TransactionListResponse } from "./transactions.js";
+export { BankConnectionRequestIdSchema, BankConnectionStatusSchema, BankConnectionRequestStatusSchema } from "./bank-connections.js";
+export type { BankConnectionRequestStatus } from "./bank-connections.js";
