@@ -90,9 +90,10 @@ export function encryptBankToken(
   value: string, context: BankTokenContext, keys: BankTokenKeyring,
 ): BankTokenEnvelope {
   try {
-    if (typeof value !== "string" || value.length === 0) throw new Error(INVALID);
+    if (typeof value !== "string" || value.length === 0
+      || Buffer.byteLength(value, "utf8") > 65_536) throw new Error(INVALID);
     const plaintext = Buffer.from(value, "utf8");
-    if (plaintext.length > 65_536 || plaintext.toString("utf8") !== value) {
+    if (plaintext.toString("utf8") !== value) {
       throw new Error(INVALID);
     }
     const kid = keys.activeKid;

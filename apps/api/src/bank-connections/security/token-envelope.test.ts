@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import {
   decryptBankToken,
   encryptBankToken,
@@ -90,6 +90,29 @@ it("rejects empty and over-64KiB values but accepts exactly 64KiB", () => {
   );
   const value = "x".repeat(65_536);
   expect(decryptBankToken(encryptBankToken(value, context, keys), context, keys)).toBe(value);
+});
+
+it("rejects an oversized value before allocating its UTF-8 plaintext buffer", () => {
+  const keys = { activeKid: "key-a", keys: new Map([["key-a", randomBytes(32)]]) };
+  const value = "x".repeat(65_537);
+  const from = vi.spyOn(Buffer, "from");
+  let error: unknown;
+  let converted: boolean;
+
+  try {
+    try {
+      encryptBankToken(value, context, keys);
+    } catch (caught) {
+      error = caught;
+    }
+    converted = from.mock.calls.some(([input]) => input === value);
+  } finally {
+    from.mockRestore();
+  }
+
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toBe("BANK_TOKEN_ENVELOPE_INVALID");
+  expect(converted).toBe(false);
 });
 
 it("round-trips valid Unicode but rejects malformed UTF-16 instead of changing plaintext", () => {

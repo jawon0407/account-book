@@ -27,7 +27,13 @@
 - Task 2 RED — `pnpm --filter @account-book/api test -- src/bank-connections/security/connection-secret.test.ts`: 구현 부재로 모듈 import 실패. GREEN — 같은 명령, 1개 파일·13개 테스트 통과. API typecheck 통과.
 - Task 2 전체 검사 — `pnpm test` 통과: legacy 54, contracts 74, database 15, API 161, web 569, e2e preflight 85 (총 958). 첫 실행의 최종 출력/종료 상태를 잃어 재실행했으며, 기록한 수치는 종료 코드 0으로 캡처된 실행 결과다.
 - Task 3 첫 RED — `pnpm --filter @account-book/api test -- src/bank-connections/security/token-envelope.test.ts`: 구현 모듈 부재로 실패했다. 첫 GREEN — 같은 명령, 1개 파일·11개 테스트 통과. 추가 RED — 잘못된 UTF-16 원문의 무음 치환을 거부하는 테스트 1개 실패. 최종 GREEN — 같은 명령, 1개 파일·12개 테스트 통과. API typecheck 통과.
-- Task 3 전체 검사 — 최종 코드에서 `pnpm test` 종료 코드 0: legacy 54, contracts 74, database 15, API 173, web 569, e2e preflight 85 (총 970). 출력과 종료 상태는 무시되는 로컬 로그에 보존했다.
+- Task 3 첫 구현(`969e22f`) 전체 검사 — 당시 코드에서 `pnpm test` 종료 코드 0: legacy 54, contracts 74, database 15, API 173, web 569, e2e preflight 85 (총 970). 출력과 종료 상태는 무시되는 로컬 로그에 보존했다.
+- 전체 브랜치 수정 전 검사 — `969e22f` 시점의 `pnpm verify` 종료 코드 0: 테스트 970개, lint·타입 검사·빌드 통과. 아래 후속 수정의 최종 검사 결과로 혼동하지 않는다.
+- 후속 수정 RED — 64KiB 초과 값을 UTF-8 Buffer로 변환하기 전에 거부하는 테스트에서 1개 실패·12개 통과. GREEN — 같은 집중 명령에서 1개 파일·13개 테스트 통과, API typecheck 통과. 이 수정에 대한 전체 `pnpm verify`는 상위 작업에서 재실행한다.
+
+현재 `feature/bank-connection-foundation`의 변경은 로컬 커밋에만 있다. 다음 단계는
+A2 DB 실행 계획과 소유자 격리 검증이다. DB·브라우저·공급자 연동 테스트나
+푸시·PR·배포를 이 단위 검증의 성과로 주장하지 않는다.
 
 후속 작업은 완료한 항목만 갱신하고, 공개 계약·연결 인증·잔액 및 거래 수집 상태를
 서로 혼동하지 않도록 유지한다.

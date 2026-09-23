@@ -33,11 +33,13 @@ HTTP endpoint, 은행 provider 연동은 아직 없다. 작업 단위별 진행 
 
 ## 연결 비밀값과 만료
 
-API는 요청 state와 브라우저에 입력·표시할 연결 확인값을 서로 다른
-`createConnectionSecret()` 호출로 발급해야 한다. 두 값은 각각 독립적인 32바이트
-난수이며, 한 값을 다른 용도로 재사용하면 두 보안 목적이 같은 값에 의존하게 되어
-유출·혼동 시 서로 대체되는 위험이 생긴다. 확인값은 state 대신 쓸 수 없고 그 반대도
-마찬가지다.
+API는 `createConnectionSecret()`으로 요청 state를 발급해야 한다. 후속 A4의
+BFF는 API 모듈을 import하지 않고 별도로 연결 확인값(proof)을 생성해야 한다.
+두 값은 각각 독립적인 32바이트 난수다. BFF는 확인값 원문을 UI에 입력·표시하지
+않고 `HttpOnly`·`Secure`·`SameSite=Lax`·host-only(`Domain` 미지정) 쿠키에
+보관한다. API에는 원문 대신 해시만 보내야 한다. 한 값을 다른 용도로 재사용하면
+두 보안 목적이 같은 값에 의존하게 되어 유출·혼동 시 서로 대체되는 위험이 생긴다. 확인값은
+state 대신 쓸 수 없고 그 반대도 마찬가지다. 이 BFF 흐름은 아직 구현되지 않았다.
 
 `hashConnectionSecret()`은 정규 base64url 입력만 받아 SHA-256 비교용 지문을 만든다.
 이는 암호화가 아니므로 원문을 복원할 수 없다. 따라서 원문 조회가 필요 없는 state와
