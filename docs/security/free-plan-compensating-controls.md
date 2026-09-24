@@ -2,6 +2,8 @@
 
 이 문서는 GitHub 무료 플랜의 비공개 저장소에서 사용할 수 없는 서버 측 통제를 대신해 현재 적용한 통제, 운영 절차, 남은 위험을 설명한다. 구현의 기술 구조는 [보안 아키텍처](security-architecture.md), 검토 시 확인할 항목은 [보안 검증 체크리스트](verification-checklist.md)를 함께 본다.
 
+> 2026-09-24 주의: 아래 main 병합 증빙 개선은 기능 브랜치의 미배포 구현이다. 독립 리뷰에서 간접 병합 관련 P1이 발견되어 반영을 보류했다. GitHub가 직접 push 뒤에도 PR을 merged로 표시할 수 있으므로, 상태·SHA·부모의 일치만으로 모든 직접 push를 탐지한다고 해석하면 안 된다. [상세 기록](../status/2026-09-24-ci-merge-provenance.ko.md), [GitHub 근거](https://docs.github.com/en/pull-requests/reference/pull-request-merges#indirect-merges).
+
 ## 1. 확인된 플랫폼 상태
 
 2026-07-17에 저장소 설정을 실제로 조회하고 변경을 시도한 결과는 다음과 같다.
