@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { join } from "node:path";
 
 import { SecurityGateError } from "./errors.mjs";
+import { withoutGithubCredentials } from "./merge-evidence.mjs";
 import {
   rangeFromCi,
   rangesFromPrePushUpdates,
@@ -32,6 +33,7 @@ function runRepositoryChecks(rootDir) {
     const result = spawnSync(command, args, {
       cwd: rootDir,
       encoding: "utf8",
+      env: withoutGithubCredentials(process.env),
     });
     if (result.error || result.status !== 0) {
       throw new SecurityGateError(
@@ -68,7 +70,7 @@ const PRODUCTION_DEPENDENCIES = Object.freeze({
 /**
  * 브랜치 정책 → 저장소 구조 → 푸시할 이력의 파일 내용 → 비밀값 패턴 순서로 검사한다.
  * 하나라도 실패하면 통과로 간주하지 않는다. 기본 구현은 Git 읽기와 구조 검사 프로세스를 실행하지만 푸시하지 않는다.
- * @param {{mode: "pre-push"|"ci", rootDir: string, updates?: Array<{localRef: string, localSha: string, remoteRef: string, remoteSha: string}>, eventName?: string, targetRef?: string, base?: string, head?: string}} options 실행 모드에 맞는 정책 입력값과 저장소 루트.
+ * @param {{mode: "pre-push"|"ci", rootDir: string, updates?: Array<{localRef: string, localSha: string, remoteRef: string, remoteSha: string}>, eventName?: string, targetRef?: string, base?: string, head?: string, mergeEvidence?:object}} options 실행 모드에 맞는 정책 입력값·main 증빙·저장소 루트.
  * @param {Partial<SecurityGateDependencies>} [dependencies] 테스트 등 통제된 호출에서 대체할 함수들. 생략한 항목은 기본 구현을 사용한다.
  * @returns {{scannedBlobCount: number}} 비밀값을 담지 않는 검사 대상 blob 수 요약.
  * @throws {SecurityGateError} 모드·브랜치·구조·이력 조회가 잘못되거나 비밀값 패턴이 발견되면 발생한다.
@@ -83,6 +85,9 @@ export function runSecurityGate(options, dependencies = {}) {
     operations.assertCiPolicy({
       eventName: options.eventName,
       targetRef: options.targetRef,
+      base: options.base,
+      head: options.head,
+      mergeEvidence: options.mergeEvidence,
     });
     ranges = [operations.rangeFromCi({ base: options.base, head: options.head })];
   } else {
