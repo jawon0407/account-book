@@ -36,6 +36,8 @@
 `.github/workflows/security-gate.yml`은 `pull_request`와 `push`에서 같은 `scripts/security-gate.mjs`를 CI 모드로 실행한다.
 
 - workflow 최상위 권한은 `contents: read`뿐이다.
+- main push에서만 `main-provenance` 작업에 `contents: read`와 `pull-requests: read`를 제공한다. 자동 `github.token`은 해당 증빙 실행 단계의 환경에만 넣으며 새 PAT나 운영 secret을 만들지 않는다.
+- 품질 작업 `security-gate`는 `contents: read`만 가진다. main 증빙 결과가 성공인지 먼저 검사한 뒤 기존 설치·lint·타입·테스트·빌드·coverage·DB·브라우저·감사를 실행한다. main 실패/취소/누락/skipped는 통과시키지 않는다. non-main에서만 의도된 skipped를 허용한다.
 - 저장소 secret을 참조하지 않는다.
 - 모든 `uses:`는 검토한 전체 40자리 commit SHA에 고정한다.
 - checkout은 `fetch-depth: 0`으로 전체 이력을 가져오고 `persist-credentials: false`로 Git 자격 증명을 남기지 않는다.
@@ -64,7 +66,28 @@ pnpm verify:structure
 2. 로컬 pre-push 게이트를 통과해 원격 브랜치로 push한다.
 3. `main` 또는 `maintenance-branch`를 대상으로 PR을 만든다.
 4. 로컬 `git rev-parse HEAD`, PR의 `headRefOid`, 성공한 `security-gate` Check의 SHA가 같은지 확인한다.
-5. [검증 체크리스트](verification-checklist.md)를 수동으로 확인하고 squash merge한다.
+5. [검증 체크리스트](verification-checklist.md)를 수동으로 확인하고 일반 merge commit 또는 squash merge한다. 여러 커밋 rebase·배치 main 갱신·merge queue는 이번 정책의 지원 범위가 아니다.
+6. 승인된 병합 뒤 새 main push 실행에서 `main-provenance`와 `security-gate`가 모두 성공했는지 확인한다. 과거 실패 실행 재시작은 새 정책 코드의 검증이 아니다.
+
+### 정상 병합을 확인하는 흐름
+
+초급 개발자 관점에서 SHA는 커밋의 고유 식별자이며, 부모는 그 커밋이 이어받은 이전 상태다. `before`는 이번 push 직전 main, `after`는 직후 main이다. 원격 main이 나중에 더 진행되어도 이번 이벤트의 두 값을 기준으로 검사한다.
+
+1. CLI는 GitHub 이벤트 파일·실행 환경·전달 인자의 저장소 이름/숫자 ID, main ref, before/after를 대조한다. 강제 push·브랜치 생성/삭제·0 SHA·같은 SHA·누락된 flags는 거부한다.
+2. Git reader는 현재 HEAD=after인지와 원본 커밋 부모를 읽는다. shallow와 Git replace로 축약·변조된 이력은 허용하지 않는다. secret scan도 같은 원본 그래프를 사용한다.
+3. HTTP 조회기는 고정 `api.github.com`의 해당 커밋 관련 PR 목록을 모두 확인한 뒤 하나의 후보를 상세 재조회한다. 목록의 시험 병합 SHA만으로 성공시키지 않는다.
+4. 순수 판정기는 실제 merged=true, 유효한 merged_at, closed/non-draft, 정확한 저장소/main/결과 SHA와 목록/상세 identity를 검증한다. 두 부모면 `[before, PR head]`, 한 부모면 `[before]`여야 한다.
+5. 정상 증빙이어도 저장소 구조와 도입된 전체 커밋의 secret scan을 실행한다. 성공 로그에는 PR 번호·결과 SHA·검사 blob 수만 남긴다.
+
+단일 커밋 rebase는 squash와 같은 증빙을 만족할 수 있어 명칭으로 구별하지 않는다. 여러 커밋 rebase나 여러 병합을 모은 push는 부모 계약과 맞지 않아 실패한다. 리뷰 승인과 병합 전 정확한 head CI 성공은 별도로 수동 확인해야 한다.
+
+### 자원·자격 증명 경계
+
+- Next.js나 금융 데이터 로직은 관여하지 않는다. 증빙 작업은 의존성 설치/앱 실행 없이 Node 내장 기능과 Git만 사용한다.
+- 조회 전체 시간은 본문 포함 10초, 응답당 1MiB, 페이지당 100개·최대 3페이지다. 첫 페이지에서 후보를 찾아도 남은 페이지를 생략하지 않으며 중복 후보와 한도 초과는 실패한다.
+- 응답 Link URL은 요청 주소로 쓰지 않고 next 존재만 확인한다. 다음 주소는 고정 호스트·경로와 증가하는 페이지 번호로 만든다. redirect와 자동 재시도는 없다.
+- 이벤트 파일은 일반 파일만 최대 4MiB까지 읽는다. 그보다 큰 정상 이벤트도 확인 불가로 종료될 수 있어 검토 없이 한도를 우회하지 않는다.
+- Git/구조 검사 자식 프로세스에는 GITHUB_TOKEN/GH_TOKEN을 대소문자 구분 없이 제거한 환경을 전달한다. 토큰·원시 이벤트·응답·HTTP 오류 원문은 로그나 증빙 파일에 기록하지 않는다.
 
 CI 성공은 GitHub branch protection이 활성화됐다는 증거가 아니다. 반드시 같은 SHA의 결과인지 별도로 확인한다.
 
@@ -77,6 +100,17 @@ CI 성공은 GitHub branch protection이 활성화됐다는 증거가 아니다.
 `.github/CODEOWNERS`는 보안 관련 변경의 검토 책임자를 표시하지만 현재 플랜에서는 code owner 승인을 서버가 필수로 강제하지 않는다. `.github/pull_request_template.md`도 검토 증거 누락을 드러내는 운영 도구이며 체크하지 않은 항목을 자동 차단하지 않는다.
 
 ## 5. 사고 처리
+
+새 증빙 오류는 먼저 종류를 구분한다. 실패 자체를 즉시 침해 확정으로 해석하지 않는다.
+
+| 코드 | 뜻 | 운영 대응 |
+| --- | --- | --- |
+| MAIN_PUSH_CONTEXT_INVALID | 이벤트·CLI 불일치 또는 읽기/크기 오류 | 이벤트 종류·SHA·파일 한도를 확인하고 원문 비밀값은 복사하지 않는다. |
+| MAIN_MERGE_EVIDENCE_REJECTED | 일치하는 실제 병합 PR/부모를 증명하지 못함 | PR 번호·병합 결과 SHA·부모·지원 병합 방식과 API 반영 지연을 조사한다. |
+| MAIN_MERGE_EVIDENCE_UNAVAILABLE | 권한·HTTP·시간·본문·페이지 한도로 확인 불가 | 최소 읽기 권한/API 상태를 확인하고 동일 이벤트를 수동 재실행한다. |
+| MAIN_PROVENANCE_JOB_FAILED | 증빙 작업 실패/취소/예상 밖 skipped | 선행 작업 결과를 확인한다. 품질 작업만 성공으로 바꾸지 않는다. |
+
+실행 ID·검사 SHA·안전한 오류 코드와 PR 상태를 보존한다. API 반영 지연은 동일 이벤트 재실행으로 확인하되 지속 실패를 자동 재시도나 main 검사 제외로 숨기지 않는다. 지원하지 않는 병합 방식이 원인이면 별도 설계·테스트 후 정책을 확장한다.
 
 직접 `main` push 또는 게이트 우회가 확인되면 추가 작업을 중단하고 SHA와 관련 CI 결과를 보존한 뒤 영향을 평가한다. 정상 `hotfix/*` 또는 `feature/*` PR로 복구하고 원인, 영향, 재발 방지를 기록한다.
 

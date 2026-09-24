@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
@@ -16,7 +17,7 @@ const approvedActions = [
   "actions/setup-node@820762786026740c76f36085b0efc47a31fe5020",
 ];
 const reviewedWorkflowSha256 =
-  "ced83548a6edcfca6d95dbb4ea72687de446177c9331cf533e7f0f4a52dc761b";
+  "1b508e1f714ce7688e3d5864a32e42ea89b9b332fd28f573a47142f546cde322";
 const disposableDatabaseUrl =
   "postgresql://postgres:postgres@127.0.0.1:5432/account_book_test";
 const postgresImage =
@@ -100,6 +101,16 @@ function singleTopLevelBlock(source, key) {
   const blocks = topLevelBlocks(source, key);
   assert.equal(blocks.length, 1, `expected one top-level ${key} block`);
   return blocks[0];
+}
+
+/** source의 지정 job(name)을 기존 단순 들여쓰기 규칙으로 분리한다. 누락이면 실패한다. */
+function jobSource(source, name) {
+  const lines = singleTopLevelBlock(source, "jobs");
+  const start = lines.findIndex(line => line === `  ${name}:`);
+  assert.notEqual(start, -1, `missing job ${name}`);
+  let end = start + 1;
+  while (end < lines.length && !/^ {2}\S/u.test(lines[end])) end++;
+  return lines.slice(start, end).join("\n");
 }
 
 /**
@@ -288,16 +299,20 @@ test("push runs use unique run-ID groups, never SHA grouping, and only PR runs a
   );
 });
 
-test("security workflow grants only top-level contents read permission", () => {
+test("only isolated provenance job receives additional PR read permission", () => {
   const source = readFileSync(workflowPath, "utf8");
   const declarations = yamlKeyOccurrences(source, "permissions");
 
-  assert.equal(declarations.length, 1);
+  assert.equal(declarations.length, 3);
   assert.deepEqual(activeLines(singleTopLevelBlock(source, "permissions")), [
     "permissions:",
     "  contents: read",
   ]);
   assert.equal(dangerousPermissionValues(source).length, 0);
+  assert.deepEqual(nestedBlockContent(jobSource(source, "main-provenance").split("\n"), "permissions").map(line => line.trim()),
+    ["contents: read", "pull-requests: read"]);
+  assert.deepEqual(nestedBlockContent(jobSource(source, "security-gate").split("\n"), "permissions").map(line => line.trim()),
+    ["contents: read"]);
 });
 
 test("security workflow does not reference repository secrets", () => {
@@ -309,8 +324,8 @@ test("security workflow does not reference repository secrets", () => {
 test("security workflow uses exactly the approved SHA-pinned actions", () => {
   const source = readFileSync(workflowPath, "utf8");
 
-  assert.equal(yamlKeyOccurrences(source, "uses").length, 2);
-  assert.deepEqual(actionReferences(source.split(/\r?\n/u)), approvedActions);
+  assert.equal(yamlKeyOccurrences(source, "uses").length, 4);
+  assert.deepEqual(actionReferences(source.split(/\r?\n/u)), [...approvedActions, ...approvedActions]);
 });
 
 test("checkout step disables shallow history and persisted credentials", () => {
@@ -319,11 +334,13 @@ test("checkout step disables shallow history and persisted credentials", () => {
     actionReferences(block).some((action) => action.startsWith("actions/checkout@")),
   );
 
-  assert.equal(checkoutSteps.length, 1);
+  assert.equal(checkoutSteps.length, 2);
   assert.deepEqual(
     nestedBlockContent(checkoutSteps[0], "with").map((line) => line.trim()),
-    ["fetch-depth: 0", "persist-credentials: false"],
+    ["fetch-depth: 0", "persist-credentials: false", "ref: ${{ github.sha }}"],
   );
+  assert.deepEqual(nestedBlockContent(checkoutSteps[1], "with").map(line => line.trim()),
+    ["fetch-depth: 0", "persist-credentials: false"]);
 });
 
 test("security workflow uses the reviewed disposable PostgreSQL service", () => {
@@ -340,7 +357,7 @@ test("security workflow uses the reviewed disposable PostgreSQL service", () => 
 
 test("security workflow runs install and every security gate in reviewed order", () => {
   const source = readFileSync(workflowPath, "utf8");
-  const steps = stepBlocks(source);
+  const steps = stepBlocks(jobSource(source, "security-gate"));
   const commands = steps.map((block) => {
     if (block.some((line) => stripYamlComment(line).trim() === "run: >-")) return foldedRunCommand(block);
     const runLine = activeLines(block).find((line) => /^\s+run:\s+/u.test(line));
@@ -365,6 +382,11 @@ test("security workflow runs install and every security gate in reviewed order",
     previous = index;
   }
   assert.match(commands.at(-1) ?? "", /^node scripts\/security-gate\.mjs --mode ci/u);
+  assert.match(commands[1], /^node --input-type=module -e/u);
+  for (const block of steps.slice(0, -1)) {
+    assert.equal(yamlKeyOccurrences(block.join("\n"), "if").length, 0);
+    assert.equal(yamlKeyOccurrences(block.join("\n"), "continue-on-error").length, 0);
+  }
 });
 
 test("database preparation and browser gates use only the disposable server-side database boundary", () => {
@@ -407,6 +429,7 @@ test("security workflow wires the authoritative CI backstop", () => {
   );
 
   assert.equal(backstopSteps.length, 1);
+  assert.ok(activeLines(backstopSteps[0]).includes("        if: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}"));
   assert.equal(
     foldedRunCommand(backstopSteps[0]),
     'node scripts/security-gate.mjs --mode ci --event "$EVENT_NAME" ' +
@@ -421,6 +444,50 @@ test("security workflow wires the authoritative CI backstop", () => {
       "HEAD_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}",
     ],
   );
+});
+
+test("main provenance uses only built-in tools and a step-scoped automatic token", () => {
+  const source = readFileSync(workflowPath, "utf8");
+  const main = jobSource(source, "main-provenance"), quality = jobSource(source, "security-gate");
+  assert.ok(main.includes("    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}"));
+  assert.ok(main.includes("    timeout-minutes: 5"));
+  assert.equal(yamlKeyOccurrences(main, "run").length, 1);
+  const steps = stepBlocks(main);
+  assert.equal(steps.length, 3);
+  assert.deepEqual(nestedBlockContent(steps[2], "env").map(line => line.trim()), [
+    "GITHUB_TOKEN: ${{ github.token }}", "EVENT_NAME: ${{ github.event_name }}",
+    "TARGET_REF: ${{ github.ref }}", "BASE_SHA: ${{ github.event.before }}", "HEAD_SHA: ${{ github.sha }}",
+  ]);
+  assert.equal(foldedRunCommand(steps[2]), 'node scripts/security-gate.mjs --mode ci --event "$EVENT_NAME" --target-ref "$TARGET_REF" --base "$BASE_SHA" --head "$HEAD_SHA"');
+  assert.equal((source.match(/github\.token/gu) ?? []).length, 1);
+  assert.doesNotMatch(quality, /GITHUB_TOKEN|pull-requests:/u);
+  assert.ok(quality.includes("    needs: main-provenance"));
+  assert.ok(quality.includes("    if: ${{ !cancelled() }}"));
+  assert.ok(quality.includes("    timeout-minutes: 30"));
+  assert.equal(yamlKeyOccurrences(source, "continue-on-error").length, 0);
+});
+
+test("actual workflow guard rejects failed/cancelled/skipped main and unexpected non-main success", () => {
+  const source = readFileSync(workflowPath, "utf8");
+  const guard = stepBlocks(jobSource(source, "security-gate"))[1];
+  assert.deepEqual(nestedBlockContent(guard, "env").map(line => line.trim()), [
+    "EVENT_NAME: ${{ github.event_name }}",
+    "TARGET_REF: ${{ github.event_name == 'pull_request' && format('refs/heads/{0}', github.base_ref) || github.ref }}",
+    "PROVENANCE_RESULT: ${{ needs.main-provenance.result }}",
+  ]);
+  const match = /^node --input-type=module -e '(.+)'$/u.exec(foldedRunCommand(guard));
+  assert.ok(match, "guard must run the extracted Node script");
+  for (const [eventName, targetRef] of [["push", "refs/heads/main"], ["push", "refs/heads/feature/example"], ["pull_request", "refs/heads/main"]]) {
+    for (const result of ["success", "failure", "cancelled", "skipped", ""]) {
+      const child = spawnSync(process.execPath, ["--input-type=module", "-e", match[1]], {
+        cwd: fileURLToPath(new URL("../../", import.meta.url)), encoding: "utf8",
+        env: { ...process.env, EVENT_NAME: eventName, TARGET_REF: targetRef, PROVENANCE_RESULT: result },
+      });
+      const accepted = eventName === "push" && targetRef === "refs/heads/main" ? result === "success" : result === "skipped";
+      assert.equal(child.status, accepted ? 0 : 1, `${eventName}/${targetRef}/${result}`);
+      if (!accepted) assert.match(child.stderr, /MAIN_PROVENANCE_JOB_FAILED/u);
+    }
+  }
 });
 
 test("policy scanner recognizes quoted and flow-style security keys", () => {

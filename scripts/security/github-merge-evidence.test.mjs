@@ -116,13 +116,13 @@ test("invalid token, timeout or repository fails before sending any request", as
   }), { code: "MAIN_PUSH_CONTEXT_INVALID" });
   assert.equal(called, false);
 });
-test("unsettled fetch and body are bounded even when abort is ignored", { timeout: 1500 }, async () => {
+test("unsettled fetch and body are bounded even when abort is ignored", { timeout: 500 }, async () => {
   for (const fetcher of [() => new Promise(() => {}),
     async () => new Response(new ReadableStream({ pull: () => new Promise(() => {}) }))]) {
     await assert.rejects(loadGithubMergeEvidence(mainFixture().context, { token, fetcher, timeoutMs: 20 }), unavailable);
   }
 });
-test("deadline aborts stream and late responses never trigger detail fetches", { timeout: 1500 }, async () => {
+test("deadline aborts stream and late responses never trigger detail fetches", { timeout: 500 }, async () => {
   for (const mode of ["resolve", "reject", "body"]) {
     let calls = 0, signal, finish, cancelled = false;
     const work = loadGithubMergeEvidence(mainFixture().context, { token, timeoutMs: 20,

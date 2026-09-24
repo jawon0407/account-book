@@ -76,7 +76,7 @@ export async function loadGithubMergeEvidence(context, { token, fetcher = global
     timer = setTimeout(() => { controller.abort(); reject(unavailable()); }, timeoutMs);
   });
   const root = `https://api.github.com/repos/${context.repository.split("/").map(encodeURIComponent).join("/")}`;
-  /** pathは内部固定 경로다. 동일 signal로 GET 후 제한된 본문과 헤더를 반환한다. */
+  /** path는 내부 고정 경로다. 동일 signal로 GET 후 제한된 본문과 헤더를 반환한다. */
   async function get(path) {
     signal.throwIfAborted();
     const response = await fetcher(`${root}${path}`, { method: "GET", redirect: "error", signal,
