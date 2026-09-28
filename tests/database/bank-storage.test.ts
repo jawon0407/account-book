@@ -29,6 +29,12 @@ describe("bank storage constraints on disposable PostgreSQL", () => {
     await expect(seedRequest(database.admin, { status: "connected", connection_id: connectionId, callback_received_at: "2026-09-28T00:01:00Z" })).rejects.toMatchObject({ code: "23503" });
   });
 
+  it("accepts a connected request only with its own bound result", async () => {
+    const connectionId = await seedConnection(database.admin);
+    await expect(seedRequest(database.admin, { status: "connected", connection_id: connectionId, callback_received_at: "2026-09-28T00:01:00Z" })).resolves.toBeTypeOf("string");
+    await expect(seedRequest(database.admin, { status: "cancelled", connection_id: connectionId })).rejects.toMatchObject({ code: "23514" });
+  });
+
   it("accepts the maximum request/code TTL and clears ciphertext after claim", async () => {
     const id = await seedRequest(database.admin, { status: "awaiting_completion", callback_received_at: "2026-09-28T00:04:00Z", code_expires_at: "2026-09-28T00:05:00Z", encrypted_code: ENVELOPE });
     await database.admin.query("update app_bank.bank_connection_requests set status='exchanging', encrypted_code=null,code_expires_at=null where id=$1", [id]);

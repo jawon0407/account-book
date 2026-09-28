@@ -38,7 +38,7 @@ Drizzle은 테이블 이름·열/타입·NULL·기본값·PK/UNIQUE/FK·인덱�
 
 `app_api`는 기존 hardened 역할을 재사용한다. `app_bank` USAGE와 세 테이블 SELECT만 허용한다. 본인 user_id 행만 RLS로 보이고, 트랜잭션 로컬 `app.user_id`가 없거나 빈 값이면0행이다. 잘못된 UUID 설정은 오류로 닫힌다. 사용자 ID는 검증한 API principal에서만 설정하고 요청 본문을 그대로 쓰지 않는다. 쿼리 종료 시 SET LOCAL은 사라져야 한다.
 
-모든 테이블에 ENABLE/FORCE RLS, 역할별 SELECT 정책을 적용한다. app_api는 INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER/DDL/함수 직접 실행·owner 역할 전환 권한이 없다. `PUBLIC`, `anon`, `authenticated`, `service_role`, `app_session_bff`는 schema/테이블 접근이 없다. migration owner의 future tables/functions 기본 권한도 정리한다. 생성 직후부터 schema PUBLIC 접근을 철회해 migration 파일 사이에도 노출 창을 만들지 않는다.
+모든 테이블에 ENABLE/FORCE RLS, 역할별 SELECT 정책을 적용한다. app_api는 INSERT/UPDATE/DELETE/TRUNCATE/REFERENCES/TRIGGER/DDL/함수 직접 실행·owner 역할 전환 권한이 없다. `PUBLIC`, `anon`, `authenticated`, `service_role`, `app_session_bff`는 schema/테이블 접근이 없다. migration owner의 해당 schema 기본 테이블 권한을 정리하고 새 함수는 생성 transaction 안에서 PUBLIC 실행을 개별 철회한다. 다른 schema의 전역 기본 함수 권한은 변경하지 않는다. 생성 직후부터 schema PUBLIC 접근을 철회해 migration 파일 사이에도 노출 창을 만들지 않는다.
 
 RLS는 API 자체 침해로 임의의 사용자 GUC를 설정하는 공격까지 방어하지 않는다. DB superuser/BYPASSRLS는 별도 관리 경계이고 런타임 URL에 금지한다. A2.2 최소 SECURITY DEFINER 상태 함수는 별도 설계/테스트 후 추가하며 이번에 쓰기 권한을 미리 주지 않는다.
 

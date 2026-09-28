@@ -14,6 +14,17 @@ beforeAll(async () => {
 afterAll(async () => { await database?.close(); });
 
 describe("bank least-privilege access on disposable PostgreSQL", () => {
+  it("refuses to replace an existing test database", async () => {
+    await expect(openBankDatabase()).rejects.toThrow("BANK_TEST_DATABASE_ALREADY_EXISTS");
+    expect((await database.admin.query("select * from app_bank.bank_connections")).rowCount).toBe(2);
+  });
+
+  it("rejects non-disposable or wrong database settings before connecting", async () => {
+    for (const environment of [{}, { TEST_DATABASE_DISPOSABLE: "true", TEST_DATABASE_URL: "postgresql://postgres:postgres@127.0.0.1:5432/not_bank_test" }, { TEST_DATABASE_URL: process.env.TEST_DATABASE_URL }]) {
+      await expect(openBankDatabase(environment)).rejects.toThrow("BANK_TEST_DATABASE_CONFIGURATION_INVALID");
+    }
+  });
+
   it.each([USER_A, USER_B, undefined, ""])("restricts app_api rows for context %s", async (user) => {
     await asBankRole(database.admin, "app_api", user, async () => {
       for (const table of tables) {
