@@ -1,2 +1,2 @@
 # Isolated protection verification
-Synthetic fixture only. No application or financial data. missing-check
+Synthetic fixture only. No application or financial data. failure

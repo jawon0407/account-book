@@ -7,10 +7,10 @@ concurrency:
   group: protection-fixture-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 jobs:
-  fixture-observer:
-    name: fixture-observer
+  security-gate:
+    name: security-gate
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Synthetic missing condition
-        run: exit 0
+      - name: Synthetic failure condition
+        run: exit 1
