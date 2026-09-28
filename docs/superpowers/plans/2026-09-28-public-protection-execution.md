@@ -81,11 +81,11 @@ Task4 추가 범위: PR CI만 반복 실패한 원인을 조사해 Playwright의
 **Inputs:** PR14 최신 H/B/C·CI, 실제 보호, 실패/정상 검증.
 **Outputs:** 최신 main과 main-provenance/security-gate 실제 실행 증거.
 
-- [ ] 기존 AI 독립 리뷰 결과와 이후 diff를 확인한다. 새 중요 지적이 있으면 수정·검증하고 진행한다.
-- [ ] PR14를 ready로 전환해 SHA 고정 정상 merge 수행. admin 우회·강제 push는 금지.
-- [ ] 새 main의 사후 provenance 및 품질 검사 실행을 확인한다. 실패하면 A1/A2 통합을 보류한다.
+- [x] 기존 AI 독립 리뷰와 새 Playwright/API 계약 보완의 별도 독립 리뷰 완료. 미해결 Critical/Important 없음.
+- [x] PR14를 ready로 전환해 SHA 고정 정상 merge. 이후 API 계약 보완 PR17도 보호를 유지해 정상 merge.
+- [x] 첫 main36399193418 실패 시 A1 통합 보류. 최소 API 계약 보완 후 새 main e43260d/36400707374 실제 provenance·품질 성공 확인.
 - [ ] PR13은 A1 보안 기반9파일의 독립 변경이다. 최신 main을 반영해 새 CI를 검증한 뒤 정상 통합한다. 이전 main 기준 CI를 그대로 재사용하지 않는다.
-- [ ] 문서/Notion에서 완료·미검증·보류를 구분하고 P1은 전체 증거·독립 검토 충족 시에만 종결한다.
+- [x] 문서/Notion에서 완료·미검증·보류를 구분했다. 전체 증거·독립 검토·main 실행 충족으로 서버 조건 강제 범위 P1 종결. UI/API 경로 독점·관리자 침해·실금융 운영 적합성은 제외.
 - [ ] 10-A2 상세 설계·계획·RED/GREEN 구현으로 이어간다. 본 계획 완료가 계좌 연결 기능 완료는 아니다.
 
 ## 검증과 출처

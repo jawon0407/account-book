@@ -37,8 +37,8 @@ PR #14는 c4ba4a5 push/PR 각각 필수13단계 성공 후 정상 merge되어 ma
 
 - [x] 전체 pnpm verify exit0(1,153개·lint·타입·빌드). 독립 최종 리뷰 Critical0/Important0/Minor0, 집중115/115 및 실제 읽기 probe 재실행 성공.
 - [x] docs/status/2026-09-28-public-protection-execution.ko.md 및 Notion08의 현재 상태/근거/다음 액션 갱신. 새 원격 결과에 맞춰 계속 갱신한다.
-- [ ] 커밋·push·새 PR, 정확한 최신 H/B/C와 필수13단계 성공 후 정상 merge. 보호 read-back 및 사후 main CI 실제 성공 확인.
-- [ ] 실패했던36399193418은 과거 실패로 유지하며 새 main 성공으로 복구를 입증한다. 그 뒤 A1 통합 재개.
+- [x] 후보971ecb9 push36400190560/PR36400228384 각필수13단계·H/B/C 대조, 보호 read-back 후 PR #17 정상 merge. 새 main e43260d 실행36400707374의 실제 provenance·전체 품질 성공 확인.
+- [x] 실패했던36399193418은 과거 실패로 유지하고 새 main 성공으로 복구를 입증했다. A1 최신 기준 재검증·통합 재개.
 
 ## 자체 검토
 
