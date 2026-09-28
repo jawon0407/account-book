@@ -1,6 +1,6 @@
 # 은행 연결 저장소 개발 흐름
 
-상태: A2.1 구현 중. 이 문서는 설계와 구현 책임을 설명하며 실제 DB 검증이 끝났다는 뜻이 아니다. 최신 실행 증거는 [진행 기록](../status/2026-09-28-bank-storage.ko.md)을 따른다.
+상태: A2.1 저장/권한 코드를 구현했고, 독립 리뷰 보완 후 실제 DB 112개·전체 1,192개·브라우저 인증 10개를 통과했다. 현재 정상 PR 통합 절차를 진행한다. 실제 은행 연결 완료를 뜻하지 않는다. 최신 실행 증거는 [진행 기록](../status/2026-09-28-bank-storage.ko.md)을 따른다.
 
 ## 왜 세 테이블인가요?
 
@@ -42,6 +42,7 @@ SQL GRANT는 누가 테이블에 접근하는지, RLS는 그 안에서 누구의
 3. `packages/database/src/schema/bank-*.ts`: TypeScript 쿼리가 사용할 선언. 파일만 import해도 DB가 바뀌는 것은 아니다.
 4. `tests/database/bank-storage.test.ts`: 잘못된 해시·TTL·봉투·연결 참조가 저장되지 않는지 검사.
 5. `tests/database/bank-access.test.ts`: 실제 역할로 본인 조회와 타인/금지 작업 거부를 검사.
+6. `bank-parity.test.ts`와 `bank-times.test.ts`: TypeScript 선언을 실제 PostgreSQL 열/제약/인덱스와 대조하고 잘못된 연결·토큰 시간을 거부하는지 검사.
 
 ## 안전하게 검증하는 방법
 
