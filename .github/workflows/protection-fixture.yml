@@ -12,5 +12,5 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
-      - name: Synthetic failure condition
-        run: exit 1
+      - name: Synthetic cancelled condition
+        run: sleep 90
