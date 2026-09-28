@@ -36,7 +36,7 @@
 - tests/database/vitest.config.ts, tsconfig.json: 직렬 실행·support 포함.
 - docs/database/bank-connections.ko.md, docs/status/2026-09-28-bank-storage.ko.md: 초급 개발자 설명/실행 증거.
 
-## Task1: 공급자 식별자 암호화 문맥
+## Task 1: 공급자 식별자 암호화 문맥
 
 **Interface:** 기존 encryptBankToken/decryptBankToken의 context.purpose에 provider_subject 추가. 기존 용도 이름/봉투 형태 불변.
 
@@ -44,7 +44,7 @@
 - [ ] API 집중 테스트 RED 확인 → allowlist/type만 확장 → GREEN.
 - [ ] 새 key/digest/공개 응답 필드는 추가하지 않고 변경을 기록.
 
-## Task2: 저장 제약과 역할 격리
+## Task 2: 저장 제약과 역할 격리
 
 **Interface:** app_bank의3테이블과 Drizzle bankConnections/bankConnectionRequests/bankConnectionCredentials export. API query 연결은 후속 작업.
 
@@ -56,7 +56,7 @@
 - [ ] 로컬 pnpm verify, 새 feature push의 실제 DB GREEN·기존 인증/브라우저 CI 확인.
 - [ ] 개발 가이드에 저장/암호화/권한의 역할 차이와 A2.2 미구현을 명시.
 
-## Task3: 통합 검토·전송·기록
+## Task 3: 통합 검토·전송·기록
 
 - [ ] 새 독립 리뷰어에게 전체 변경·spec·검증 증거 전달. Critical/Important 해결 후 필요한 회귀 실행.
 - [ ] 실제 파일 수/줄 수, RED/GREEN/전체 검증/한계를 MD 및 Notion10/A2 페이지에 기록.

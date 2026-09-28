@@ -15,6 +15,16 @@ const context: BankTokenContext = {
   purpose: "access_token",
 };
 
+it("encrypts a provider subject without allowing token-purpose substitution", () => {
+  const keys = { activeKid: "subject-key", keys: new Map([["subject-key", randomBytes(32)]]) };
+  const subject: BankTokenContext = { ...context, purpose: "provider_subject" };
+  const envelope = encryptBankToken("fake-provider-user", subject, keys);
+  expect(decryptBankToken(envelope, subject, keys)).toBe("fake-provider-user");
+  expect(() => decryptBankToken(envelope, context, keys)).toThrow("BANK_TOKEN_ENVELOPE_INVALID");
+  const access = encryptBankToken("fake-access-token", context, keys);
+  expect(() => decryptBankToken(access, subject, keys)).toThrow("BANK_TOKEN_ENVELOPE_INVALID");
+});
+
 it("round-trips a token and refuses another owner, resource, environment, or purpose", () => {
   const keys = { activeKid: "key-a", keys: new Map([["key-a", randomBytes(32)]]) };
   const envelope = encryptBankToken("fake-token", context, keys);

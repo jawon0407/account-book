@@ -5,7 +5,7 @@ export type BankTokenContext = Readonly<{
   resourceId: string;
   provider: "kftc";
   environment: "fake" | "test" | "live";
-  purpose: "authorization_code" | "access_token" | "refresh_token";
+  purpose: "authorization_code" | "access_token" | "refresh_token" | "provider_subject";
 }>;
 
 export type BankTokenKeyring = Readonly<{
@@ -51,7 +51,7 @@ function aad(context: BankTokenContext, kid: string): Buffer {
   if (!UUID.test(context.userId) || !UUID.test(context.resourceId)
     || context.provider !== "kftc"
     || !["fake", "test", "live"].includes(context.environment)
-    || !["authorization_code", "access_token", "refresh_token"].includes(context.purpose)) {
+    || !["authorization_code", "access_token", "refresh_token", "provider_subject"].includes(context.purpose)) {
     throw new Error(INVALID);
   }
   return Buffer.from(JSON.stringify([
