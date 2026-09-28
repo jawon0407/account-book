@@ -1,0 +1,36 @@
+name: checkout-history-diagnostic
+on:
+  push:
+    branches: [feature/protection-checkout-diagnostic]
+permissions:
+  contents: read
+jobs:
+  checkout-history-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: f40126dccbe63c4e636ba375d3af926b30e5e434
+      - name: History immediately after checkout
+        run: |
+          git rev-parse --is-shallow-repository
+          if test -f .git/shallow; then wc -l .git/shallow; fi
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version-file: .nvmrc
+          check-latest: false
+      - name: Install pinned graph
+        run: |
+          corepack enable
+          pnpm install --frozen-lockfile
+          git rev-parse --is-shallow-repository
+      - name: Existing Git fixture tests
+        run: |
+          pnpm test:legacy
+          git rev-parse --is-shallow-repository
+          if test -f .git/shallow; then wc -l .git/shallow; fi
+      - name: Same proposed-range read
+        run: node scripts/security-gate.mjs --mode ci --event pull_request --target-ref refs/heads/main --base 9e2ff81b88c8f6290f68c9bebb1b4bb43493cac5 --head dbe910f81e514d47852978a95f50266e6cac8a66
