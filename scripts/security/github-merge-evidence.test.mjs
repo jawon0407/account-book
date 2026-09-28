@@ -31,14 +31,33 @@ test("loads list and detail only from the fixed host using bounded authenticated
     assert.equal(new URL(url).origin, "https://api.github.com");
     assert.equal(init.method, "GET"); assert.equal(init.redirect, "error");
     assert.equal(init.headers.Authorization, `Bearer ${token}`);
-    assert.equal(init.headers["X-GitHub-Api-Version"], "2026-03-10");
+    assert.equal(init.headers["X-GitHub-Api-Version"], "2022-11-28");
     assert.equal(init.headers.Accept, "application/vnd.github+json");
     assert.ok(init.signal instanceof AbortSignal);
   }
   assert.equal(calls[0].init.signal, calls[1].init.signal);
   assert.ok(!JSON.stringify(result).includes(token));
 });
-for (const status of [401, 403, 404, 429, 500, 302]) {
+test("pins the supported response contract that includes the actual merge SHA", async () => {
+  const f = mainFixture();
+  const versions = [];
+  const result = await loadGithubMergeEvidence(f.context, { token,
+    // 실제 API처럼 2026 응답에는 결과 SHA가 없다. 모든 버전에 구형 fixture를 반환하지 않는다.
+    fetcher: async (url, init) => {
+      const version = init.headers["X-GitHub-Api-Version"];
+      versions.push(version);
+      const detail = url.endsWith("/pulls/12");
+      const response = structuredClone(detail ? f.pullRequest : f.candidate);
+      if (version !== "2022-11-28") delete response.merge_commit_sha;
+      return Response.json(detail ? response : [response]);
+    },
+  });
+  assert.equal(result.candidate.merge_commit_sha, f.context.after);
+  assert.equal(result.pullRequest.merge_commit_sha, f.context.after);
+  assert.deepEqual(versions, ["2022-11-28", "2022-11-28"]);
+});
+
+for (const status of [401, 403, 404, 410, 429, 500, 302]) {
   test(`fails closed on HTTP ${status} without retry or raw diagnostics`, async () => {
     const { promise, calls } = load([new Response(`raw-${token}`, { status })]);
     await assert.rejects(promise, unavailable); assert.equal(calls.length, 1);
