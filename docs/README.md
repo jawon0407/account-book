@@ -1,8 +1,8 @@
 # 프로젝트 문서 지도 — 먼저 읽어 주세요
 
-갱신 기준: 2026-09-29, `feature/bank-connection-storage`. 저장소 PUBLIC·main 보호를 적용했고 CI 보완 PR #14/#17과 은행 보안 기반 PR #13은 정상 병합·main 검사까지 완료했습니다. 현재 은행 연결 DB 구조·권한(A2.1)의 구현과 리뷰 보완 검증을 마치고 정상 PR 통합 절차를 진행합니다. 이 문서는 **실제 구현**, **승인된 목표**, **검증하지 못한 운영 설정**을 구분합니다. 사용자는 1~2절부터, 초급 개발자는 3절의 순서대로 읽으면 됩니다.
+갱신 기준: 2026-09-29, main `b7ecd83` / 후속 `feature/bank-state-transitions`. 저장소 PUBLIC·main 보호를 적용했고 CI 보완 PR #14/#17, 은행 보안 기반 PR #13, 은행 DB 구조·권한(A2.1) PR #18은 정상 병합·main 검사까지 완료했습니다. 다음 A2.2 상태 처리의 사전 범위를 정리했으며 상세 설계·구현은 아직 후속입니다. 이 문서는 **실제 구현**, **승인된 목표**, **검증하지 못한 운영 설정**을 구분합니다. 사용자는 1~2절부터, 초급 개발자는 3절의 순서대로 읽으면 됩니다.
 
-현재 작업은 [은행 DB 진행 기록](status/2026-09-28-bank-storage.ko.md) → [초급 개발자용 저장 흐름](database/bank-connections.ko.md) → [파일별 실행 계획](superpowers/plans/2026-09-28-bank-storage.md) 순서로 읽습니다. [앞선 보호·CI 실행 결과](status/2026-09-28-public-protection-execution.ko.md), [전체 진행 지도](status/2026-09-24-project-map.ko.md)와 [Notion 기능별 현황](https://app.notion.com/p/817d15a21e174eac86a7d3608a21b457)에서 구현·미완료를 확인합니다. 일반 작업은 반복 승인 없이 진행하되 규모·파일·검증 기록을 남깁니다.
+현재 작업은 [은행 DB 완료 기록](status/2026-09-28-bank-storage.ko.md) → [초급 개발자용 저장 흐름](database/bank-connections.ko.md) → [다음 상태 처리 사전 점검](status/2026-09-29-bank-state-transitions-next.ko.md) 순서로 읽습니다. [파일별 실행 계획](superpowers/plans/2026-09-28-bank-storage.md), [앞선 보호·CI 실행 결과](status/2026-09-28-public-protection-execution.ko.md), [전체 진행 지도](status/2026-09-24-project-map.ko.md)와 [Notion 기능별 현황](https://app.notion.com/p/817d15a21e174eac86a7d3608a21b457)에서 구현·미완료를 확인합니다. 일반 작업은 반복 승인 없이 진행하되 규모·파일·검증 기록을 남깁니다.
 
 외부 코드의 적용 경로·출처·원문은 [라이선스 고지](../THIRD_PARTY_NOTICES.md), 이번 보완의 범위·검증은 [고지 보완 계획](superpowers/plans/2026-09-28-third-party-license-notices.md)에서 확인합니다. 로컬 반영과 원격 공개·보호 적용은 별개입니다.
 
@@ -12,7 +12,7 @@
 | --- | --- | --- |
 | 웹 | 로그인·가입·이메일 확인·비밀번호 복구 화면 5개, 인증 BFF route 14개 | 메인 `/`, 로그인 후 `/app` 장부 화면, 거래 입력·대시보드 |
 | 백엔드 | `/health`, 보호된 `/v1/me`, 요청 결속 JWT·재사용 방어 | 실제 금융 CRUD·집계·멱등 저장 API |
-| 데이터베이스 | main: 인증6개 + JWT replay1개. A2.1 기능 브랜치: 은행 연결3테이블·조회 RLS, 실제 DB 112개 검사 통과 | 은행 연결 상태 변경 함수, 계좌·카테고리·거래·이체 원장 |
+| 데이터베이스 | main: 인증6개 + JWT replay1개 + 은행 연결3테이블·조회 RLS, 실제 DB 112개 검사 통과 | 은행 연결 상태 변경 함수, 계좌·카테고리·거래·이체 원장 |
 | 공용 계약 | 계좌·분류·거래·이체의 Zod 입력/응답 검증, UUID 정규화 | 계약을 실제 DB 저장과 화면에 연결하는 작업 |
 | 모바일 | 웹과 같은 계정·API·DB를 쓰는 설계 | `apps/mobile`, Expo/React Native 코드·배포 |
 | 운영 | 로컬 검사·disposable CI 기반 | 실제 OAuth 공급자, 플랫폼 권한·풀러·백업·복구·경보 검증 |
