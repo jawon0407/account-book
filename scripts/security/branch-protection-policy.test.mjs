@@ -7,7 +7,6 @@ import test from "node:test";
 const approvedPolicy = {
   required_status_checks: {
     strict: true,
-    contexts: [],
     checks: [{ context: "security-gate", app_id: 15368 }],
   },
   enforce_admins: true,
@@ -44,6 +43,8 @@ test("local protection payload requires PR and the observed Actions check source
 
 // 정책 검사의 누락 방지용 변형 입력이다. GitHub 서버의 거부 동작을 흉내내지 않는다.
 const mutations = [
+  // 실제 보호 API가 두 표현의 동시 전송을 422로 거절한 회귀 사례다.
+  ["legacy contexts alongside app-bound checks", p => { p.required_status_checks.contexts = []; }],
   ["missing checks", p => { delete p.required_status_checks; }],
   ["null checks", p => { p.required_status_checks = null; }],
   ["outdated base permitted", p => { p.required_status_checks.strict = false; }],

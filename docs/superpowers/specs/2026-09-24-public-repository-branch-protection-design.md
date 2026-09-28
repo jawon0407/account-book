@@ -1,6 +1,8 @@
 # 무료·공개 저장소의 기본 브랜치 보호 설계안
 
-상태: 2026-09-28 로컬 보완과 T5 노출 감사 완료, G2 라이선스 고지 로컬 반영. G1 개인정보·G3 권리/최종 목록·P1 원격 보호는 미종결이다. 비공개 초안 PR 전송 계획은 승인됐지만 공개 전환·원격 보호 변경은 별도 승인 대상이다. [승인 보완 기록](../plans/2026-09-27-public-repository-autoplan-review.md), [실행 계획](../plans/2026-09-28-public-repository-local-hardening.md).
+상태: 2026-09-28 후속 사용자 G1/G3 확인과 최종 변경분 감사를 거쳐 PUBLIC 전환 및 main 보호 원격 적용·재조회를 완료했다. 아래 승인 대기 문구는 당시 설계 이력이며 최신 권한·진행 상태는 [후속 실행 계획](../plans/2026-09-28-public-protection-execution.md)과 [결과](../../status/2026-09-28-public-protection-execution.ko.md)가 우선한다. P1은 거부/정상 검증·독립 검토 전까지 미종결이다.
+
+요청 형식 정정: 실제 보호 API가 `contexts=[]`와 `checks`를 함께 보내면 422로 거절했다. 이후 로컬 JSON은 앱 출처가 결속된 `checks`만 사용한다. 서버 응답의 파생 `contexts`와 요청 payload를 혼동하지 않는다.
 
 ## 1. 사용자 의도와 범위
 

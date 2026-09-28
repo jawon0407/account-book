@@ -6,18 +6,19 @@
 
 ## 1. 현재 상태와 목표
 
-2026-09-28 확인 기준이다. [T5 노출 감사](2026-09-28-public-exposure-audit.ko.md)는 완료했고 G2 라이선스 고지는 로컬에 반영했다. G1 개인정보·G3 권리/최종 목록·P1 원격 보호는 미종결이며 공개 전환·원격 보호 변경은 하지 않았다. 무료 공개 저장소의 protected branch 지원은 [GitHub 공식 문서](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)에 근거한다.
+2026-09-28 후속 실행 기준이다. [T5 노출 감사](2026-09-28-public-exposure-audit.ko.md) 이후 변경분을 검사했고 사용자가 G1 개인정보 공개 수용·G3 자료 공개 권한을 확인했다. 저장소를 PUBLIC으로 바꾸고 아래 보호를 실제 적용·재조회했다. G2 고지 파일은 PR #14에 있으며 main 통합은 별도다. P1은 거부/정상 흐름·독립 검토까지 완료해야 종결한다. [실행 기록](../status/2026-09-28-public-protection-execution.ko.md), [GitHub 공식 지원 범위](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches).
 
 | 구분 | 현재 | 승인된 목표 / 완료 증거 |
 | --- | --- | --- |
-| 공개 범위 | 최근 조회는 비공개 | 전수 노출 점검과 최종 승인 후 공개, 실제 API 재조회 |
-| main 보호 | 이번 작업에서 활성 상태 미검증 | PR 필수·strict security-gate·앱 출처·관리자 적용을 원격 read-back |
+| 공개 범위 | PUBLIC 실제 확인 | 소유자 확인·최종 delta 감사 후 전환 |
+| main 보호 | 적용·재조회 통과 | PR 필수·strict security-gate·앱15368·관리자 적용, force/delete 금지 |
 | 로컬 목표 JSON | 필수 검사와 merge 호환 정책 반영 | 파일은 요청 payload일 뿐 서버 적용 증거 아님 |
-| secret scanning / push protection | 과거 제한 기록, 현재 활성 미검증 | 각각 실제 상태와 차단 증거를 확인 |
+| secret scanning / push protection | 모두 enabled 실제 확인 | 활성 설정 증거이며 실제 키를 밀어 넣는 탐지 실험은 하지 않음 |
+| 외부 PR / 신고 | 전체 외부 기여자 실행 승인·비공개 신고 활성 | Actions 복원·기본 토큰 읽기 전용·PR 승인 불가 재조회 |
 | 본인 최종 확인 | PR 양식으로 기록하는 절차 | 최신 H/B/C·실행·검사 정의에 결속, 타인 강제 승인 0 |
 | 간접 병합 P1 | 미종결 | 목표 재정의만으로 닫지 않고 원격 정상/거부 흐름과 독립 확인 필요 |
 
-목표 JSON의 `required_status_checks`는 `strict=true`, `contexts=[]`, `checks=[{context:"security-gate", app_id:15368}]`다. [보호 API 계약](https://docs.github.com/en/rest/branches/branch-protection#update-branch-protection)의 앱 결속 checks를 사용하며 any-source로 완화하지 않는다. PR 객체는 유지하고 required_approving_review_count=0, enforce_admins=true, force/delete=false, conversation_resolution=true, linear_history=false다. 일반 merge/squash는 유지하되 rebase 비활성화는 별도 승인된 원격 변경이다. main-provenance는 main push 전용이므로 PR 필수 검사에 넣지 않는다.
+요청 JSON의 `required_status_checks`는 `strict=true`, `checks=[{context:"security-gate", app_id:15368}]`다. 구형 `contexts`는 보내지 않는다. 실제 API가 `contexts`와 `checks` 동시 제출을 422로 거절해 회귀 테스트 후 수정했다. [보호 API 계약](https://docs.github.com/en/rest/branches/branch-protection#update-branch-protection)의 앱 결속 checks를 사용하며 any-source로 완화하지 않는다. PR 객체는 유지하고 required_approving_review_count=0, enforce_admins=true, force/delete=false, conversation_resolution=true, linear_history=false다. 일반 merge/squash를 유지하고 rebase는 실제 비활성화했다. main-provenance는 main push 전용이므로 PR 필수 검사에 넣지 않는다.
 
 앱 ID 15368은 2026-09-28 main `9e2ff81b88c8f6290f68c9bebb1b4bb43493cac5`의 [security-gate 실행](https://github.com/jawon0407/account-book/actions/runs/35832112508/job/107086890347)에서 `github-actions`로 조회했다. 해당 실행의 결론은 failure였으므로 출처 확인만 의미한다. 원격 적용 직전 실제 후보에서도 출처를 재확인한다.
 
