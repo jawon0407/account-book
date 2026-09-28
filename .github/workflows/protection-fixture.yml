@@ -1,0 +1,16 @@
+name: protection-fixture
+on:
+  pull_request:
+    branches: [feature/protection-validation-20260928]
+permissions: {}
+concurrency:
+  group: protection-fixture-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  fixture-observer:
+    name: fixture-observer
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Synthetic missing condition
+        run: exit 0
