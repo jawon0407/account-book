@@ -38,6 +38,8 @@
 - 내부 증거: .superpowers/public-audit/delta-20260928.json 및 .superpowers/public-protection/의 값 제거 기록. Git 제외 상태 유지.
 - 기존 보호 대상 PR #14와 A1 PR #13의 통합은 각각 최신 CI·변경 범위 확인 뒤 정상 PR 경로로 한다. 보호 우회나 admin 강제 병합을 사용하지 않는다.
 
+Task4 추가 범위: PR CI만 반복 실패한 원인을 조사해 Playwright의 보고서용 Git diff 수집이 전체 이력을 shallow로 변경함을 재현했다. 테스트 설정1파일·실제 runner 회귀1파일과 결과/운영 문서를 수정한다. 브라우저 검사나 보안 gate 자체는 변경하지 않는다. 이 새 동작 변경은 별도 독립 리뷰와 새 후보 CI 대상이다.
+
 ## Task 1: 최종 변경분 감사
 
 **Inputs:** 이전 T5 감사 스냅샷, 사용자 G1/G3 확인, PR14 H7ca4868/B9e2ff81.
@@ -88,7 +90,7 @@
 
 ## 검증과 출처
 
-- 이번은 설정/문서 작업이므로 제품 테스트를 새로 만들지 않는다. 기존 security185/verify1149/DB22/Chromium10 증거는 후보7ca4868의 결과이며 새 후보에는 재검증한다.
+- 최초 범위는 설정/문서 작업이었다. 실제 protection API 계약 회귀와 이후 Playwright Git 이력 훼손 회귀를 추가했다. 기존 security185/verify1149/DB22/Chromium10 증거는 후보7ca4868의 결과이며 새 후보에는 재검증한다.
 - CSO 적용 범위는 공개 노출 변경분과 GitHub 설정이다. 전역 스킬 스캔·텔레메트리 전송·도구 업그레이드·앱 침투 테스트는 포함하지 않는다.
 - [GitHub protection API](https://docs.github.com/en/rest/branches/branch-protection).
 - [외부 PR 실행 승인 API](https://docs.github.com/en/rest/actions/permissions#set-fork-pr-contributor-approval-permissions-for-a-repository).

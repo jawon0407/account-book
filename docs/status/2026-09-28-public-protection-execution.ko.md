@@ -34,6 +34,18 @@ PR #14의 라이선스/CI 보완과 PR #13의 은행 보안 기반은 아직 mai
 
 ## 기능별 다음 순서
 
+### PR에서만 실패하던 이력 검사 원인과 수정
+
+후보 `dbe910f`의 push 실행36396500422는 성공했지만 PR 실행36396505166의 attempt1·2는 마지막 범위 검사에서 `SHALLOW_REPOSITORY_UNSUPPORTED`로 실패했다. 앞선 전체 검증·커버리지·DB·브라우저·의존성 단계는 통과했다. 실패를 삭제하거나 단순 재실행 성공으로 대체하지 않는다.
+
+전체 이력을 가져오는 checkout 자체는 정상이었다. 격리 실행36397514031에서 같은 PR merge commit으로 checkout·설치·legacy·범위 검사까지 성공했고, 설치된 Playwright1.61.1의 Git 정보 플러그인에서 원인을 확인했다. PR 이벤트의 base SHA가 있으면 보고서용 diff 수집이 `git fetch origin <base> --depth=1`을 실행한다. 이 과정이 마지막 보안 검사 전에 저장소를 shallow 상태로 만들었다.
+
+변경 범위는 `tests/e2e/playwright.config.ts`의 보고서 메타데이터 설정과 `playwright-config.test.ts`의 회귀 검증이다. 실제 브라우저 테스트, 전체 이력 보안 검사, checkout 깊이는 바꾸지 않는다. `captureGitInfo: { commit: false, diff: false }`로 불필요한 보고서용 소스·작성자 복제도 막는다. 이 설정의 CI 기본 동작은 [Playwright 공식 문서](https://playwright.dev/docs/api/class-testconfig#test-config-capture-git-info)를 참조한다.
+
+회귀는 문자열 검색이나 Git mock이 아니다. 테스트가 만든 3개 커밋의 임시 저장소와 `file://` origin, 합성 PR 이벤트에서 실제 Playwright runner를 실행한다. RED에서는 정상 이력이 shallow로 변경됐고, 수정 후 GREEN에서는 3개 커밋과 전체 이력이 보존되며 보고서에 gitDiff/gitCommit이 없는 것을 확인했다(2/2). 실제 은행·브라우저·DB 접근은 이 회귀 안에서 하지 않는다.
+
+수정 후 `pnpm verify` exit0: lint·타입·빌드 및 1,151개(193+66+15+148+643+86) 통과. 사용자 `.gitignore` 변경은 그대로 보존하고 커밋에서 제외한다. 새 원격 CI·main 통합은 이 로컬 성공과 구분해 별도 기록한다.
+
 ### 보호 조건의 실제 거부·정상 검증
 
 앱 이력과 연결되지 않은 합성 문서·workflow만으로 `feature/protection-validation-20260928` 브랜치를 만들고 main과 같은 핵심 보호값을 적용했다. [검증 PR #15](https://github.com/jawon0407/account-book/pull/15)와 [기준 갱신 PR #16](https://github.com/jawon0407/account-book/pull/16)은 main 대상이 아니다.

@@ -51,6 +51,9 @@ export default defineConfig({
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
   reporter: "list",
+  // PR 보고서용 diff 수집은 내부적으로 --depth=1 fetch를 수행한다.
+  // 전체 이력을 검사하는 보안 gate를 보존하고 보고서에 소스/작성자 정보를 복제하지 않는다.
+  captureGitInfo: { commit: false, diff: false },
   use: {
     baseURL,
     browserName: "chromium",
