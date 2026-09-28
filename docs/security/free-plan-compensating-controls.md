@@ -176,8 +176,8 @@ CI 성공은 GitHub branch protection이 활성화됐다는 증거가 아니다.
 
 | 종료 대상 | 필요한 증거 | 현재 |
 | --- | --- | --- |
-| 공개 점검 | 전체 목록·동결·직전 delta·권리·최종 승인 | G1/G3 소유자 확인·최종 delta 감사 후 2026-09-28 PUBLIC 전환 완료; 라이선스 고지 main 반영은 PR #14 통합 대기 |
-| main 보호 / P1 | 원격 목표 값, rebase 비활성화, 후보 CI, 승인된 무민감 fixture의 거부/정상 흐름, 정상 PR/main 실행, 독립 확인 | 원격 read-back·격리 PR #15/#16 거부/정상 검증 완료. 최신 PR #14/main CI 전이므로 P1 유지 |
+| 공개 점검 | 전체 목록·동결·직전 delta·권리·최종 승인 | G1/G3 소유자 확인·최종 delta 감사 후 2026-09-28 PUBLIC 전환 완료; 라이선스 고지도 PR #14로 main 반영 |
+| main 보호 / P1 | 원격 목표 값, rebase 비활성화, 후보 CI, 승인된 무민감 fixture의 거부/정상 흐름, 정상 PR/main 실행, 독립 확인 | 원격 read-back·격리 PR #15/#16 검증·독립 리뷰·PR #14/#17 정상 통합·main36400707374 성공. 서버 조건 강제 범위 P1 종결, UI/API 경로 독점·관리자 침해 방어 주장은 제외 |
 | secret 보호 | secret scanning·push protection 각 상태 및 승인된 합성 canary 검증 | 두 설정 enabled 재조회 완료; canary 탐지 실험은 미실행 |
 
 실제 main에 우회 코드를 push하지 않는다. 승인된 무민감 격리 fixture의 실행 기록과 실제 앱 통합 증거를 구분한다. 각 종료일·대상·증거를 따로 기록하고 로컬/CI 게이트는 유지한다. 상세 범위는 [공개 보호 설계](../superpowers/specs/2026-09-24-public-repository-branch-protection-design.md), [원격 실행 계획](../superpowers/plans/2026-09-28-public-protection-execution.md), [최신 결과 기록](../status/2026-09-28-public-protection-execution.ko.md)을 따른다.
