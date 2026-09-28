@@ -4,5 +4,5 @@
     "noEmit": true,
     "skipLibCheck": true
   },
-  "include": ["*.ts"]
+  "include": ["*.ts", "support/**/*.ts"]
 }
