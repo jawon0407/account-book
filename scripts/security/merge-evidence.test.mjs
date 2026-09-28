@@ -5,6 +5,22 @@ import { assertMainMergeEvidence, normalizeMainPushContext, assertProvenanceJobR
 import { mainFixture } from "./merge-evidence.test-fixtures.mjs";
 
 const prove = (f) => assertMainMergeEvidence({ base: f.options.base, head: f.options.head, evidence: f });
+test("records association for single-parent indirect merge without proving transport", () => {
+  const f = mainFixture();
+  f.candidate.head.sha = f.context.after;
+  f.pullRequest.head.sha = f.context.after;
+  f.commit.parents = [f.context.before];
+  // 직접 도달 뒤 merged로 기록된 PR도 이 입력을 만족한다. 경로 허가 증명이 아니다.
+  assert.equal(prove(f).prNumber, 12);
+});
+
+test("two-parent association cannot distinguish a locally created merge transport", () => {
+  const f = mainFixture();
+  // 동일한 커밋은 로컬에서도 만들 수 있다. fixture에는 전송 경로를 구분할 입력이 없다.
+  assert.deepEqual(f.commit.parents, [f.context.before, f.pullRequest.head.sha]);
+  assert.deepEqual(prove(f), { prNumber: 12, sha: f.context.after });
+});
+
 test("accepts real merge and single-result commits, ignoring moving base SHA", () => {
   const f = mainFixture();
   assert.deepEqual(normalizeMainPushContext(f), f.context);

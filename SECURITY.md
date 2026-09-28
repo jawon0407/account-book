@@ -24,6 +24,7 @@
 
 - 저장소 소유자에게 접근 가능한 비공개 채널로 전달한다.
 - GitHub Security Advisory를 사용할 수 있으면 비공개 초안을 생성한다.
+- 현재 공개 방문자가 이용할 수 있는 비공개 신고 채널은 확인 전이다. 공개 전환 전 소유자가 GitHub private vulnerability reporting 또는 접근 가능한 별도 비공개 채널을 실제 확인하고 안내를 갱신한다. 채널이 보이지 않는다고 공개 Issue에 취약점·비밀값을 올리지 않는다.
 - 보고에는 영향받는 기능, 재현 조건, 관찰 시각과 시간대, 예상 영향, 관련 요청 ID를 포함한다.
 - 실제 토큰, 비밀번호, 전체 계좌 식별자, 거래 원문은 보고서에 복사하지 않는다. 필요한 증거는 마스킹하고 별도 보호 채널로 공유한다.
 
@@ -43,11 +44,15 @@
 
 중간 등급 위험을 임시 수용하려면 악용 시나리오, 영향, 보완 통제, 소유자, 재검토일을 기록해야 한다. 재검토 기한은 원칙적으로 30일을 넘기지 않는다.
 
-## GitHub 무료 플랜 운영 제한
+## GitHub 무료 플랜 보호 상태
 
-비공개 저장소의 branch protection/rulesets와 secret scanning/push protection은 현재 무료 플랜에서 사용할 수 없다. API 확인 결과는 각각 HTTP 403과 HTTP 422였으며, Dependabot vulnerability alerts와 automated security fixes는 활성화되어 있다.
+2026-07-17 비공개 저장소 조회에서 보호 설정은 HTTP 403, secret 보호는 HTTP 422였고 Dependabot 알림/자동 수정은 활성화돼 있었다. 이는 당시 기록이지 모든 무료 저장소의 제한은 아니다. 2026-09-28 최근 확인은 비공개이며, 승인된 방향은 전수 공개 점검 후 무료 공개 저장소의 main 보호를 사용하는 것이다. 공개 전환과 원격 보호 적용은 아직 수행하지 않았다.
+
+로컬 목표는 PR 필수·타인 필수 승인 0·strict security-gate(관측 앱 ID 15368)·관리자 적용·force/delete 금지다. 일반 merge/squash를 지원한다. JSON 존재/로컬 테스트 성공은 원격 보호 증거가 아니다. 본인 최종 확인은 H/B/C와 run/event에 연결하는 운영 절차이며 서버가 독립 사람 승인을 강제하지는 않는다.
 
 `main` 직접 push는 정책상 금지하고 `.githooks/pre-push`, 공통 `scripts/security-gate.mjs`, 읽기 전용 GitHub Actions와 PR 수동 검토로 보완한다. 로컬 hook은 `--no-verify`로 우회할 수 있고 CI는 이미 GitHub에 도달한 push를 되돌릴 수 없으므로 이 구성은 서버 측 보호와 동등하지 않다. 설치, 검증, 사고 처리와 위험 종료 조건은 [GitHub 무료 플랜 보완 통제](docs/security/free-plan-compensating-controls.md)를 따른다.
+
+PR·커밋 연관성은 병합 전송 경로 증명이 아니다. 간접 병합 P1은 원격 정상/거부 검증과 독립 확인 전까지 미종결이다. 공개 점검·main 보호·secret 보호의 완료 여부를 따로 기록한다. 같은 Actions 앱/체크 이름/digest만으로 검사 내용을 신뢰하지 않고 최종 정의 diff와 실제 실행을 확인한다.
 
 ## Security Documentation
 

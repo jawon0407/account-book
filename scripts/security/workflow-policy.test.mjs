@@ -547,9 +547,18 @@ test("pull request template keeps its Korean policy evidence in UTF-8", () => {
     "## 보안 영향",
     "## 데이터베이스와 롤백",
     "## 알려진 잔여 위험",
-    "- [ ] PR head SHA와 CI가 검사한 SHA가 같다.",
+    "- [ ] H/B/C와 실행 결과의 대응을 확인했다.",
+    "- [ ] head/base/검사 정의가 바뀌면 이전 확인은 무효다.",
+    "- [ ] workflow·보안 scripts·package scripts의 최종 diff를 확인했다.",
+    "- PR head SHA (H):",
+    "- base SHA (B):",
+    "- CI checkout SHA (C):",
+    "- run ID:",
+    "- event:",
+    "- run URL:",
+    "- 최종 본인 확인자/시각:",
     "- [ ] 코드, diff, 로그, fixture에 실제 비밀정보나 재무 데이터가 없다.",
-    "- [ ] GitHub 무료 플랜에서 main 보호와 push protection이 강제되지 않는 잔여 위험을 확인했다.",
+    "- [ ] 원격 main 보호와 secret 보호의 실제 상태를 각각 확인했다.",
     "- [ ] 마이그레이션 없음 또는 마이그레이션·롤백 절차를 기록했다.",
     "- 위험:",
     "- 수용 또는 후속 조치:",
@@ -558,5 +567,6 @@ test("pull request template keeps its Korean policy evidence in UTF-8", () => {
   for (const line of requiredLines) {
     assert.ok(lines.includes(line), `missing UTF-8 policy line: ${line}`);
   }
+  assert.ok(!source.includes("PR head SHA와 CI가 검사한 SHA가 같다."));
   assert.ok(!lines.includes("## 蹂寃?紐⑹쟻怨?踰붿쐞"));
 });

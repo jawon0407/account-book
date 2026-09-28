@@ -1,14 +1,31 @@
-# GitHub 무료 플랜 보완 통제
+# GitHub 무료 플랜 보호 운영 — 현재 통제와 공개 전환
 
-이 문서는 GitHub 무료 플랜의 비공개 저장소에서 사용할 수 없는 서버 측 통제를 대신해 현재 적용한 통제, 운영 절차, 남은 위험을 설명한다. 구현의 기술 구조는 [보안 아키텍처](security-architecture.md), 검토 시 확인할 항목은 [보안 검증 체크리스트](verification-checklist.md)를 함께 본다.
+이 문서는 현재의 로컬/CI 보완 통제와 승인된 무료·공개 저장소 보호 목표를 구분한다. 로컬 JSON 수정은 GitHub 서버 설정 변경이 아니다. 구현의 기술 구조는 [보안 아키텍처](security-architecture.md), 검토 항목은 [보안 검증 체크리스트](verification-checklist.md)를 함께 본다.
 
 > 2026-09-24 주의: 아래 main 병합 증빙 개선은 기능 브랜치의 미배포 구현이다. 독립 리뷰에서 간접 병합 관련 P1이 발견되어 반영을 보류했다. GitHub가 직접 push 뒤에도 PR을 merged로 표시할 수 있으므로, 상태·SHA·부모의 일치만으로 모든 직접 push를 탐지한다고 해석하면 안 된다. [상세 기록](../status/2026-09-24-ci-merge-provenance.ko.md), [GitHub 근거](https://docs.github.com/en/pull-requests/reference/pull-request-merges#indirect-merges).
 
-## 1. 확인된 플랫폼 상태
+## 1. 현재 상태와 목표
+
+2026-09-28 확인 기준이다. [T5 노출 감사](2026-09-28-public-exposure-audit.ko.md)는 완료했고 G2 라이선스 고지는 로컬에 반영했다. G1 개인정보·G3 권리/최종 목록·P1 원격 보호는 미종결이며 공개 전환·원격 보호 변경은 하지 않았다. 무료 공개 저장소의 protected branch 지원은 [GitHub 공식 문서](https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-protected-branches/about-protected-branches)에 근거한다.
+
+| 구분 | 현재 | 승인된 목표 / 완료 증거 |
+| --- | --- | --- |
+| 공개 범위 | 최근 조회는 비공개 | 전수 노출 점검과 최종 승인 후 공개, 실제 API 재조회 |
+| main 보호 | 이번 작업에서 활성 상태 미검증 | PR 필수·strict security-gate·앱 출처·관리자 적용을 원격 read-back |
+| 로컬 목표 JSON | 필수 검사와 merge 호환 정책 반영 | 파일은 요청 payload일 뿐 서버 적용 증거 아님 |
+| secret scanning / push protection | 과거 제한 기록, 현재 활성 미검증 | 각각 실제 상태와 차단 증거를 확인 |
+| 본인 최종 확인 | PR 양식으로 기록하는 절차 | 최신 H/B/C·실행·검사 정의에 결속, 타인 강제 승인 0 |
+| 간접 병합 P1 | 미종결 | 목표 재정의만으로 닫지 않고 원격 정상/거부 흐름과 독립 확인 필요 |
+
+목표 JSON의 `required_status_checks`는 `strict=true`, `contexts=[]`, `checks=[{context:"security-gate", app_id:15368}]`다. [보호 API 계약](https://docs.github.com/en/rest/branches/branch-protection#update-branch-protection)의 앱 결속 checks를 사용하며 any-source로 완화하지 않는다. PR 객체는 유지하고 required_approving_review_count=0, enforce_admins=true, force/delete=false, conversation_resolution=true, linear_history=false다. 일반 merge/squash는 유지하되 rebase 비활성화는 별도 승인된 원격 변경이다. main-provenance는 main push 전용이므로 PR 필수 검사에 넣지 않는다.
+
+앱 ID 15368은 2026-09-28 main `9e2ff81b88c8f6290f68c9bebb1b4bb43493cac5`의 [security-gate 실행](https://github.com/jawon0407/account-book/actions/runs/35832112508/job/107086890347)에서 `github-actions`로 조회했다. 해당 실행의 결론은 failure였으므로 출처 확인만 의미한다. 원격 적용 직전 실제 후보에서도 출처를 재확인한다.
+
+### 과거 기록: 2026-07-17
 
 2026-07-17에 저장소 설정을 실제로 조회하고 변경을 시도한 결과는 다음과 같다.
 
-| 항목 | 현재 상태 | 확인 결과 |
+| 항목 | 당시 상태 | 당시 확인 결과 |
 |---|---|---|
 | 저장소 공개 범위 | 비공개 유지 | 비공개 저장소로 확인 |
 | branch protection/rulesets | 사용할 수 없음 | API HTTP 403 |
@@ -16,7 +33,7 @@
 | Dependabot vulnerability alerts | 활성화 | 설정 조회로 확인 |
 | Dependabot automated security fixes | 활성화 | 설정 조회로 확인 |
 
-따라서 GitHub 서버는 `main` 직접 push, 강제 push, 브랜치 삭제, 필수 PR 검토 또는 비밀정보가 포함된 push를 현재 설정으로 사전 차단하지 않는다. 저장소의 `.github/settings/main-protection.json`은 지원 플랜에서 적용할 목표 설정이며, 활성 상태를 의미하지 않는다.
+이 과거 기록을 모든 무료 저장소의 현재 제한으로 일반화하지 않는다. `.github/settings/main-protection.json`의 존재나 CI 성공으로 원격 보호 활성화를 추정하지 않는다.
 
 ## 2. 적용한 보완 통제
 
@@ -49,9 +66,13 @@
 
 workflow를 의도적으로 바꿀 때는 변경의 보안 영향을 검토하고 전체 파일 digest와 구조 assertion을 같은 변경에서 갱신한 뒤 `pnpm test:security-gate`를 실행한다. digest만 갱신해 실패를 없애는 것은 승인 절차가 아니다.
 
+같은 GitHub Actions 앱·체크 이름은 **누가 체크를 보냈는지**를 제한할 뿐 **무슨 검사를 했는지**를 보장하지 않는다. 테스트와 digest도 같은 PR에서 바뀔 수 있다. 본인이 workflow·보안 scripts·package scripts 최종 diff와 실제 job/step 실행을 확인해야 한다. GitHub는 필수 체크의 skipped/neutral을 허용할 수 있으므로 서버 보호가 이것까지 항상 실패시킨다고 주장하지 않는다. 이 프로젝트의 확인 절차에서는 품질 검사가 실제 완료되지 않은 후보를 승인하지 않는다.
+
 ## 3. 설치와 일상 검증 방법
 
-저장소를 새로 clone하거나 worktree를 만들면 다음 명령을 실행한다.
+### 준비: 설치와 조회를 구분하기
+
+Node 22.15.1·pnpm 11.9.0·Git·GitHub CLI가 필요하다. 이미 설치된 환경에서는 재설치하지 않는다. `gh auth status`로 인증 상태만 확인하고 토큰 출력 옵션은 사용하지 않는다. 새 clone/worktree에서 다음 설치는 로컬 Git 설정을 바꾸므로 별도로 의식해서 실행한다.
 
 ```powershell
 pnpm setup:hooks
@@ -62,14 +83,39 @@ pnpm verify:structure
 
 두 번째 명령은 정확히 `.githooks`를 출력해야 한다. 설치 또는 read-back이 실패하면 push를 진행하지 않는다. 테스트 통과 개수는 코드와 함께 변하므로 문서에 고정하지 않고 명령 출력과 검사한 commit SHA를 PR 증거에 기록한다.
 
-일상 변경 흐름은 다음과 같다.
+### 읽기 전용 첫 확인
+
+아래 번호는 예시가 아니라 현재 작업 대상 PR 번호로 입력한다. 이번 로컬 보완은 아직 push/PR 생성하지 않았다. 첫 확인의 목표는 짧게 상태를 파악하는 것이며 소요 시간은 실측하지 않았다.
+
+```powershell
+$pr = Read-Host '확인할 PR 번호'
+gh pr view $pr --repo jawon0407/account-book --json headRefOid,baseRefOid,url
+gh pr checks $pr --repo jawon0407/account-book
+gh pr checks $pr --repo jawon0407/account-book --required
+gh api repos/jawon0407/account-book/branches/main/protection
+```
+
+전체 체크 목록과 required 목록을 둘 다 본다. 빈 required 목록은 검사가 필요 없다는 허가가 아니라 보호 설정을 확인할 이유다. API 응답은 로컬 요청 JSON과 형태가 다르므로 객체 전체를 비교하지 말고 strict/checks의 context·app_id, PR 승인 수, admins.enabled, force/delete.enabled, linear.enabled, conversation.enabled를 대조한다. contexts는 서버가 checks에서 파생하여 반환할 수 있다. 중복 classic 규칙·ruleset 적용 여부도 원격 변경 전에 확인한다.
+
+| 상태 | 의미 / 다음 행동 |
+| --- | --- |
+| 인증 실패 | 로그인 계정·권한을 확인, 토큰을 채팅/로그에 출력하지 않음 |
+| pending | 아직 실행 중. [gh pr checks](https://cli.github.com/manual/gh_pr_checks)의 종료 코드 8은 성공 아님 |
+| failure / cancelled | 원인과 해당 run 확인 후 수정/재실행, 검사 제거 금지 |
+| 체크 없음 / skipped / neutral | 실제 필수 품질 단계 실행을 확인하기 전 본인 승인 보류 |
+| 보호 조회 403 / 404 | 권한·가시성·플랜·규칙 존재 여부 미확인, 자동 성공/우회 금지 |
+| 보호 값 불일치 | 실제 적용 완료로 표시하지 않고 변경·병합 중단 |
+
+### 일상 변경과 본인 확인
 
 1. `feature/*` 또는 `hotfix/*`에서 변경하고 집중 테스트와 전체 테스트를 실행한다.
 2. 로컬 pre-push 게이트를 통과해 원격 브랜치로 push한다.
 3. `main` 또는 `maintenance-branch`를 대상으로 PR을 만든다.
-4. 로컬 `git rev-parse HEAD`, PR의 `headRefOid`, 성공한 `security-gate` Check의 SHA가 같은지 확인한다.
+4. PR 양식에 H(PR head), B(검사 기준 base), C(실제 checkout), run ID/event/URL을 각각 기록한다. PR 실행은 시험 병합 커밋 C를 검사할 수 있어 H=C를 강제하지 않는다. 현재 PR 값만 보지 말고 해당 실행의 checkout 로그와 실행 당시 PR/base 기록을 대조한다. 확인할 증거가 없으면 미검증이다.
 5. [검증 체크리스트](verification-checklist.md)를 수동으로 확인하고 일반 merge commit 또는 squash merge한다. 여러 커밋 rebase·배치 main 갱신·merge queue는 이번 정책의 지원 범위가 아니다.
 6. 승인된 병합 뒤 새 main push 실행에서 `main-provenance`와 `security-gate`가 모두 성공했는지 확인한다. 과거 실패 실행 재시작은 새 정책 코드의 검증이 아니다.
+
+확인자는 검사 정의 diff·전체 단계 결과·후보 H/B/C를 확인한 후 이름과 시각을 기록한다. head/base/검사 정의가 변경되면 이전 확인은 무효이며 새 실행과 새 확인이 필요하다. 이는 사람의 운영 절차이고 필수 타인 승인 0 설정이 본인 확인을 자동 강제하는 것은 아니다.
 
 ### 정상 병합을 확인하는 흐름
 
@@ -91,7 +137,7 @@ pnpm verify:structure
 - 이벤트 파일은 일반 파일만 최대 4MiB까지 읽는다. 그보다 큰 정상 이벤트도 확인 불가로 종료될 수 있어 검토 없이 한도를 우회하지 않는다.
 - Git/구조 검사 자식 프로세스에는 GITHUB_TOKEN/GH_TOKEN을 대소문자 구분 없이 제거한 환경을 전달한다. 토큰·원시 이벤트·응답·HTTP 오류 원문은 로그나 증빙 파일에 기록하지 않는다.
 
-CI 성공은 GitHub branch protection이 활성화됐다는 증거가 아니다. 반드시 같은 SHA의 결과인지 별도로 확인한다.
+CI 성공은 GitHub branch protection이 활성화됐다는 증거가 아니다. 해당 후보의 H/B/C·실행 결과와 원격 보호 상태를 각각 확인한다.
 
 ## 4. 수용한 잔여 위험
 
@@ -99,7 +145,7 @@ CI 성공은 GitHub branch protection이 활성화됐다는 증거가 아니다.
 
 따라서 현재 통제는 실수와 알려진 형식의 비밀정보 유출 가능성을 줄이는 방어 심층화 계층이지 branch protection, rulesets 또는 GitHub push protection과 동등한 통제가 아니다. 규칙이 알지 못하는 비밀정보 형식은 사람의 검토가 필요하다. 5 MiB 초과 blob은 단순 수동 승인 대상이 아니라 게이트가 해소될 때까지 push와 merge를 막는 조건이다.
 
-`.github/CODEOWNERS`는 보안 관련 변경의 검토 책임자를 표시하지만 현재 플랜에서는 code owner 승인을 서버가 필수로 강제하지 않는다. `.github/pull_request_template.md`도 검토 증거 누락을 드러내는 운영 도구이며 체크하지 않은 항목을 자동 차단하지 않는다.
+`.github/CODEOWNERS`는 검토 책임자를 표시하지만 승인된 목표도 code owner/타인 승인을 필수로 강제하지 않는다. `.github/pull_request_template.md`는 누락을 드러내는 운영 도구이며 체크하지 않은 항목을 자동 차단하지 않는다. 관리자에게 보호를 적용해도 관리자가 규칙 자체를 변경할 권한까지 제거하지는 못하므로 MFA·계정 권한·설정 변경 기록을 별도로 관리한다.
 
 ## 5. 사고 처리
 
@@ -114,15 +160,23 @@ CI 성공은 GitHub branch protection이 활성화됐다는 증거가 아니다.
 
 실행 ID·검사 SHA·안전한 오류 코드와 PR 상태를 보존한다. API 반영 지연은 동일 이벤트 재실행으로 확인하되 지속 실패를 자동 재시도나 main 검사 제외로 숨기지 않는다. 지원하지 않는 병합 방식이 원인이면 별도 설계·테스트 후 정책을 확장한다.
 
+현재 사후 증빙→품질 순서를 유지하므로 main 증빙 조회 장애가 나면 후속 품질 검사가 실행되지 않을 수 있다. 보고서는 증빙 실패와 품질 미실행을 구별한다. 원인이 해소된 뒤 같은 이벤트를 수동 재실행한다. 새 코드 검증이 필요하다면 승인된 새 PR/이벤트가 필요하며, 사후 CI가 main 변경을 자동 취소하지는 않는다.
+
 직접 `main` push 또는 게이트 우회가 확인되면 추가 작업을 중단하고 SHA와 관련 CI 결과를 보존한 뒤 영향을 평가한다. 정상 `hotfix/*` 또는 `feature/*` PR로 복구하고 원인, 영향, 재발 방지를 기록한다.
 
 실제 비밀정보가 Git 기록에 포함됐으면 commit 삭제만으로 해결된 것으로 간주하지 않는다. 즉시 해당 자격 증명을 폐기·회전하고 [사고 대응 절차](incident-response.md)를 따른다. 실제 일치 값은 이슈, PR, 로그 또는 fixture에 복사하지 않는다.
 
-## 6. 위험 수용 종료 조건
+## 6. 공개 전 점검과 단계별 종료 조건
 
-지원 플랜 또는 동등한 서버 측 통제를 사용할 수 있게 되면 다음 항목을 API live read-back으로 확인하고 확인 날짜, 응답, 대상 저장소를 보안 변경 기록에 남긴다.
+1. 공개할 refs·태그·전체 이력, PR 본문/댓글, Actions 로그/artifact, 스크린샷/첨부, DB 덤프/백업, raon 자료, 외부 자산·라이선스·공개 권리를 목록화한다. Git 검사만으로 전체 노출 점검을 대신하지 않는다.
+2. **최종 목록 확정 시점부터 동결**하고 시각·refs SHA·검토한 항목/미검증 항목을 기록한다. 접근 불가나 미확인 자료가 있으면 공개 보류다. 실제 키 발견 시 폐기·교체를 먼저 하고 이력 정리는 별도 승인받는다.
+3. 보고서 검토 후 공개 전환의 최종 승인을 받는다. 전환 직전 목록과 변경분을 다시 확인하며 차이가 있으면 감사·확인을 갱신한다. 소스 공개는 DB 공개와 다르지만 이력의 금융정보 노출은 별개다. 다시 비공개로 바꿔도 복제본은 회수할 수 없다.
+4. 별도 승인된 원격 단계에서 공개·보호를 적용하고 read-back한다. 두 변경이 원자적이라고 가정하지 않는다. 보호 실패 시 동결을 유지하고 main push·병합·배포를 하지 않는다.
 
-- `main`에 PR 필수, 강제 push 금지, 삭제 금지와 필요한 status check가 서버에서 강제된다.
-- secret scanning과 push protection이 활성화되어 push 전에 차단한다.
+| 종료 대상 | 필요한 증거 | 현재 |
+| --- | --- | --- |
+| 공개 점검 | 전체 목록·동결·직전 delta·권리·최종 승인 | T5 감사 완료, G2 로컬 반영; G1/G3·최종 delta/공개 승인 대기 |
+| main 보호 / P1 | 원격 목표 값, rebase 비활성화, 후보 CI, 승인된 무민감 fixture의 거부/정상 흐름, 정상 PR/main 실행, 독립 확인 | 미검증, P1 유지 |
+| secret 보호 | secret scanning·push protection 각 상태 및 승인된 합성 canary 검증 | 미검증 |
 
-그 뒤 이 문서에 위험 수용 종료일과 증거를 기록한다. 로컬 및 CI 게이트는 서버 측 통제가 생긴 뒤에도 방어 심층화 계층으로 유지한다.
+실제 main에 우회 코드를 push하지 않는다. 거부 실험을 위한 임시 보호 브랜치/테스트 저장소 생성도 별도 승인이다. 각 종료일·대상·증거를 따로 기록하고 로컬/CI 게이트는 유지한다. 상세 범위는 [공개 보호 설계](../superpowers/specs/2026-09-24-public-repository-branch-protection-design.md), [실행 계획](../superpowers/plans/2026-09-28-public-repository-local-hardening.md), [결과 기록](../status/2026-09-24-ci-merge-provenance.ko.md)을 따른다.

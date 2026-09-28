@@ -25,6 +25,8 @@ The approved target is a separate PC web and native mobile app, not an installab
 
 ## Documentation
 
+- [저장소 보호 운영: 읽기 확인·PR 증거·공개 전 중단 조건](docs/security/free-plan-compensating-controls.md)
+- [현재 CI 보호 보완과 검증 기록 — 원격 적용/P1 종결은 별도](docs/status/2026-09-24-ci-merge-provenance.ko.md)
 - [문서 전체 지도와 최신 상태](docs/README.md)
 - [초급 개발자용 코드 읽기: 역할·매개변수·실제 호출 흐름](docs/guides/code-reading.ko.md)
 - [프론트엔드 구현 설명](docs/architecture/frontend.ko.md)
@@ -46,6 +48,8 @@ The approved target is a separate PC web and native mobile app, not an installab
 - [초기 제품 설계 — PWA 방향을 포함한 과거 기록](docs/superpowers/specs/2026-07-16-account-book-app-design.md)
 - [Testing guide](docs/guides/testing.md)
 - [Changelog](CHANGELOG.md)
+
+외부 개발 도구 복사본의 출처·라이선스 원문은 [외부 코드 고지](THIRD_PARTY_NOTICES.md)에 정리되어 있습니다. 이 고지는 앱 전체의 라이선스를 지정하지 않습니다.
 
 ## Verify the Repository Structure
 
