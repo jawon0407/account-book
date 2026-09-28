@@ -1,9 +1,12 @@
-import { readFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync } from "node:fs";
 import { resolve } from "node:path";
 
 import { SecurityGateError } from "./security/errors.mjs";
 import { runSecurityGate } from "./security/gate.mjs";
 import { parsePrePushInput } from "./security/push-policy.mjs";
+import { readMainPushCommit } from "./security/git-change-reader.mjs";
+import { loadGithubMergeEvidence } from "./security/github-merge-evidence.mjs";
+import { assertMainMergeEvidence, mergeEvidenceError, normalizeMainPushContext } from "./security/merge-evidence.mjs";
 
 const VALUE_OPTIONS = new Map([
   ["--mode", { key: "mode", modes: ["pre-push", "ci"] }],
@@ -78,13 +81,49 @@ function parseArguments(args) {
   return options;
 }
 
+/**
+ * 이벤트 파일(path)을 최대 4MiB+1 바이트만 읽어 큰 입력·특수 파일·잘못된 JSON을 거부한다.
+ * @param {string} path GitHub가 제공한 이벤트 파일 경로. 내용/경로는 오류에 출력하지 않는다.
+ * @returns {object} JSON 이벤트. 읽기·크기·형태 오류는 고정 context-invalid로 변환한다.
+ */
+function readMainEvent(path) {
+  let fd;
+  try {
+    fd = openSync(path, "r");
+    const limit = 4 * 1024 * 1024;
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size > limit) throw new Error("limit");
+    const bytes = Buffer.alloc(limit + 1);
+    let size = 0, count;
+    do { count = readSync(fd, bytes, size, bytes.length - size, null); size += count; }
+    while (count > 0 && size < bytes.length);
+    if (size > limit) throw new Error("limit");
+    return JSON.parse(bytes.subarray(0, size).toString("utf8"));
+  } catch {
+    throw mergeEvidenceError("MAIN_PUSH_CONTEXT_INVALID");
+  } finally { if (fd !== undefined) closeSync(fd); }
+}
+
 try {
   const options = parseArguments(process.argv.slice(2));
   if (options.mode === "pre-push") {
     options.updates = parsePrePushInput(readFileSync(0, "utf8"));
   }
+  if (options.mode === "ci" && options.eventName === "push" && options.targetRef === "refs/heads/main") {
+    const token = process.env.GITHUB_TOKEN;
+    const event = readMainEvent(process.env.GITHUB_EVENT_PATH);
+    const context = normalizeMainPushContext({ event, env: process.env, options });
+    const commit = readMainPushCommit({ rootDir: options.rootDir, head: context.after });
+    const { candidate, pullRequest } = await loadGithubMergeEvidence(context, { token });
+    options.mergeEvidence = { context, candidate, pullRequest, commit };
+  }
   const result = runSecurityGate(options);
-  console.log(`Security gate passed; scanned ${result.scannedBlobCount} changed blobs.`);
+  if (options.mergeEvidence) {
+    const proof = assertMainMergeEvidence({ base: options.base, head: options.head, evidence: options.mergeEvidence });
+    console.log(`Security gate passed; PR #${proof.prNumber}, SHA ${proof.sha}; scanned ${result.scannedBlobCount} changed blobs.`);
+  } else {
+    console.log(`Security gate passed; scanned ${result.scannedBlobCount} changed blobs.`);
+  }
 } catch (error) {
   const code = error instanceof SecurityGateError ? error.code : "UNEXPECTED_FAILURE";
   const message = error instanceof SecurityGateError
