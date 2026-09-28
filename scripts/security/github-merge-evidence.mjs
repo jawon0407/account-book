@@ -81,7 +81,9 @@ export async function loadGithubMergeEvidence(context, { token, fetcher = global
     signal.throwIfAborted();
     const response = await fetcher(`${root}${path}`, { method: "GET", redirect: "error", signal,
       headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json",
-        "X-GitHub-Api-Version": "2026-03-10" } });
+        // 2026 계약은 merge_commit_sha를 제거했다. 판정에 필요한 지원 계약을 명시한다.
+        // 2022 계약의 지원 종료(2028-03-10) 전 별도 이관 검증을 완료해야 한다.
+        "X-GitHub-Api-Version": "2022-11-28" } });
     signal.throwIfAborted();
     const data = await readBoundedJson(response, signal);
     signal.throwIfAborted();

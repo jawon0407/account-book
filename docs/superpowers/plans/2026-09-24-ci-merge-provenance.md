@@ -186,7 +186,7 @@ test("loads list and detail without following response URLs", async () => {
 
 Run: `node --test scripts/security/github-merge-evidence.test.mjs`. Expected: RED → 구현 후 GREEN.
 
-- [ ] GET 전용·고정 호스트·API version `2026-03-10`·Accept application/vnd.github+json·Authorization Bearer를 사용한다. context 필드를 Task 1 계약으로 재검사하고 URL 각 구간을 encodeURIComponent로 인코딩한다. 응답 url/links는 요청 주소로 사용하지 않는다.
+- [ ] GET 전용·고정 호스트·API version `2022-11-28`·Accept application/vnd.github+json·Authorization Bearer를 사용한다. 초기2026-03-10 선택은 merge_commit_sha 제거로 호환되지 않아 [2026-09-28 계약 보완](2026-09-28-github-evidence-contract.md)에서 정정했다. context 필드를 Task 1 계약으로 재검사하고 URL 각 구간을 encodeURIComponent로 인코딩한다. 응답 url/links는 요청 주소로 사용하지 않는다.
 - [ ] 단일 타이머·controller를 조회 전체에 공유한다. 타이머에서 abort만 하지 말고 reject되는 deadline promise와 전체 work를 race해 취소를 무시하는 fetch 대역도 시간 안에 종료한다. pending rejection은 race로 관찰하고 finally에서 타이머를 해제한다. 각 후속 fetch 직전/본문 처리 후에도 signal.aborted를 검사해 늦은 작업의 추가 요청을 차단한다.
 
 ```js
