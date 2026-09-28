@@ -178,6 +178,9 @@ importers:
       '@types/pg':
         specifier: 8.20.0
         version: 8.20.0
+      drizzle-orm:
+        specifier: 0.45.2
+        version: 0.45.2(@types/pg@8.20.0)(pg@8.22.0)
 
   tests/e2e:
     devDependencies:
