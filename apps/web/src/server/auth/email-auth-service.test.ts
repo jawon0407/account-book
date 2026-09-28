@@ -139,6 +139,96 @@ function setup(clock: () => Date = () => new Date(now)) {
 }
 
 describe("EmailAuthService PKCE confirmation continuity", () => {
+  it.each([
+    "https://app.example.test/confirm",
+    new URL("https://user:password@app.example.test/confirm"),
+    new URL("https://app.example.test/confirm#fragment"),
+    new URL("http://remote.example.test/confirm"),
+  ])("rejects unsafe callback input before persistence %#", async (emailRedirectUrl) => {
+    const subject = setup();
+    await expect(subject.service.signUp(validInput, { ...subject.context, emailRedirectUrl }))
+      .rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    expect(subject.repository.events).toEqual([]);
+  });
+
+  it("accepts explicit loopback HTTP callbacks", async () => {
+    const subject = setup();
+    await expect(subject.service.signUp(validInput, { ...subject.context, emailRedirectUrl: new URL("http://localhost:3000/confirm") }))
+      .resolves.toEqual({ accepted: true });
+    expect(subject.provider.calls.signUp[0]).toEqual([validInput, new URL("http://localhost:3000/confirm"), expect.any(String)]);
+  });
+
+  it.each(["signUp", "signIn"] as const)("rejects malformed %s input before external effects", async (method) => {
+    const subject = setup();
+    await expect(subject.service[method]({}, subject.context)).rejects.toMatchObject({ code: "AUTH_INVALID_CREDENTIALS" });
+    expect(subject.repository.events).toEqual([]);
+    expect(subject.provider.calls.signIn).toEqual([]);
+  });
+
+  it("rejects an invalid generated ID and an overflowing confirmation lifetime", async () => {
+    const subject = setup();
+    const invalidId = new EmailAuthService!(subject.provider, subject.sessions, subject.repository, keyring, () => "invalid", () => verifier);
+    await expect(invalidId.signUp(validInput, subject.context)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    await expect(subject.service.signUp(validInput, { ...subject.context, now: new Date(8_640_000_000_000_000) }))
+      .rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    expect(subject.repository.record).toBeNull();
+    expect(subject.provider.signUp).not.toHaveBeenCalled();
+  });
+
+  it("hides signup verification-required responses and unknown provider failures", async () => {
+    const subject = setup();
+    subject.provider.failure = new AuthProviderError("AUTH_EMAIL_VERIFICATION_REQUIRED");
+    await expect(subject.service.signUp(validInput, subject.context)).resolves.toEqual({ accepted: true });
+    subject.provider.signInWithPassword.mockRejectedValueOnce(new Error("private-provider-detail"));
+    await expect(subject.service.signIn(validInput, subject.context))
+      .rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", message: "AUTH_PROVIDER_UNAVAILABLE" });
+    expect(subject.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects token metadata inconsistent with a verified user", async () => {
+    const subject = setup();
+    subject.provider.signInResult = { ...tokens, accessToken: "" };
+    await expect(subject.service.signIn(validInput, subject.context)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    expect(subject.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { interactionHash: Buffer.alloc(32, 9) },
+    { consumedAt: null },
+    { expiresAt: new Date(now.getTime() + 900_001) },
+  ])("rejects malformed claimed transactions before exchanging codes %#", async (override) => {
+    const subject = setup();
+    await subject.service.signUp(validInput, subject.context);
+    vi.spyOn(subject.repository, "claimEmailConfirmationTransaction").mockResolvedValueOnce({ ...subject.repository.record!, consumedAt: now, ...override });
+    await expect(subject.service.confirmEmail({ code: "code" }, subject.context))
+      .rejects.toMatchObject({ code: "AUTH_OAUTH_TRANSACTION_INVALID" });
+    expect(subject.provider.confirmEmail).not.toHaveBeenCalled();
+    expect(subject.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("hides unexpected storage failures during confirmation", async () => {
+    const subject = setup();
+    vi.spyOn(subject.repository, "claimEmailConfirmationTransaction").mockRejectedValueOnce(new Error("private-storage-detail"));
+    await expect(subject.service.confirmEmail({ code: "code" }, subject.context))
+      .rejects.toMatchObject({ code: "AUTH_OAUTH_TRANSACTION_INVALID", message: "AUTH_OAUTH_TRANSACTION_INVALID" });
+    expect(subject.provider.confirmEmail).not.toHaveBeenCalled();
+  });
+
+  it("uses the default clock and generators without exposing provider tokens", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    try {
+      const subject = setup();
+      const service = new EmailAuthService!(subject.provider, subject.sessions, subject.repository, keyring);
+      await expect(service.signUp(validInput, subject.context)).resolves.toEqual({ accepted: true });
+      expect(subject.repository.record?.id).toMatch(/^[0-9a-f-]{36}$/u);
+      const result = await service.signIn(validInput, subject.context);
+      expect(result).toMatchObject({ user: tokens.user, selector: "opaque-session-selector" });
+      expect(subject.sessions.create).toHaveBeenCalledWith(expect.objectContaining({ userId }), now);
+      expect(JSON.stringify(result)).not.toContain(tokens.accessToken);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("stores an interaction-bound encrypted verifier before sending only its challenge", async () => {
     const subject = setup();
     await expect(subject.service.signUp(validInput, subject.context)).resolves.toEqual({ accepted: true });

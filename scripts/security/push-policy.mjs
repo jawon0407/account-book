@@ -1,4 +1,5 @@
 import { SecurityGateError } from "./errors.mjs";
+import { assertMainMergeEvidence } from "./merge-evidence.mjs";
 
 export const ZERO_SHA = "0".repeat(40);
 
@@ -80,19 +81,17 @@ export function assertPrePushPolicy(updates) {
 }
 
 /**
- * CI 이벤트 종류와 목적 브랜치를 함께 검사한다. push는 로컬과 같은 브랜치 규칙을 적용한다.
+ * CI 이벤트 종류와 목적 브랜치를 검사한다. main push는 실제 병합 증빙이 있어야 한다.
  * pull_request는 main 또는 maintenance-branch를 대상으로 할 때 허용하지만 PR 승인 여부를 조회하지는 않는다.
- * @param {{eventName: string, targetRef: string}} options GitHub 이벤트 이름과 refs/heads/... 형태의 목적 참조.
+ * @param {{eventName: string, targetRef: string, base?:string, head?:string, mergeEvidence?:object}} options 이벤트·참조·범위와 main 전용 증빙.
  * @returns {void} 허용된 이벤트·참조 조합이면 반환값 없이 종료한다.
  * @throws {SecurityGateError} main 직접 push, 허용되지 않은 브랜치 또는 알 수 없는 이벤트 조합이면 발생한다.
  */
-export function assertCiPolicy({ eventName, targetRef }) {
+export function assertCiPolicy({ eventName, targetRef, base, head, mergeEvidence }) {
   if (eventName === "push") {
     if (targetRef === "refs/heads/main") {
-      throw new SecurityGateError(
-        "DIRECT_MAIN_PUSH_REACHED_REMOTE",
-        "A direct main push reached GitHub. Stop work and follow docs/security/incident-response.md.",
-      );
+      assertMainMergeEvidence({ base, head, evidence: mergeEvidence });
+      return;
     }
     if (!ALLOWED_PUSH_REFS.some((pattern) => pattern.test(targetRef))) {
       throw new SecurityGateError(

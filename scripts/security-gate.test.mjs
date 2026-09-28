@@ -4,7 +4,8 @@ import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { mainFixture } from "./security/merge-evidence.test-fixtures.mjs";
 
 const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 const cliPath = fileURLToPath(new URL("./security-gate.mjs", import.meta.url));
@@ -29,11 +30,12 @@ const shellPath = process.platform === "win32"
  * @param {{args: string[], input?: string}} options 모드별 CLI 인자와 Git pre-push 입력.
  * @returns 종료 상태·stdout·stderr가 담긴 결과. 실제 push는 실행하지 않는다.
  */
-function runCli({ args, input = "" }) {
+function runCli({ args, input = "", env = process.env }) {
   return spawnSync(process.execPath, [cliPath, ...args], {
     cwd: rootDir,
     input,
     encoding: "utf8",
+    env,
   });
 }
 
@@ -52,15 +54,50 @@ test("CLI fails closed on malformed input", () => {
   assert.match(result.stderr, /INVALID_PRE_PUSH_INPUT/);
 });
 
-test("CI blocks a push event targeting main", () => {
+test("CI blocks a main push without Actions context", () => {
   const result = runCli({
+    env: { ...process.env, GITHUB_ACTIONS: "false", GITHUB_EVENT_PATH: "" },
     args: [
       "--mode", "ci", "--event", "push", "--target-ref", "refs/heads/main",
       "--base", BASE, "--head", HEAD,
     ],
   });
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /DIRECT_MAIN_PUSH_REACHED_REMOTE/);
+  assert.match(result.stderr, /MAIN_PUSH_CONTEXT_INVALID/);
+});
+
+test("real CLI verifies matching merge proof and fails safely without it", async () => {
+  const temp = await mkdtemp(join(tmpdir(), "account-book-proof-cli-"));
+  try {
+    const f = mainFixture();
+    const [head, base, source = f.candidate.head.sha] = execFileSync("git", ["--no-replace-objects", "rev-list", "--parents", "-n", "1", "HEAD"], { cwd: rootDir, encoding: "utf8" }).trim().split(" ");
+    f.event.before = base; f.event.after = head;
+    f.env.GITHUB_SHA = head;
+    f.candidate.head.sha = source; f.candidate.merge_commit_sha = head;
+    f.pullRequest = { ...structuredClone(f.candidate), merged: true };
+    const eventPath = join(temp, "event.json"), preloadPath = join(temp, "fetch.mjs");
+    await writeFile(eventPath, JSON.stringify(f.event));
+    const args = ["--mode", "ci", "--event", "push", "--target-ref", "refs/heads/main", "--base", base, "--head", head];
+    const env = { ...process.env, ...f.env, GITHUB_EVENT_PATH: eventPath, GITHUB_TOKEN: "synthetic-cli-canary" };
+    for (const mode of ["success", "absent", "http"]) {
+      await writeFile(preloadPath, `globalThis.fetch = async (url) => ${mode === "http"
+        ? 'new Response("synthetic-cli-canary", {status:403})'
+        : `Response.json(url.includes("/commits/") ? ${JSON.stringify(mode === "absent" ? [] : [f.candidate])} : ${JSON.stringify(f.pullRequest)})`};`);
+      const result = spawnSync(process.execPath, ["--import", pathToFileURL(preloadPath).href, cliPath, ...args], { cwd: rootDir, env, encoding: "utf8", timeout: 180000 });
+      assert.equal(result.error, undefined);
+      assert.equal(result.status, mode === "success" ? 0 : 1, result.stderr);
+      if (mode === "success") { assert.match(result.stdout, /PR #12/u); assert.ok(result.stdout.includes(head)); }
+      else assert.match(result.stderr, mode === "absent" ? /MAIN_MERGE_EVIDENCE_REJECTED/u : /MAIN_MERGE_EVIDENCE_UNAVAILABLE/u);
+      assert.doesNotMatch(result.stdout + result.stderr, /synthetic-cli-canary/u);
+    }
+    for (const content of ["raw-synthetic-cli-canary", " ".repeat(4 * 1024 * 1024 + 1)]) {
+      await writeFile(eventPath, content);
+      const result = runCli({ args, env });
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /MAIN_PUSH_CONTEXT_INVALID/u);
+      assert.doesNotMatch(result.stderr, /synthetic-cli-canary/u);
+    }
+  } finally { await rm(temp, { recursive: true, force: true }); }
 });
 
 test("allowed feature update reaches repository checks with sanitized failure", async () => {

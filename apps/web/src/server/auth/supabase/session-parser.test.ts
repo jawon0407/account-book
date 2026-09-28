@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { accepted, tokenPair } from "./session-parser.js";
 import {
   accessToken,
   adapter,
@@ -19,6 +20,17 @@ import {
 } from "./test-fixtures.js";
 
 vi.mock("server-only", () => ({}));
+
+it("validates errors even when no result data is expected", () => {
+  expect(() => accepted({ error: { status: 429 } })).toThrow("AUTH_RATE_LIMITED");
+  expect(accepted({})).toBeUndefined();
+});
+
+it.each(["A", "Zh"])("rejects an empty or noncanonical decoded JWT segment %s", (segment) => {
+  const parts = session.access_token.split(".");
+  expect(() => tokenPair({ ...session, access_token: `${segment}.${parts[1]}.${parts[2]}` }))
+    .toThrow("AUTH_PROVIDER_UNAVAILABLE");
+});
 
 const tokenSegments = session.access_token.split(".");
 const wrongSegmentCountJwt = tokenSegments.slice(0, 2).join(".");

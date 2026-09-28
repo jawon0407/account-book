@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 
 import { sanitizeDiagnosticPath } from "./diagnostic-path-sanitizer.mjs";
 import { SecurityGateError } from "./errors.mjs";
+import { withoutGithubCredentials } from "./merge-evidence.mjs";
 import { ZERO_SHA } from "./push-policy.mjs";
 
 const MAX_BLOB_BYTES = 5 * 1024 * 1024;
@@ -16,9 +17,10 @@ const SHA_PATTERN = /^[0-9a-f]{40}$/iu;
  * @throws {SecurityGateError} Git 실행 실패나 제한된 출력 버퍼 초과 시 GIT_READ_FAILED 오류.
  */
 function runGit(rootDir, args, encoding = null) {
-  const result = spawnSync("git", args, {
+  const result = spawnSync("git", ["--no-replace-objects", ...args], {
     cwd: rootDir,
     encoding,
+    env: withoutGithubCredentials(process.env),
     maxBuffer: MAX_BLOB_BYTES + 1024 * 1024,
   });
   if (result.error || result.status !== 0) {
@@ -99,6 +101,25 @@ function listIntroducedCommits(rootDir, base, head) {
     );
   }
   return commits;
+}
+
+/**
+ * 현재 checkout과 정확한 커밋 부모를 원본 Git 객체에서 읽는다. replace 객체는 무시한다.
+ * @param {{rootDir:string,head:string}} options 저장소 위치와 이벤트 after 전체 SHA.
+ * @returns {{head:string,parents:string[]}} 읽은 HEAD/부모. 루트·다중 부모의 허용 판정은 순수 판정기가 한다.
+ * @throws {SecurityGateError} 잘못된 SHA·shallow·없는 커밋·stale checkout·출력 불일치면 중단한다.
+ */
+export function readMainPushCommit({ rootDir, head }) {
+  assertValidRange(null, head);
+  assertCompleteRepositoryHistory(rootDir);
+  const actual = runGit(rootDir, ["rev-parse", "HEAD"], "utf8").trim();
+  const row = runGit(rootDir, ["rev-list", "--parents", "-n", "1", head, "--"], "utf8").trim();
+  const [returnedHead, ...parents] = row.split(" ");
+  if (actual !== head.toLowerCase() || returnedHead !== actual ||
+    !SHA_PATTERN.test(returnedHead) || parents.some(parent => !SHA_PATTERN.test(parent))) {
+    throw new SecurityGateError("GIT_READ_FAILED", "Git could not verify the exact pushed commit and parents.");
+  }
+  return { head: actual, parents };
 }
 
 /**

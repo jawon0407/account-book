@@ -8,6 +8,18 @@ describe("runProviderOperation", () => {
   beforeEach(() => vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] }));
   afterEach(() => vi.useRealTimers());
 
+  it("rejects a Request already aborted before dispatch without sending credentials", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const request = new Request("https://example.test", { signal: controller.signal });
+    const fetcher = vi.fn<typeof fetch>();
+    await expect(runProviderOperation(fetcher, (operation) => operation.fetch(request)))
+      .rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(request.signal.aborted).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("aborts the real transport signal when headers stall", async () => {
     let signal: AbortSignal | null | undefined;
     const fetcher = vi.fn<typeof fetch>((_input, init) => {

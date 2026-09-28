@@ -18,6 +18,14 @@ import {
 vi.mock("server-only", () => ({}));
 
 describe("SupabaseAuthAdapter explicit server PKCE boundary", () => {
+  it("rejects invalid signup, reset and password-update inputs before transport", async () => {
+    const setup = adapter();
+    const redirect = new URL("https://app.example.test/confirm");
+    await expectSafeError(() => setup.adapter.signUp({ email: "invalid", password: "a".repeat(12) }, redirect, challenge), "AUTH_INVALID_CREDENTIALS");
+    await expectSafeError(() => setup.adapter.requestPasswordReset("invalid", redirect, challenge), "AUTH_INVALID_CREDENTIALS");
+    await expectSafeError(() => setup.adapter.updatePassword({ userId, accessToken, refreshToken: "refresh", password: "x" }), "AUTH_INVALID_CREDENTIALS");
+    expect(setup.factory).not.toHaveBeenCalled();
+  });
   it.each([
     ["google", "google"],
     ["kakao", "kakao"],

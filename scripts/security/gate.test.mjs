@@ -3,6 +3,9 @@ import test from "node:test";
 
 import { SecurityGateError } from "./errors.mjs";
 import { runSecurityGate } from "./gate.mjs";
+import { mainFixture } from "./merge-evidence.test-fixtures.mjs";
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 
 test("gate runs dependencies in fail-closed order and propagates repository failure", () => {
   const calls = [];
@@ -46,4 +49,41 @@ test("gate runs dependencies in fail-closed order and propagates repository fail
     (error) => error === failure,
   );
   assert.deepEqual(calls, ["policy", "ranges", "repository"]);
+});
+
+test("main proof failure stops downstream work; valid proof still scans secrets", () => {
+  const f = mainFixture(), calls = [];
+  const options = { ...f.options, rootDir: "controlled-root", mergeEvidence: f };
+  const dependencies = {
+    runRepositoryChecks: () => calls.push("repository"),
+    readChangedBlobs: ({ ranges }) => { assert.deepEqual(ranges, [{ base: f.context.before, head: f.context.after }]); calls.push("blobs"); return []; },
+    scanBlobsForSecrets: () => { calls.push("secrets"); return []; },
+  };
+  assert.deepEqual(runSecurityGate(options, dependencies), { scannedBlobCount: 0 });
+  assert.deepEqual(calls, ["repository", "blobs", "secrets"]);
+  calls.length = 0; f.pullRequest.merged = false;
+  assert.throws(() => runSecurityGate(options, dependencies), { code: "MAIN_MERGE_EVIDENCE_REJECTED" });
+  assert.deepEqual(calls, []);
+  f.pullRequest.merged = true;
+  assert.throws(() => runSecurityGate(options, { ...dependencies,
+    scanBlobsForSecrets: () => [{ path: "example", rule: "synthetic" }], formatSecretFindings: () => "Synthetic finding.",
+  }), { code: "SECRET_DETECTED" });
+});
+
+test("repository subprocesses receive no GitHub credentials", (t) => {
+  let calls = 0;
+  t.mock.method(childProcess, "spawnSync", (_command, _args, options) => {
+    calls++; assert.ok(!Object.keys(options.env).some(key => /^(github_token|gh_token)$/iu.test(key)));
+    return { status: 0 };
+  });
+  syncBuiltinESMExports();
+  const old = process.env.GITHUB_TOKEN; process.env.GITHUB_TOKEN = "synthetic-child-canary";
+  try {
+    runSecurityGate({ mode: "ci", eventName: "pull_request", targetRef: "refs/heads/main", base: "1".repeat(40), head: "2".repeat(40), rootDir: "." },
+      { readChangedBlobs: () => [] });
+    assert.equal(calls, 2);
+  } finally {
+    if (old === undefined) delete process.env.GITHUB_TOKEN; else process.env.GITHUB_TOKEN = old;
+    t.mock.restoreAll(); syncBuiltinESMExports();
+  }
 });

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { mainFixture } from "./merge-evidence.test-fixtures.mjs";
 
 import {
   ZERO_SHA,
@@ -133,7 +134,7 @@ test("policy diagnostics do not echo hostile refs or CI event names", () => {
 test("CI rejects a direct main push but accepts a PR targeting main", () => {
   assert.throws(
     () => assertCiPolicy({ eventName: "push", targetRef: "refs/heads/main" }),
-    { code: "DIRECT_MAIN_PUSH_REACHED_REMOTE" },
+    { code: "MAIN_MERGE_EVIDENCE_REJECTED" },
   );
   assert.doesNotThrow(() =>
     assertCiPolicy({
@@ -141,4 +142,15 @@ test("CI rejects a direct main push but accepts a PR targeting main", () => {
       targetRef: "refs/heads/main",
     }),
   );
+});
+
+test("main CI requires actual matching evidence while non-main policy stays offline", () => {
+  const f = mainFixture();
+  const options = { ...f.options, mergeEvidence: f };
+  assert.doesNotThrow(() => assertCiPolicy(options));
+  f.pullRequest.merged = false;
+  assert.throws(() => assertCiPolicy(options), { code: "MAIN_MERGE_EVIDENCE_REJECTED" });
+  for (const targetRef of ["refs/heads/feature/example", "refs/heads/hotfix/example", "refs/heads/maintenance-branch"]) {
+    assert.doesNotThrow(() => assertCiPolicy({ eventName: "push", targetRef }));
+  }
 });

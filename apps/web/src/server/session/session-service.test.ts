@@ -568,6 +568,25 @@ describe("SessionService", () => {
     await expectFailureReason(() => subject.refresh(created.selector, now), "unavailable", "AUTH_RATE_LIMITED", created.selector);
   });
 
+  it.each([null, "private-provider-detail"])("safely classifies non-object provider rejection %#", async (error) => {
+    const { repository, created } = await createSession();
+    const subject = new SessionService!(repository, keyring, async () => { throw error; }, () => id, () => new Date(now));
+    await expectFailureReason(() => subject.refresh(created.selector, now), "unavailable", "private-provider-detail");
+    expect(repository.calls.rotate).toBe(0);
+  });
+
+  it("samples the default wall clock after refreshing", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(now);
+    try {
+      const { repository, created } = await createSession();
+      const subject = new SessionService!(repository, keyring, async () => tokenPair(), () => id);
+      await expect(subject.refresh(created.selector, now)).resolves.toEqual({ status: "refreshed" });
+      expect(repository.record?.rotationVersion).toBe(1);
+      expect(repository.record?.lastSeenAt).toEqual(now);
+    } finally { vi.useRealTimers(); }
+  });
+
   it("validates and delegates revocation operations", async () => {
     const { repository, service: subject, created } = await createSession();
     await expect(subject.revokeCurrent(created.selector, now)).resolves.toBe(true);

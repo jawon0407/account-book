@@ -12,8 +12,44 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  main-provenance:
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the exact main update
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.sha }}
+
+      - name: Use the repository-pinned Node version
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          check-latest: false
+
+      - name: Verify main merge provenance and changed history
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET_REF: ${{ github.ref }}
+          BASE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
+        run: >-
+          node scripts/security-gate.mjs --mode ci --event "$EVENT_NAME"
+          --target-ref "$TARGET_REF" --base "$BASE_SHA" --head "$HEAD_SHA"
+
   security-gate:
     name: security-gate
+    needs: main-provenance
+    if: ${{ !cancelled() }}
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 30
     services:
@@ -37,6 +73,17 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - name: Require the expected provenance result
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          TARGET_REF: ${{ github.event_name == 'pull_request' && format('refs/heads/{0}', github.base_ref) || github.ref }}
+          PROVENANCE_RESULT: ${{ needs.main-provenance.result }}
+        run: >-
+          node --input-type=module -e
+          'import { assertProvenanceJobResult } from "./scripts/security/merge-evidence.mjs";
+          assertProvenanceJobResult({eventName:process.env.EVENT_NAME,
+          targetRef:process.env.TARGET_REF,result:process.env.PROVENANCE_RESULT});'
+
       - name: Use the repository-pinned Node version
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -51,6 +98,9 @@ jobs:
 
       - name: Run repository verification
         run: pnpm run verify
+
+      - name: Enforce authentication branch coverage
+        run: pnpm --filter @account-book/web test:coverage
 
       - name: Test the disposable authentication schema
         env:
@@ -78,6 +128,7 @@ jobs:
         run: pnpm audit --prod --audit-level high
 
       - name: Evaluate pushed or proposed commit range
+        if: ${{ !(github.event_name == 'push' && github.ref == 'refs/heads/main') }}
         env:
           EVENT_NAME: ${{ github.event_name }}
           TARGET_REF: ${{ github.event_name == 'pull_request' && format('refs/heads/{0}', github.base_ref) || github.ref }}
