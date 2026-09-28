@@ -17,9 +17,9 @@ describe("Drizzle declarations versus live PostgreSQL catalog", () => {
     expect(columns.rows).toEqual(config.columns.map((column) => ({ name: column.name, type: column.getSQLType(), required: column.notNull, has_default: column.hasDefault })));
 
     const constraints = await database.admin.query(`select conname as name,contype as type,
-      array(select a.attname from unnest(c.conkey) with ordinality as k(num,pos)
+      array(select a.attname::text from unnest(c.conkey) with ordinality as k(num,pos)
         join pg_attribute a on a.attrelid=c.conrelid and a.attnum=k.num order by k.pos) as columns,
-      array(select a.attname from unnest(c.confkey) with ordinality as k(num,pos)
+      array(select a.attname::text from unnest(c.confkey) with ordinality as k(num,pos)
         join pg_attribute a on a.attrelid=c.confrelid and a.attnum=k.num order by k.pos) as foreign_columns
       from pg_constraint c where c.conrelid=$1::regclass order by conname`, [name]);
     const checkNames = constraints.rows.filter((row) => row.type === "c").map((row) => row.name).sort();
@@ -32,7 +32,7 @@ describe("Drizzle declarations versus live PostgreSQL catalog", () => {
     expect(constraints.rows.filter((row) => row.type === "p").map((row) => row.columns)).toEqual([config.columns.filter((column) => column.primary).map((column) => column.name)]);
     expect(constraints.rows.filter((row) => row.type === "f").map((row) => ({ name: row.name, columns: row.columns, foreign_columns: row.foreign_columns }))).toEqual(config.foreignKeys.map((key) => ({ name: key.getName(), columns: key.reference().columns.map((column) => column.name), foreign_columns: key.reference().foreignColumns.map((column) => column.name) })));
     const indexes = await database.admin.query(`select ci.relname as name,i.indisunique as unique,
-      array(select a.attname from unnest(i.indkey) with ordinality as k(num,pos)
+      array(select a.attname::text from unnest(i.indkey) with ordinality as k(num,pos)
         join pg_attribute a on a.attrelid=i.indrelid and a.attnum=k.num order by k.pos) as columns
       from pg_index i join pg_class ci on ci.oid=i.indexrelid
       where i.indrelid=$1::regclass and i.indpred is not null`, [name]);
