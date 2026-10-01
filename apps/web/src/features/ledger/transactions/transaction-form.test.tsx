@@ -28,6 +28,23 @@ it("retains fields after a definite archived-parent rejection and permits correc
   expect((screen.getByLabelText("금액 (원)") as HTMLInputElement).value).toBe("800");
   expect(screen.getByLabelText("금액 (원)").closest("fieldset")?.disabled).toBe(false);
 });
+it.each(["AUTH_RATE_LIMITED", "AUTH_CSRF_REJECTED"] as const)("preserves an uncertain original intent after a retry returns %s", async code => {
+  const calls: CreateTransactionInput[] = [], saved = vi.fn();
+  render(<TransactionForm accounts={accounts} categories={categories} onClose={() => undefined} onSaved={saved} onSave={async value => {
+    calls.push(value);
+    if (calls.length === 1) throw new Error("response lost after commit");
+    if (calls.length === 2) throw new ApiClientError(buildApiError({ code, retryable: true }));
+  }} />);
+  fireEvent.change(screen.getByLabelText("금액 (원)"), { target: { value: "1200" } });
+  fireEvent.submit(screen.getByRole("form"));
+  await waitFor(() => expect(screen.getByRole("button", { name: "같은 내용으로 재시도" })).toBeDefined());
+  fireEvent.click(screen.getByRole("button", { name: "같은 내용으로 재시도" }));
+  await waitFor(() => expect(screen.getByRole("alert").textContent).toContain(code === "AUTH_RATE_LIMITED" ? "요청이 많아요" : "요청을 확인할 수 없어요"));
+  expect(screen.getByLabelText("금액 (원)").closest("fieldset")?.disabled).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "같은 내용으로 재시도" }));
+  await waitFor(() => expect(saved).toHaveBeenCalledOnce());
+  expect(calls).toHaveLength(3); expect(calls[1]).toEqual(calls[0]); expect(calls[2]).toEqual(calls[0]);
+});
 it("validates amounts before submitting and guides missing prerequisites", () => {
   const save = vi.fn();
   const { rerender } = render(<TransactionForm accounts={accounts} categories={categories} onClose={() => undefined} onSaved={() => undefined} onSave={save} />);

@@ -31,7 +31,10 @@ export function TransactionForm({ accounts, categories, onSave, onSaved, onClose
     const value = uncertain && intent.current ? intent.current : parsed.data;
     intent.current = value; busy.current = true; setPending(true); onPending?.(true); setError(undefined); setValidation("");
     try { await onSave(value); onSaved(); }
-    catch (failure) { setError(failure); const unknown = !definitelyRejected(failure); setUncertain(unknown); if (!unknown) intent.current = null; }
+    catch (failure) {
+      // 재시도의 거부는 최초 요청의 미저장을 증명하지 않는다. 한 번 미확정이면 성공 확인까지 키/본문을 유지한다.
+      setError(failure); const unknown = uncertain || !definitelyRejected(failure); setUncertain(unknown); if (!unknown) intent.current = null;
+    }
     finally { busy.current = false; setPending(false); onPending?.(false); }
   }
   return <form className={styles.form} aria-label="거래 입력" onSubmit={event => { void submit(event); }}>

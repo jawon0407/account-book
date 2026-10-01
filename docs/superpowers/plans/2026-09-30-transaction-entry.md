@@ -2,6 +2,8 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. 일반 후속 작업은 사용자 연속 진행 지침을 따르며 반복 승인을 요청하지 않는다. 외부 DB·비용·권한 확대는 별도다.
 
+실행 기록: 2026-10-01 세 task의 구현·검증 완료. 실제 SQL 테이블명, 커서 캐시 구조 등 실행 중 판단과 최종 리뷰는 [당일 기록](../../status/2026-10-01-transactions.ko.md)을 따른다. 아래 Architecture의 미구현 표현은 착수 당시 상태다.
+
 **Goal:** PC 웹에서 본인의 수입·지출을 저장하고 날짜순 목록과 계좌 잔액에 반영한다.
 
 **Architecture:** 기존 Next BFF → Nest/Fastify → 사용자별 PostgreSQL transaction을 재사용한다. 공용 거래 계약과 `finance.transaction_history`, `finance.request_deduplication`은 이미 있으나 거래 API/화면은 아직 없다. 먼저 조회·생성만 완성하고 수정·삭제, 시작 잔액, 원자적 이체는 독립 후속으로 나눈다.
@@ -50,37 +52,37 @@
 
 **Interfaces:** `TransactionsRepository.list(userId: string, query: TransactionListQuery): Promise<TransactionListResponse>`; `GET /v1/transactions`, scope `transaction:read`, 200/no-store. `parseTransactionQuery(raw: unknown): TransactionListQuery`는 HTTP limit만 숫자로 변환하며 중복/배열/알 수 없는 query를 거부한다.
 
-- [ ] RED: `transaction-cursor.test.ts`에 같은 날짜·잘못된 base64url·과도 길이·다른 필터/사용자 커서 거부를 작성한다. 커서는 `{v:1, date, id, binding}` canonical JSON의 base64url; binding은 서버 소유자와 정규화 필터의 SHA-256이며 권한 증명이 아니다.
-- [ ] RED: API 입력 테스트에 limit의 `0`, `101`, `1.5`, 중복 query, 날짜 역전, unknown field와 권한 없는 요청을 작성한다.
-- [ ] `pnpm --filter @account-book/api test`로 아직 없는 구현 때문에 실패함을 확인한다.
-- [ ] 고정 SQL·파라미터로 사용자 WHERE/RLS, 날짜/계좌/분류/종류 필터, `(occurred_on,id)<cursor`, `limit+1`을 구현한다. 커서·응답에 메모·사용자 ID 원문을 넣지 않는다.
-- [ ] 공용 `TransactionSchema`로 DB bigint/시각/날짜/variant를 매핑한다. SQL DATE는 문자열 cast로 받아 타임존 변환하지 않는다. opening balance에만 direction을 넣는다.
-- [ ] 실제 폐기용 DB에서 타인·탈퇴자·삭제행 제외, 보관 계좌의 과거행 조회, 동일일자 페이지, 경계금액을 검증한다. 실패면 고정400/401/404/503 정책을 유지한다.
-- [ ] API·DB 테스트 GREEN, 변경 파일 diff 검토. 커밋/푸시는 별도 사용자 요청 시에만 수행한다.
+- [x] RED: `transaction-cursor.test.ts`에 같은 날짜·잘못된 base64url·과도 길이·다른 필터/사용자 커서 거부를 작성한다. 커서는 `{v:1, date, id, binding}` canonical JSON의 base64url; binding은 서버 소유자와 정규화 필터의 SHA-256이며 권한 증명이 아니다.
+- [x] RED: API 입력 테스트에 limit의 `0`, `101`, `1.5`, 중복 query, 날짜 역전, unknown field와 권한 없는 요청을 작성한다.
+- [x] `pnpm --filter @account-book/api test`로 아직 없는 구현 때문에 실패함을 확인한다.
+- [x] 고정 SQL·파라미터로 사용자 WHERE/RLS, 날짜/계좌/분류/종류 필터, `(occurred_on,id)<cursor`, `limit+1`을 구현한다. 커서·응답에 메모·사용자 ID 원문을 넣지 않는다.
+- [x] 공용 `TransactionSchema`로 DB bigint/시각/날짜/variant를 매핑한다. SQL DATE는 문자열 cast로 받아 타임존 변환하지 않는다. opening balance에만 direction을 넣는다.
+- [x] 실제 폐기용 DB에서 타인·탈퇴자·삭제행 제외, 보관 계좌의 과거행 조회, 동일일자 페이지, 경계금액을 검증한다. 실패면 고정400/401/404/503 정책을 유지한다.
+- [x] API·DB 테스트 GREEN, 변경 파일 diff 검토. 커밋/푸시는 별도 사용자 요청 시에만 수행한다.
 
 ### Task 2: 수입·지출 생성 API
 
 **Interfaces:** `TransactionsRepository.create(userId: string, input: CreateTransactionInput): Promise<Transaction>`; `POST /v1/transactions`, scope `transaction:write`, 201/no-store. `input.type`을 DB `kind`로 매핑한다.
 
-- [ ] RED: 실제 DB 테스트에 성공1행·같은 키/내용 재시도1행·같은 키/다른 내용409·다른 사용자 독립키·동시 동일키1행을 작성한다.
-- [ ] RED: 타인 계좌/분류404, 보관/종류 불일치409, 금액/날짜/메모 계약, 오류 rollback 후 dedup 행 미생성을 작성한다.
-- [ ] API/DB 명령을 실행해 새 실패를 확인한다.
-- [ ] 기존 `idempotentCreate`와 `UserDatabase.run`을 사용해 정규화한 전체 의미 입력을 fingerprint한다. 같은 사용자 부모 계좌/분류 확인과 보관 경쟁 잠금을 고정 순서로 잡고 기존 DB trigger와 함께 보호한다. DB 내부 오류를 복사하지 않는다.
-- [ ] 원장 생성과 최초 응답 snapshot을 같은 transaction으로 저장한다. 재시도는 새 JWT/기존 멱등 키다.
-- [ ] 실제 잔액이 수입 +/지출 -로 반영되고 안전정수 overflow가 0원으로 숨겨지지 않는지 확인한다.
-- [ ] 집중 API·DB GREEN 후 readonly 리뷰. 수정/삭제·transfer/opening 명령으로 확장하지 않는다.
+- [x] RED: 실제 DB 테스트에 성공1행·같은 키/내용 재시도1행·같은 키/다른 내용409·다른 사용자 독립키·동시 동일키1행을 작성한다.
+- [x] RED: 타인 계좌/분류404, 보관/종류 불일치409, 금액/날짜/메모 계약, 오류 rollback 후 dedup 행 미생성을 작성한다.
+- [x] API/DB 명령을 실행해 새 실패를 확인한다.
+- [x] 기존 `idempotentCreate`와 `UserDatabase.run`을 사용해 정규화한 전체 의미 입력을 fingerprint한다. 같은 사용자 부모 계좌/분류 확인과 보관 경쟁 잠금을 고정 순서로 잡고 기존 DB trigger와 함께 보호한다. DB 내부 오류를 복사하지 않는다.
+- [x] 원장 생성과 최초 응답 snapshot을 같은 transaction으로 저장한다. 재시도는 새 JWT/기존 멱등 키다.
+- [x] 실제 잔액이 수입 +/지출 -로 반영되고 안전정수 overflow가 0원으로 숨겨지지 않는지 확인한다.
+- [x] 집중 API·DB GREEN 후 readonly 리뷰. 수정/삭제·transfer/opening 명령으로 확장하지 않는다.
 
 ### Task 3: BFF와 PC 거래 화면
 
 **Interfaces:** `createTransactionsApi(http: KyInstance, expectedUserId: string)` → `list(query: TransactionListQuery, signal?: AbortSignal): Promise<TransactionListResponse>`, `create(input: CreateTransactionInput): Promise<Transaction>`. `GET/POST /api/transactions`만 고정 허용한다. 목록 query key는 사용자ID+정규화 필터+cursor를 포함한다.
 
-- [ ] RED: BFF의 request-target query 보존/서명·CSRF·origin·사용자 assertion·안전한 응답과 status 계약을 작성한다.
-- [ ] RED: 프론트 입력/응답 검사, 기존 키의 명시 재시도, 결과 미확정 상태에서 본문 변경 방지, 사용자 변경 시 캐시/폼 폐기를 작성한다.
-- [ ] 기존 boundary를 재사용하고 `transaction-target.ts`에 query만 분리한다. 범용 임의 URL 프록시를 만들지 않는다.
-- [ ] `/app/transactions`에 날짜/계좌/분류/종류 필터·더 보기·수입/지출 입력을 연결한다. 계좌/분류 미등록 시 해당 관리 화면으로 안내한다. 이체/시작 잔액 입력 버튼은 만들지 않는다.
-- [ ] 성공 후 거래 목록과 계좌 잔액을 재조회한다. 오류 시 입력을 보존하고 다른 사용자의 캐시·localStorage/IndexedDB에는 저장하지 않는다. 자동 변경 재시도는 하지 않는다.
-- [ ] 실제 Playwright로 PC 로그인→계좌/분류 준비→수입/지출 생성→새로고침/필터/페이지→잔액 반영→로그아웃을 폐기용 DB에서 검증한다. 응답 유실/보관 경쟁/사용자 교체도 확인한다.
-- [ ] `pnpm verify`, 관련 실제 DB 검사, `git diff --check`, README/Notion 갱신 후 구현과 운영 미검증을 구분해 보고한다.
+- [x] RED: BFF의 request-target query 보존/서명·CSRF·origin·사용자 assertion·안전한 응답과 status 계약을 작성한다.
+- [x] RED: 프론트 입력/응답 검사, 기존 키의 명시 재시도, 결과 미확정 상태에서 본문 변경 방지, 사용자 변경 시 캐시/폼 폐기를 작성한다.
+- [x] 기존 boundary를 재사용하고 `transaction-target.ts`에 query만 분리한다. 범용 임의 URL 프록시를 만들지 않는다.
+- [x] `/app/transactions`에 날짜/계좌/분류/종류 필터·더 보기·수입/지출 입력을 연결한다. 계좌/분류 미등록 시 해당 관리 화면으로 안내한다. 이체/시작 잔액 입력 버튼은 만들지 않는다.
+- [x] 성공 후 거래 목록과 계좌 잔액을 재조회한다. 오류 시 입력을 보존하고 다른 사용자의 캐시·localStorage/IndexedDB에는 저장하지 않는다. 자동 변경 재시도는 하지 않는다.
+- [x] 실제 Playwright로 PC 로그인→계좌/분류 준비→수입/지출 생성→새로고침/필터/페이지→잔액 반영→로그아웃을 폐기용 DB에서 검증한다. 응답 유실/보관 경쟁/사용자 교체도 확인한다.
+- [x] `pnpm verify`, 관련 실제 DB 검사, `git diff --check`, README/Notion 갱신 후 구현과 운영 미검증을 구분해 보고한다.
 
 ## 뒤에 오는 독립 단계
 

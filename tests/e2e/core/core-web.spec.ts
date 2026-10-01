@@ -1,5 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 import { AxeBuilder } from "@axe-core/playwright";
+import { buildApiError } from "../../../packages/contracts/src/index.js";
 
 /** @param page 격리된 브라우저. 합성 IdP 사용자로 실제 로그인 경로를 통과한다. */
 async function login(page: Page) {
@@ -156,11 +157,14 @@ test("PC transactions survive response loss, filter/paginate, update balance and
   }
   await page.goto("/app/transactions");
   await expect(page.getByRole("heading", { name: "거래 내역", exact: true })).toBeVisible();
-  // 응답 대역이 아닌 실제 BFF/API 요청. 서버 저장 후 브라우저 응답만 한 번 유실시킨다.
-  let lost = false;
+  // 최초 요청은 실제 저장 후 응답만 유실. 두 번째 전송은 429 대역, 세 번째는 같은 키로 실제 서버 재시도다.
+  const attempts: unknown[] = [];
   await page.route("**/api/transactions", async route => {
-    if (route.request().method() === "POST" && !lost) { lost = true; await route.fetch(); await route.abort("failed"); }
-    else await route.continue();
+    if (route.request().method() !== "POST") return route.continue();
+    attempts.push(route.request().postDataJSON());
+    if (attempts.length === 1) { await route.fetch(); return route.abort("failed"); }
+    if (attempts.length === 2) return route.fulfill({ status: 429, json: buildApiError({ code: "AUTH_RATE_LIMITED", retryable: true }) });
+    return route.continue();
   });
   await page.getByRole("button", { name: "거래 추가", exact: true }).click();
   await page.getByLabel("금액 (원)").fill("1200");
@@ -169,7 +173,11 @@ test("PC transactions survive response loss, filter/paginate, update balance and
   await expect(page.getByRole("button", { name: "같은 내용으로 재시도" })).toBeVisible();
   await expect(page.getByLabel("금액 (원)")).toBeDisabled();
   await page.getByRole("button", { name: "같은 내용으로 재시도" }).click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("요청이 많아요");
+  await expect(page.getByLabel("금액 (원)")).toBeDisabled();
+  await page.getByRole("button", { name: "같은 내용으로 재시도" }).click();
   await expect(page.getByRole("row").filter({ hasText: "응답 유실 재시도" })).toHaveCount(1);
+  expect(attempts).toHaveLength(3); expect(attempts[1]).toEqual(attempts[0]); expect(attempts[2]).toEqual(attempts[0]);
   for (const [type, amount, memo] of [["income", "10000", "월급 기록"], ["expense", "800", "간식 기록"]]) {
     await page.getByRole("button", { name: "거래 추가", exact: true }).click();
     await page.getByLabel("거래 종류", { exact: true }).selectOption(type!);
