@@ -50,14 +50,14 @@ const approvedPackageLocalSkipLibCheck = [
 ];
 
 const expectedWorkspaceOverrides = {
-  "next@16.3.3>sharp": "-",
-  "next@16.3.3>postcss": "8.5.23",
-  "next@16.3.3>baseline-browser-mapping": "2.11.0",
+  "next@16.3.6>sharp": "-",
+  "next@16.3.6>postcss": "8.5.23",
+  "next@16.3.6>baseline-browser-mapping": "2.11.0",
   "nanoid@3.3.16": "3.3.18",
   "find-my-way@9.6.0": "9.7.0",
-  "@nestjs/platform-fastify@11.1.28>fastify": "5.12.3",
-  "fast-uri@3.1.5": "3.1.7",
-  "fast-uri@4.1.2": "4.1.4",
+  "@nestjs/platform-fastify@11.2.5>fastify": "5.12.5",
+  "fast-uri@3.1.5": "3.1.8",
+  "fast-uri@4.1.2": "4.1.5",
 };
 
 /**
@@ -123,19 +123,22 @@ function assertPatchedProductionResolutions(lockfile) {
     /^ {2}postcss@8\.5\.23:\r?$/mu,
     /^ {2}nanoid@3\.3\.18:(?: \{\})?\r?$/mu,
     /^ {2}find-my-way@9\.7\.0:\r?$/mu,
-    /^ {2}fastify@5\.12\.3:\r?$/mu,
-    /^ {2}fast-uri@3\.1\.7:(?: \{\})?\r?$/mu,
-    /^ {2}fast-uri@4\.1\.4:(?: \{\})?\r?$/mu,
+    /^ {2}fastify@5\.12\.5:\r?$/mu,
+    /^ {2}fast-uri@3\.1\.8:(?: \{\})?\r?$/mu,
+    /^ {2}fast-uri@4\.1\.5:(?: \{\})?\r?$/mu,
   ];
   const vulnerableEntries = [
     /^ {2}postcss@8\.5\.22:\r?$/mu,
     /^ {2}nanoid@3\.3\.16:(?: \{\})?\r?$/mu,
     /^ {2}find-my-way@9\.6\.0:\r?$/mu,
     /^ {2}fastify@5\.10\.0:\r?$/mu,
+    /^ {2}fastify@5\.12\.[34]:\r?$/mu,
     /^ {2}fast-uri@3\.1\.4:(?: \{\})?\r?$/mu,
     /^ {2}fast-uri@4\.1\.1:(?: \{\})?\r?$/mu,
     /^ {2}fast-uri@3\.1\.5:(?: \{\})?\r?$/mu,
+    /^ {2}fast-uri@3\.1\.[67]:(?: \{\})?\r?$/mu,
     /^ {2}fast-uri@4\.1\.2:(?: \{\})?\r?$/mu,
+    /^ {2}fast-uri@4\.1\.[34]:(?: \{\})?\r?$/mu,
   ];
 
   for (const section of resolutionSections) {
@@ -158,8 +161,10 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
   const npmrc = readFileSync(npmrcPath, "utf8");
 
   assert.deepEqual(pkg.devDependencies, expectedDevDependencies);
-  assert.equal(apiPackage.dependencies.fastify, "5.12.3");
-  assert.equal(webPackage.dependencies.next, "16.3.3");
+  assert.equal(apiPackage.dependencies.fastify, "5.12.5");
+  assert.equal(webPackage.dependencies.next, "16.3.6");
+  for (const name of ["@nestjs/common", "@nestjs/core", "@nestjs/platform-fastify"]) assert.equal(apiPackage.dependencies[name], "11.2.5");
+  assert.equal(apiPackage.devDependencies["@nestjs/testing"], "11.2.5");
   assert.equal(
     e2ePackage.scripts["test:preflight"],
     "tsx --test production-fake-startup.test.ts playwright-environment.test.ts playwright-config.test.ts auth-response-policy.test.ts ui-facade-boundary.test.ts support/safe-ui-error.test.ts support/transport-tripwire.test.ts support/safe-ui-test.test.ts",
@@ -215,7 +220,7 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
       }),
   );
   assert.deepEqual(allowBuilds, { esbuild: true });
-  // Next 16.3.3 declares sharp only as an optional image optimizer.
+  // Next 16.3.6 declares sharp only as an optional image optimizer.
   // The app has no next/image usage, so keep that unused native dependency absent.
   // Its production PostCSS dependency and Fastify stack are pinned to patched releases.
   assert.deepEqual(workspaceScalarOverrides(workspace), expectedWorkspaceOverrides);
@@ -240,7 +245,8 @@ test("Next security update excludes audited vulnerable resolutions", () => {
   // 생성된 잠금파일을 검사해 승인 버전 누락·취약 버전 또는 불필요한 이미지 의존성 재유입을 막는다.
   // 콜백 매개변수는 없으며 파일 읽기 외에 설치나 네트워크 부작용은 없다.
   const lockfile = readFileSync(lockfilePath, "utf8");
-  assert.equal(/^ {2}next@16\.3\.3:/mu.test(lockfile), true, "patched Next resolution must exist");
+  assert.equal(/^ {2}next@16\.3\.6:/mu.test(lockfile), true, "patched Next resolution must exist");
+  assert.equal(/^ {2}next@16\.3\.[0-5]:/mu.test(lockfile), false, "vulnerable ImageResponse Next must be absent");
   assert.equal(/^ {2}next@16\.2\.11:/mu.test(lockfile), false, "audited vulnerable Next must be absent");
   assert.equal(/^ {2}baseline-browser-mapping@2\.10\.43:/mu.test(lockfile), false, "audited vulnerable browser mapping must be absent");
   assert.equal(/^ {2}sharp@/mu.test(lockfile), false, "unused native image optimizer must remain absent");
@@ -279,7 +285,7 @@ test("lockfile resolves only patched production dependency versions", () => {
     /patched production dependency resolution/u,
   );
   assert.throws(
-    () => assertPatchedProductionResolutions(lockfile.replaceAll("fastify@5.12.3", "fastify@5.10.0")),
+    () => assertPatchedProductionResolutions(lockfile.replaceAll("fastify@5.12.5", "fastify@5.10.0")),
     /patched production dependency resolution/u,
   );
   assert.throws(
@@ -297,11 +303,11 @@ test("lockfile resolves only patched production dependency versions", () => {
     /vulnerable production dependency resolution/u,
   );
   assert.throws(
-    () => assertPatchedProductionResolutions(lockfile.replaceAll("fast-uri@3.1.7", "fast-uri@3.1.5")),
+    () => assertPatchedProductionResolutions(lockfile.replaceAll("fast-uri@3.1.8", "fast-uri@3.1.5")),
     /patched production dependency resolution/u,
   );
   assert.throws(
-    () => assertPatchedProductionResolutions(lockfile.replaceAll("fast-uri@4.1.4", "fast-uri@4.1.2")),
+    () => assertPatchedProductionResolutions(lockfile.replaceAll("fast-uri@4.1.5", "fast-uri@4.1.2")),
     /patched production dependency resolution/u,
   );
   assert.throws(
@@ -318,4 +324,11 @@ test("lockfile resolves only patched production dependency versions", () => {
       ),
     /vulnerable production dependency resolution/u,
   );
+  // mailto 필드명 인코딩 취약 버전이 새 패치와 함께 재유입돼도 거부한다.
+  for (const version of ["4.1.3", "4.1.4"]) {
+    assert.throws(
+      () => assertPatchedProductionResolutions(lockfile.replace("\nsnapshots:", `\nsnapshots:\n  fast-uri@${version}:`)),
+      /vulnerable production dependency resolution/u,
+    );
+  }
 });
