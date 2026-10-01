@@ -13,7 +13,7 @@ export function LedgerShell({ children, onLogout }: Readonly<{ children: ReactNo
       <span className={styles.hint}>나의 돈을, 나의 기준으로.</span>
       <button className={styles.button} style={{ marginLeft: "auto" }} onClick={onLogout}>로그아웃</button>
     </div></header>
-    <nav className={styles.nav} aria-label="장부 메뉴">{[["/app", "계좌"], ["/app/categories", "카테고리"], ["/app/profile", "내 정보"]].map(([href, label]) => <a key={href} href={href!} aria-current={path === href ? "page" : undefined}>{label}</a>)}</nav>
+    <nav className={styles.nav} aria-label="장부 메뉴">{[["/app", "계좌"], ["/app/transactions", "거래 내역"], ["/app/categories", "카테고리"], ["/app/profile", "내 정보"]].map(([href, label]) => <a key={href} href={href!} aria-current={path === href ? "page" : undefined}>{label}</a>)}</nav>
     <main id="ledger-main" className={styles.main}>{children}</main>
   </div>;
 }

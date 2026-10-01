@@ -1,8 +1,8 @@
 # API 애플리케이션
 
-이 폴더는 NestJS로 요청 처리 구조를 만들고 Fastify로 HTTP 요청을 받는 서버다. 공개 상태 확인 `GET /health`, 보호된 `GET /v1/me` 및 프로필·계좌·카테고리 10개 경로가 구현되어 있다. 모두 Node.js에서 동작한다.
+이 폴더는 NestJS로 요청 처리 구조를 만들고 Fastify로 HTTP 요청을 받는 서버다. 공개 상태 확인 `GET /health`, 보호된 `GET /v1/me` 및 프로필·계좌·카테고리·거래 12개 HTTP 작업이 구현되어 있다. 모두 Node.js에서 동작한다.
 
-프로필 조회/닉네임 수정, 계좌·카테고리의 조회/생성/수정/보관을 실제 SQL 저장소에 연결했다. 사용자 격리, version 충돌, 생성 멱등성과 원장 기반 잔액 조회를 포함한다. 거래·이체 쓰기 API와 웹 BFF·화면 연결은 후속이다. JWT 재사용 차단과 금융 생성 요청 멱등성은 별개다. 재시도는 새 JWT와 기존 요청 키를 사용한다. [한국어 개발 흐름과 10개 경로](../../docs/guides/core-api-development.ko.md), [검증·남은 작업](../../docs/status/2026-09-29-core-api.ko.md)을 먼저 읽는다.
+프로필 조회/닉네임 수정, 계좌·카테고리의 조회/생성/수정/보관을 실제 SQL 저장소에 연결했다. 2026-10-01에는 `GET/POST /v1/transactions`와 같은 출처 BFF·PC 거래 화면을 추가했다. 거래 수정/삭제·시작 잔액·이체 쓰기는 후속이다. 사용자 격리, version 충돌, 생성 멱등성과 원장 기반 잔액 조회를 포함한다. JWT 재사용 차단과 금융 생성 요청 멱등성은 별개다. 재시도는 새 JWT와 기존 요청 키를 사용한다. [기본 API 개발 흐름](../../docs/guides/core-api-development.ko.md), [거래 개발 흐름](../../docs/guides/transaction-development.ko.md)을 먼저 읽는다.
 
 ## 코드를 읽는 순서
 
@@ -14,7 +14,7 @@
 6. `src/me/me.controller.ts`: 검증된 사용자 ID를 반환한다. 이메일 증거를 전달받지 않으므로 email은 null, emailVerified는 false다. 사용자 인증 실패라는 뜻이 아니며 별도 프로필 조회는 하지 않는다.
 7. `src/common`: 응답 추적 ID를 일관되게 붙이고 내부 오류를 안전한 고정 응답으로 바꾼다.
 8. `src/core`: 기존 풀을 재사용하는 사용자별 transaction·입력·멱등성·숫자 변환 경계다.
-9. `src/profiles`, `src/accounts`, `src/categories`: 기능별 controller와 실제 SQL repository다.
+9. `src/profiles`, `src/accounts`, `src/categories`, `src/transactions`: 기능별 controller와 실제 SQL repository다. 거래는 cursor/query/mapping을 별도 파일로 나눈다.
 
 `GET /health`의 성공은 HTTP 처리가 살아 있다는 뜻이지 DB 연결이나 전체 인증 경로가 정상이라는 증거는 아니다.
 

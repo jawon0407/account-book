@@ -8,8 +8,8 @@
 
 | 구분 | 현재 소스에서 확인할 수 있는 것 | 계획 또는 제외 |
 |---|---|---|
-| 화면 | 인증 5화면, `/app` 계좌·`/app/categories` 분류·`/app/profile` 닉네임 관리 | 거래·이체 입력·대시보드는 후속 |
-| HTTP | ky 공통 클라이언트와 같은 출처 `/api` BFF, 사용자별 금융 query/mutation | 은행·거래·이체 화면 연결은 후속 |
+| 화면 | 인증 5화면, 계좌·분류·닉네임 관리, `/app/transactions` 거래 목록·수입/지출 입력 | 거래 수정/삭제·시작 잔액·이체·대시보드는 후속 |
+| HTTP | ky 공통 클라이언트와 같은 출처 `/api` BFF, 사용자별 금융 query/mutation | 은행·이체 화면 연결은 후속 |
 | 상태 | TanStack Query와 React 로컬 state/ref | Zustand는 아직 없음. 여러 화면 공통의 비서버 UI 상태가 필요할 때 검토 |
 | 모바일 | 웹·모바일이 공유할 계약 설계 | React Native·Expo 및 모바일 인증/화면은 미구현 |
 | 저장·오프라인 | 서버 원장을 기준으로 하는 설계, 현재 QueryClient는 메모리 사용 | PWA 설치, manifest, service worker, 영구 금융 캐시, 오프라인 쓰기는 범위에서 제외 |
@@ -145,7 +145,7 @@ OAuth는 외부 계정으로 로그인하는 절차다. `ProviderButtons.begin(p
 
 ## 7. BFF 라우트 참조
 
-현재 라우트 모듈은 14개다. `[provider]`는 동적 경로 한 개를 뜻하며 google/kakao/naver별 파일 세 개가 아니다.
+아래 표는 기존 인증 라우트 14개를 설명한다. 별도로 준비 상태를 알려 주는 `GET /api/auth/providers`와 장부 라우트 8개(12작업)가 있다. 장부 거래 경로는 `GET/POST /api/transactions`다. `[provider]`는 동적 경로 한 개를 뜻하며 google/kakao/naver별 파일 세 개가 아니다.
 
 | HTTP 메서드·경로 | 어댑터에 고정 전달하는 작업 |
 |---|---|
@@ -174,7 +174,7 @@ OAuth는 외부 계정으로 로그인하는 절차다. `ProviderButtons.begin(p
 
 `createQueryClient`는 메모리 상태 관리자 한 개를 생성한다. `Providers`는 `useState(createQueryClient)`로 마운트 동안 같은 인스턴스를 사용한다. 영구 저장 연결이나 Zustand 저장소는 만들지 않는다.
 
-“영구 저장하지 않는다”와 “메모리에 절대 남지 않는다”는 다르다. TanStack mutation에는 입력 variables 등이 메모리에 남을 수 있으므로 비밀번호·토큰이 메모리에 전혀 없다고 설명하면 안 된다. 현재 `signOutMutationOptions`는 로그아웃 요청 설정이며 query 캐시 제거를 직접 수행하지 않는다. 향후 금융 화면에서 로그아웃·계정 전환 시 캐시 폐기를 별도로 연결해야 한다.
+“영구 저장하지 않는다”와 “메모리에 절대 남지 않는다”는 다르다. TanStack mutation에는 입력 variables 등이 메모리에 남을 수 있으므로 비밀번호·토큰이 메모리에 전혀 없다고 설명하면 안 된다. `signOutMutationOptions` 자체는 로그아웃 요청 설정이다. 금융 화면의 `LedgerAuthBoundary`는 사용자별 QueryClient를 사용하며, 세션 재확인/변경/로그아웃 시 기존 화면·폼을 숨기고 금융 캐시를 폐기한다. [거래 개발 흐름](../guides/transaction-development.ko.md)에서 현재 연결을 확인한다.
 
 `apiError(error)`는 공개 오류 봉투를 확인한다. `safeErrorMessage(error)`는 그중 허용된 code만 한국어로 바꾼다. 원본 공급자 메시지, 응답 본문, requestId를 화면에 그대로 표시하지 않는다. `AuthStatus`는 오류를 alert, 성공·진행을 status로 읽히게 하고, 폼은 오류 입력을 aria 속성과 포커스로 연결한다.
 

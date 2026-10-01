@@ -3,15 +3,17 @@ import {
   AccountSchema, AccountListResponseSchema, CreateAccountInputSchema, UpdateAccountInputSchema, ArchiveAccountInputSchema,
   CategorySchema, CategoryListResponseSchema, CreateCategoryInputSchema, UpdateCategoryInputSchema, ArchiveCategoryInputSchema,
   LedgerIdSchema,
+  TransactionSchema, TransactionListResponseSchema, CreateTransactionInputSchema,
 } from "@account-book/contracts";
 import type { DelegatedScope } from "@account-book/contracts/internal-api";
 import type { z } from "zod";
 import { CoreBoundaryError } from "./http-boundary.js";
+import { transactionTarget } from "./transaction-target.js";
 
 type Operation = Readonly<{
   method: "GET" | "POST" | "PATCH";
   scope: DelegatedScope;
-  path: "/v1/profile" | "/v1/accounts" | "/v1/categories";
+  path: "/v1/profile" | "/v1/accounts" | "/v1/categories" | "/v1/transactions";
   item?: true;
   archive?: true;
   list?: true;
@@ -22,6 +24,8 @@ type Operation = Readonly<{
 
 /** 코드가 선택하는 닫힌 작업 표. 브라우저는 내부 주소·scope·응답 계약을 지정할 수 없다. */
 const operations = {
+  transactionsList: { method: "GET", scope: "transaction:read", path: "/v1/transactions", list: true, output: TransactionListResponseSchema, status: 200 },
+  transactionsCreate: { method: "POST", scope: "transaction:write", path: "/v1/transactions", input: CreateTransactionInputSchema, output: TransactionSchema, status: 201 },
   profileGet: { method: "GET", scope: "profile:read", path: "/v1/profile", output: ProfileSchema, status: 200 },
   profileUpdate: { method: "PATCH", scope: "profile:write", path: "/v1/profile", input: UpdateProfileInputSchema, output: ProfileSchema, status: 200 },
   accountsList: { method: "GET", scope: "account:read", path: "/v1/accounts", list: true, output: AccountListResponseSchema, status: 200 },
@@ -61,6 +65,7 @@ export function targetFor(operation: Operation, url: URL, parameters: Readonly<R
   }
   const browserPath = operation.path.replace(/^\/v1\//u, "/api/") + (operation.item ? `/${parameters.id}${operation.archive ? "/archive" : ""}` : "");
   if (url.pathname !== browserPath) throw invalidInput(operation);
+  if (operation.path === "/v1/transactions" && operation.list) return transactionTarget(url.searchParams);
   const query = [...url.searchParams.entries()];
   if (query.length > 0) {
     if (!operation.list || query.length !== 1 || query[0]![0] !== "includeArchived" || !["true", "false"].includes(query[0]![1])) throw invalidInput(operation);

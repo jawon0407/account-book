@@ -8,12 +8,17 @@ import { AccountsController } from "../accounts/accounts.controller.js";
 import { AccountsRepository } from "../accounts/accounts.repository.js";
 import { CategoriesController } from "../categories/categories.controller.js";
 import { CategoriesRepository } from "../categories/categories.repository.js";
+import { TransactionsController } from "../transactions/transactions.controller.js";
+import { TransactionsRepository } from "../transactions/transactions.repository.js";
 
 /** 기존 인증 풀/가드를 재사용해 세 기능을 연결한다. 새 풀·고권한 계정·우회 인증은 만들지 않는다. */
 @Module({
   imports: [MeModule],
-  controllers: [ProfilesController, AccountsController, CategoriesController],
+  controllers: [ProfilesController, AccountsController, CategoriesController, TransactionsController],
   providers: [
+    { provide: TransactionsRepository, inject: [UserDatabase],
+      /** @param db 사용자 transaction 경계. @returns 거래 저장소. */
+      useFactory: (db: UserDatabase) => new TransactionsRepository(db) },
     { provide: UserDatabase, inject: [API_DATABASE_POOL],
       /** @param pool 프로세스 소유 공유 풀. @returns 요청별 transaction 실행기. */
       useFactory: (pool: Pool) => new UserDatabase(pool) },

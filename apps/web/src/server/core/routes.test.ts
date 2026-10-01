@@ -14,6 +14,7 @@ const resolve = vi.fn(async () => { throw new SessionOperationError("expired"); 
 const transport = vi.fn();
 type Route = Record<string, (request: Request, context: { params: Promise<Record<string, string>> }) => Promise<Response> | Response>;
 const routes = [
+  ["/transactions", await import("../../app/api/transactions/route.js"), { GET: undefined, POST: { accountId: id, categoryId: id, type: "expense", amountKrw: 100, occurredOn: "2040-01-01", idempotencyKey: id } }, {}],
   ["/profile", await import("../../app/api/profile/route.js"), { GET: undefined, PATCH: { nickname: null, expectedVersion: 1 } }, {}],
   ["/accounts", await import("../../app/api/accounts/route.js"), { GET: undefined, POST: { name: "현금", kind: "cash", idempotencyKey: id } }, {}],
   [`/accounts/${id}`, await import("../../app/api/accounts/[id]/route.js"), { PATCH: { name: "현금", expectedVersion: 1 } }, { id }],

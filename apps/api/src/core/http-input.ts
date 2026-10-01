@@ -1,17 +1,13 @@
 import type { FastifyRequest } from "fastify";
 import { z } from "zod";
 import { CoreError } from "./core-error.js";
+import { input } from "./validation.js";
+export { input } from "./validation.js";
 
 /** @param request 가드가 검증한 요청. @returns 서명된 본인 UUID. 클라이언트 입력의 userId는 쓰지 않는다. */
 export function owner(request: FastifyRequest): string {
   if (!request.principal) throw new CoreError("AUTH_SESSION_EXPIRED", 401);
   return request.principal.userId;
-}
-/** @param schema 공유 strict 계약. @param value 신뢰하지 않는 입력. @param profile 프로필 오류 구분. @returns 검증·정규화한 값. */
-export function input<T>(schema: z.ZodType<T>, value: unknown, profile = false): T {
-  const result = schema.safeParse(value);
-  if (!result.success) throw new CoreError(profile ? "PROFILE_VALIDATION_FAILED" : "LEDGER_VALIDATION_FAILED", 400);
-  return result.data;
 }
 const EmptyQuery = z.object({}).strict();
 const ListQuery = z.object({ includeArchived: z.enum(["true", "false"]).optional() }).strict();

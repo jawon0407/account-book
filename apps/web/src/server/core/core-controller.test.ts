@@ -14,6 +14,8 @@ const now = new Date("2040-01-01T00:00:00.000Z");
 const profile = { id, nickname: "테스트", avatarObjectKey: null, signupProvider: "email", role: "member", version: 1, createdAt: now.toISOString(), updatedAt: now.toISOString() };
 const account = { id, name: "현금", kind: "cash", currentBalanceKrw: 0, archivedAt: null, version: 1, createdAt: now.toISOString(), updatedAt: now.toISOString() };
 const category = { id, name: "식비", kind: "expense", sortOrder: 0, archivedAt: null, version: 1, createdAt: now.toISOString(), updatedAt: now.toISOString() };
+const transaction = { id, accountId: id, categoryId: id, transferId: null, kind: "expense", amountKrw: 1000, occurredOn: "2040-01-01", memo: null, version: 1, deletedAt: null, createdAt: now.toISOString(), updatedAt: now.toISOString() };
+const transactionInput = { accountId: id, categoryId: id, type: "expense", amountKrw: 1000, occurredOn: "2040-01-01", idempotencyKey: id };
 
 /** @param reply 외부 HTTP 응답. 실제 BFF/위임 클라이언트를 실행하되 DB 세션 조회와 네트워크/서명만 대역으로 분리한다. */
 function setup(reply: Response = Response.json(profile)) {
@@ -46,6 +48,7 @@ describe("Core BFF", () => {
     ["profileGet", "/api/profile", "GET", undefined],
     ["profileUpdate", "/api/profile", "PATCH", { nickname: "이전 계정 입력", expectedVersion: 1 }],
     ["accountsCreate", "/api/accounts", "POST", { name: "이전 계정 계좌", kind: "cash", idempotencyKey: id }],
+    ["transactionsCreate", "/api/transactions", "POST", transactionInput],
   ] as const)("rejects stale-account %s requests before delegation", async (operation, path, method, body) => {
     const { controller, fetcher, signer } = setup();
     await failure(await controller.handle(operation, request(path, method, body, { "x-account-book-user": sessionId })), 401, "AUTH_SESSION_EXPIRED");
@@ -69,6 +72,8 @@ describe("Core BFF", () => {
     ["categoriesCreate", "/api/categories", "POST", { name: "식비", kind: "expense", sortOrder: 0, idempotencyKey: id }, {}, "category:write", category, 201],
     ["categoriesUpdate", `/api/categories/${id}`, "PATCH", { sortOrder: 0, expectedVersion: 1 }, { id }, "category:write", category, 200],
     ["categoriesArchive", `/api/categories/${id}/archive`, "POST", { expectedVersion: 1 }, { id }, "category:write", category, 200],
+    ["transactionsList", "/api/transactions?limit=2&type=expense", "GET", undefined, {}, "transaction:read", { items: [transaction], nextCursor: null }, 200],
+    ["transactionsCreate", "/api/transactions", "POST", transactionInput, {}, "transaction:write", transaction, 201],
   ] as const)("binds %s to its exact method/scope/target and returns only contract data", async (operation, path, method, body, params, scope, output, status) => {
     const { controller, fetcher, signer } = setup(Response.json(output, { status, headers: { "set-cookie": "upstream-secret", "x-internal": "private-secret" } }));
     const response = await controller.handle(operation, request(path, method, body, { authorization: "attacker", "x-user-id": "attacker", "x-request-id": "attacker" }), params);
@@ -95,6 +100,16 @@ describe("Core BFF", () => {
     const { controller, sessions, fetcher } = setup();
     await failure(await controller.handle("profileGet", request(undefined, "GET", undefined, { cookie })), 401, "AUTH_SESSION_EXPIRED");
     expect(sessions.resolve).not.toHaveBeenCalled(); expect(fetcher).not.toHaveBeenCalled();
+  });
+  it.each(["limit=1&limit=2", "limit=01", "limit=101", "userId=x", "from=2040-01-02&to=2040-01-01"])("rejects transaction query before delegation: %s", async query => {
+    const { controller, fetcher } = setup();
+    await failure(await controller.handle("transactionsList", request(`/api/transactions?${query}`)), 400, "LEDGER_VALIDATION_FAILED");
+    expect(fetcher).not.toHaveBeenCalled();
+  });
+  it.each([{ origin: "https://attacker.test" }, { "x-csrf-token": "bad" }])("requires origin and CSRF for transaction creation", async headers => {
+    const { controller, fetcher } = setup();
+    await failure(await controller.handle("transactionsCreate", request("/api/transactions", "POST", transactionInput, headers)), 403, "AUTH_CSRF_REJECTED");
+    expect(fetcher).not.toHaveBeenCalled();
   });
 
   it.each(["expired", "unavailable", "rate_limited"] as const)("maps session %s without leaking details or calling the API", async (reason) => {

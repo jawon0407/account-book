@@ -3,7 +3,7 @@ import type { z } from "zod";
 import type { DbClient } from "./user-database.js";
 import { CoreError, unavailable } from "./core-error.js";
 
-type Operation = "create_account" | "create_category";
+type Operation = "create_account" | "create_category" | "create_transaction";
 /**
  * 생성과 첫 성공 응답을 한 transaction에 저장한다. 외부 HTTP 호출이나 자동 재시도는 하지 않는다.
  * @param client UserDatabase의 연결. @param userId 검증한 소유자. @param operation 고정 생성 작업명.

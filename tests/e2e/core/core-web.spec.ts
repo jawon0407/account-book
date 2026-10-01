@@ -139,3 +139,97 @@ test("identity revalidation hides old forms and rejects a mismatched account ass
   await expect(page.getByRole("heading", { name: "세션을 다시 확인해 주세요", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "추가하기" })).toHaveCount(0);
 });
+
+test("PC transactions survive response loss, filter/paginate, update balance and reject archived parents", async ({ page }) => {
+  await login(page);
+  await page.getByRole("button", { name: "계좌 추가", exact: true }).first().click();
+  await page.getByLabel("계좌 이름").fill("거래 테스트 통장");
+  await page.getByRole("button", { name: "추가하기" }).click();
+  await expect(page.getByRole("row").filter({ hasText: "거래 테스트 통장" })).toBeVisible();
+  await page.getByRole("link", { name: "카테고리", exact: true }).click();
+  for (const [name, kind] of [["거래 식비", "expense"], ["거래 급여", "income"]]) {
+    await page.getByRole("button", { name: "카테고리 추가", exact: true }).first().click();
+    await page.getByLabel("카테고리 이름").fill(name!);
+    await page.getByLabel("종류", { exact: true }).selectOption(kind!);
+    await page.getByRole("button", { name: "추가하기" }).click();
+    await expect(page.getByRole("row").filter({ hasText: name! })).toBeVisible();
+  }
+  await page.goto("/app/transactions");
+  await expect(page.getByRole("heading", { name: "거래 내역", exact: true })).toBeVisible();
+  // 응답 대역이 아닌 실제 BFF/API 요청. 서버 저장 후 브라우저 응답만 한 번 유실시킨다.
+  let lost = false;
+  await page.route("**/api/transactions", async route => {
+    if (route.request().method() === "POST" && !lost) { lost = true; await route.fetch(); await route.abort("failed"); }
+    else await route.continue();
+  });
+  await page.getByRole("button", { name: "거래 추가", exact: true }).click();
+  await page.getByLabel("금액 (원)").fill("1200");
+  await page.getByLabel("메모 (선택)").fill("응답 유실 재시도");
+  await page.getByRole("button", { name: "저장하기" }).click();
+  await expect(page.getByRole("button", { name: "같은 내용으로 재시도" })).toBeVisible();
+  await expect(page.getByLabel("금액 (원)")).toBeDisabled();
+  await page.getByRole("button", { name: "같은 내용으로 재시도" }).click();
+  await expect(page.getByRole("row").filter({ hasText: "응답 유실 재시도" })).toHaveCount(1);
+  for (const [type, amount, memo] of [["income", "10000", "월급 기록"], ["expense", "800", "간식 기록"]]) {
+    await page.getByRole("button", { name: "거래 추가", exact: true }).click();
+    await page.getByLabel("거래 종류", { exact: true }).selectOption(type!);
+    await page.getByLabel("금액 (원)").fill(amount!); await page.getByLabel("메모 (선택)").fill(memo!);
+    await page.getByRole("button", { name: "저장하기" }).click();
+    await expect(page.getByRole("row").filter({ hasText: memo! })).toBeVisible();
+  }
+  await page.reload();
+  await expect(page.getByRole("row").filter({ hasText: "월급 기록" })).toBeVisible();
+  await page.getByLabel("종류 필터").selectOption("income");
+  await page.getByRole("button", { name: "조회하기" }).click();
+  await expect(page.getByRole("row").filter({ hasText: "월급 기록" })).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "간식 기록" })).toHaveCount(0);
+  // 작은 페이지로 같은 실제 DB의 keyset 페이지 이동을 브라우저까지 확인한다.
+  await page.route("**/api/transactions**", route => { if (route.request().method() !== "GET") return route.continue(); const url = new URL(route.request().url()); url.searchParams.set("limit", "2"); return route.continue({ url: url.href }); });
+  await page.getByRole("button", { name: "필터 초기화" }).click();
+  await expect(page.getByRole("button", { name: "더 보기" })).toBeVisible();
+  await page.getByRole("button", { name: "더 보기" }).click();
+  await expect(page.getByRole("table").getByRole("row")).toHaveCount(4);
+  expect((await new AxeBuilder({ page }).analyze()).violations.map(v => v.id)).toEqual([]);
+  for (const width of [1920, 1080, 390, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  }
+  await page.screenshot({ path: "output/playwright/transactions-desktop.png", fullPage: true });
+  await page.getByRole("link", { name: "계좌", exact: true }).click();
+  await expect(page.getByRole("row").filter({ hasText: "거래 테스트 통장" }).getByText("8,000원", { exact: true })).toBeVisible();
+  await page.getByRole("link", { name: "거래 내역", exact: true }).click();
+  await page.getByRole("button", { name: "거래 추가", exact: true }).click();
+  await page.getByLabel("금액 (원)").fill("500");
+  const archived = await page.evaluate(async () => {
+    const { items } = await (await fetch("/api/categories")).json();
+    const item = items.find((row: { name: string }) => row.name === "거래 식비");
+    const { csrfToken } = await (await fetch("/api/auth/csrf")).json();
+    return (await fetch(`/api/categories/${item.id}/archive`, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }, body: JSON.stringify({ expectedVersion: item.version }) })).status;
+  });
+  expect(archived).toBe(200);
+  await page.getByRole("button", { name: "저장하기" }).click();
+  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("사용할 수 없어요");
+  await expect(page.getByLabel("금액 (원)")).toHaveValue("500");
+  await page.keyboard.press("Escape");
+  await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "로그아웃했어요" })).toBeVisible();
+  await expect(page.getByText("월급 기록")).toHaveCount(0);
+  expect(await page.evaluate(() => [localStorage.length, sessionStorage.length])).toEqual([0, 0]);
+});
+
+test("transaction data and draft disappear while identity is revalidated", async ({ page }) => {
+  await login(page); await page.goto("/app/transactions");
+  await expect(page.getByRole("row").filter({ hasText: "월급 기록" })).toBeVisible();
+  await page.getByRole("button", { name: "거래 추가", exact: true }).click();
+  await page.getByLabel("메모 (선택)").fill("이전 계정의 미저장 거래");
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  await page.route("**/api/me", async route => { await held; await route.fulfill({ json: { id: "22222222-2222-4222-8222-222222222222", email: "second@example.test", emailVerified: true } }); });
+  await page.evaluate(() => window.dispatchEvent(new Event("visibilitychange")));
+  try {
+    await expect(page.getByRole("status")).toContainText("로그인 상태");
+    await expect(page.getByLabel("메모 (선택)")).toHaveCount(0);
+    await expect(page.getByText("월급 기록")).toHaveCount(0);
+  } finally { release(); }
+  await expect(page.getByRole("heading", { name: "세션을 다시 확인해 주세요" })).toBeVisible();
+});

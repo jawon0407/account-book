@@ -14,6 +14,7 @@ import { REPLAY_STORE } from "../persistence/replay-store.js";
 import { ProfilesRepository } from "../profiles/profiles.repository.js";
 import { AccountsRepository } from "../accounts/accounts.repository.js";
 import { CategoriesRepository } from "../categories/categories.repository.js";
+import { TransactionsRepository } from "../transactions/transactions.repository.js";
 import { CoreError } from "./core-error.js";
 
 const userId = "11111111-1111-4111-8111-111111111111", resource = "22222222-2222-4222-8222-222222222222";
@@ -26,6 +27,7 @@ describe("core API signed HTTP boundary", () => {
   const profileRepo = { get: vi.fn(async () => profile), update: vi.fn(async () => ({ ...profile, nickname: "닉네임", version: 2 })) };
   const accountRepo = { list: vi.fn(async () => ({ items: [account] })), create: vi.fn(async () => account), update: vi.fn(async () => account), archive: vi.fn(async () => account) };
   const categoryRepo = { list: vi.fn(async () => ({ items: [category] })), create: vi.fn(async () => category), update: vi.fn(async () => category), archive: vi.fn(async () => category) };
+  const transactionRepo = { list: vi.fn(async () => ({ items: [], nextCursor: null })), create: vi.fn(async () => ({ id: resource })) };
   beforeAll(async () => {
     const keys = await generateKeyPair("ES256"); privateKey = keys.privateKey;
     const used = new Set<string>();
@@ -35,7 +37,8 @@ describe("core API signed HTTP boundary", () => {
       .overrideProvider(API_DATABASE_POOL).useValue({ end: async () => undefined })
       .overrideProvider(REPLAY_STORE).useValue(replay).overrideProvider(ACCESS_TOKEN_VERIFIER).useValue(verifier)
       .overrideProvider(ProfilesRepository).useValue(profileRepo).overrideProvider(AccountsRepository).useValue(accountRepo)
-      .overrideProvider(CategoriesRepository).useValue(categoryRepo).compile();
+      .overrideProvider(CategoriesRepository).useValue(categoryRepo)
+      .overrideProvider(TransactionsRepository).useValue(transactionRepo).compile();
     app = module.createNestApplication<NestFastifyApplication>(createApiFastifyAdapter(), { logger: false });
     registerRequestBodyParsers(app); await configureApiApplication(app); await app.init(); await app.getHttpAdapter().getInstance().ready();
   });
@@ -78,6 +81,26 @@ describe("core API signed HTTP boundary", () => {
     expect(accountRepo.list).toHaveBeenCalledWith(userId, false);
     const response = await send("POST", "/v1/accounts", "account:write", { kind: "cash", name: "x", idempotencyKey: randomUUID(), userId: resource });
     expect(response.statusCode).toBe(400);
+  });
+  it("wires transaction list with exact scope and normalized query", async () => {
+    const response = await send("GET", "/v1/transactions?limit=2&type=expense", "transaction:read");
+    expect(response.statusCode).toBe(200);
+    expect(response.headers["cache-control"]).toBe("private, no-store");
+    expect(response.json()).toEqual({ items: [], nextCursor: null });
+    expect(transactionRepo.list).toHaveBeenCalledWith(userId, { limit: 2, type: "expense" });
+    expect((await send("GET", "/v1/transactions", "account:read")).statusCode).toBe(401);
+    expect((await app.inject({ method: "GET", url: "/v1/transactions" })).statusCode).toBe(401);
+  });
+  it.each(["limit=0", "limit=101", "limit=1.5", "limit=1&limit=2", "from=2026-10-02&to=2026-10-01", "owner=x"])("rejects transaction query %s", async query => {
+    expect((await send("GET", `/v1/transactions?${query}`, "transaction:read")).statusCode).toBe(400);
+  });
+  it("accepts only ordinary income/expense creation under transaction:write", async () => {
+    const value = { accountId: resource, categoryId: resource, type: "expense", amountKrw: 100, occurredOn: "2026-10-01", idempotencyKey: randomUUID() };
+    expect((await send("POST", "/v1/transactions", "transaction:write", value)).statusCode).toBe(201);
+    expect(transactionRepo.create).toHaveBeenCalledWith(userId, value);
+    expect((await send("POST", "/v1/transactions", "transaction:read", value)).statusCode).toBe(401);
+    for (const change of [{ amountKrw: 0 }, { amountKrw: 1.5 }, { amountKrw: "100" }, { memo: " " }, { memo: "x".repeat(501) }, { occurredOn: "2026-02-30" }, { userId }, { type: "transfer_in" }])
+      expect((await send("POST", "/v1/transactions", "transaction:write", { ...value, ...change })).statusCode).toBe(400);
   });
   it.each(["true&includeArchived=false", "1", "TRUE", "false&owner=x", "false&includeArchived[]=true"])("rejects ambiguous query %s", async value => {
     expect((await send("GET", `/v1/accounts?includeArchived=${value}`, "account:read")).statusCode).toBe(400);
