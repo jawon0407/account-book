@@ -166,6 +166,9 @@ export class DelegatedApiClient {
         headers,
         ...(request.method === "GET" ? {} : { body: request.body as BodyInit }),
         signal: AbortSignal.timeout(3_000),
+        // 위임 JWT를 리다이렉트 대상으로 보내거나 사용자별 응답을 Next 캐시에 남기지 않는다.
+        redirect: "error",
+        cache: "no-store",
       });
     } catch {
       return unavailable();

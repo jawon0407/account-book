@@ -4,6 +4,7 @@ const csrfModule = await import("./csrf.js").catch(() => ({} as Record<string, u
 const requestModule = await import("./request-origin.js").catch(() => ({} as Record<string, unknown>));
 const issueCsrfToken = csrfModule.issueCsrfToken as ((context: unknown, now: Date, key: Uint8Array) => string) | undefined;
 const verifyCsrfRequest = requestModule.verifyCsrfRequest as ((request: unknown, context: unknown, policy: unknown) => void) | undefined;
+const verifyMutationCsrfRequest = requestModule.verifyMutationCsrfRequest as typeof verifyCsrfRequest;
 const AuthRequestRejectedError = requestModule.AuthRequestRejectedError as (new () => Error) | undefined;
 
 const selector = Buffer.alloc(32, 12).toString("base64url");
@@ -66,6 +67,7 @@ function validHeaders(token = validToken()): Record<string, string> {
 function expectRejected(input: unknown, supplied = "", activePolicy: unknown = policy): void {
   expect(AuthRequestRejectedError).toBeTypeOf("function");
   expect(() => verifyCsrfRequest?.(input, context, activePolicy)).toThrow(AuthRequestRejectedError);
+  expect(() => verifyMutationCsrfRequest?.(input, context, activePolicy)).toThrow(AuthRequestRejectedError);
   try {
     verifyCsrfRequest?.(input, context, activePolicy);
   } catch (error) {
@@ -75,6 +77,21 @@ function expectRejected(input: unknown, supplied = "", activePolicy: unknown = p
 }
 
 describe("state-changing request boundary", () => {
+  it.each(["POST", "PATCH"])("accepts a bound same-origin JSON %s on the ledger mutation boundary", (method) => {
+    expect(verifyMutationCsrfRequest).toBeTypeOf("function");
+    expect(() => verifyMutationCsrfRequest!(request(validHeaders(), method), context, policy)).not.toThrow();
+  });
+
+  it("keeps authentication POST-only while rejecting mutation verbs outside POST/PATCH", () => {
+    expect(() => verifyCsrfRequest!(request(validHeaders(), "PATCH"), context, policy)).toThrow(AuthRequestRejectedError);
+    for (const method of ["PUT", "DELETE", "OPTIONS", "HEAD", "patch"]) {
+      expect(() => verifyMutationCsrfRequest!(request(validHeaders(), method), context, policy)).toThrow(AuthRequestRejectedError);
+    }
+  });
+
+  it("does not accept a PATCH token bound to another browser session", () => {
+    expect(() => verifyMutationCsrfRequest!(request(validHeaders(), "PATCH"), { selector: Buffer.alloc(32, 99).toString("base64url") }, policy)).toThrow(AuthRequestRejectedError);
+  });
   it("accepts an exact same-origin JSON POST with a bound CSRF token", () => {
     expect(verifyCsrfRequest).toBeTypeOf("function");
     expect(() => verifyCsrfRequest?.(request(validHeaders()), context, policy)).not.toThrow();

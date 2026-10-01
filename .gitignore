@@ -5,11 +5,16 @@ dist/
 build/
 coverage/
 output/
+test-results/
+playwright-report/
+.playwright-cli/
 
 # Local environment and secrets
 .env
 .env.*
 !.env.example
+# Next.js local HTTPS certificates (may include private keys)
+apps/web/certificates/
 
 # Local design and brainstorming sessions
 .superpowers/
@@ -24,3 +29,4 @@ Thumbs.db
 
 # Logs
 *.log
+.gstack/

@@ -10,10 +10,13 @@ import { createDatabaseClient } from "@account-book/database";
 import { EmailAuthService } from "./auth/email-auth-service.js";
 import { FakeAuthProvider } from "./auth/fake-auth-provider.js";
 import { OAuthService } from "./auth/oauth-service.js";
+import { enabledOAuthProviders } from "./auth/oauth-configuration.js";
+import type { AuthProvider } from "@account-book/contracts";
 import { PasswordRecoveryService } from "./auth/password-recovery-service.js";
 import { SupabaseAuthAdapter } from "./auth/supabase-auth-adapter.js";
 import { AuthController } from "./http/auth-controller.js";
 import { DelegatedApiClient } from "./http/delegated-api-client.js";
+import { CoreController } from "./core/core-controller.js";
 import { PostgresAuthRepository } from "./persistence/postgres-auth-repository.js";
 import { SessionService } from "./session/session-service.js";
 import { DelegatedJwtSigner } from "./security/delegated-jwt-signer.js";
@@ -27,7 +30,7 @@ let sharedDatabaseFingerprint: string | undefined;
 export type AuthAdapterMode = "supabase" | "fake";
 
 /** Canonical application origin and validated adapter choice. */
-export type AuthRuntime = Readonly<{ mode: AuthAdapterMode; origin: URL }>;
+export type AuthRuntime = Readonly<{ mode: AuthAdapterMode; origin: URL; enabledProviders: readonly AuthProvider[] }>;
 
 /**
  * 환경변수·키·연결 문자열을 오류에 담지 않고 설정 실패를 알립니다.
@@ -75,7 +78,7 @@ export function resolveAuthRuntime(environment: Readonly<Record<string, string |
   const modeValue = environment.AUTH_ADAPTER_MODE ?? "supabase";
   if (modeValue !== "supabase" && modeValue !== "fake") return invalidConfiguration();
   if (modeValue === "fake" && (production || !LOOPBACK_HOSTS.has(origin.hostname))) return invalidConfiguration();
-  return { mode: modeValue, origin };
+  return { mode: modeValue, origin, enabledProviders: enabledOAuthProviders(environment) };
 }
 
 /**
@@ -233,6 +236,7 @@ function databaseClient(connectionString: string): ReturnType<typeof createDatab
  */
 export type RequestContainer = Readonly<{
   authController: AuthController;
+  coreController: CoreController;
   delegatedApiClient: DelegatedApiClient;
   delegatedJwtSigner: DelegatedJwtSigner;
 }>;
@@ -275,6 +279,7 @@ export function createRequestContainer(environment: Readonly<Record<string, stri
     });
     const delegatedApiClient = new DelegatedApiClient(apiInternalUrl, delegatedJwtSigner);
     const authController = new AuthController({
+      enabledProviders: runtime.enabledProviders,
       configuredOrigin: runtime.origin,
       secureCookies: true,
       csrfKey,
@@ -290,6 +295,7 @@ export function createRequestContainer(environment: Readonly<Record<string, stri
       delegatedJwtSigner,
       delegatedApiClient,
       authController,
+      coreController: new CoreController({ configuredOrigin: runtime.origin, csrfKey, now: () => new Date(), sessions, delegatedApiClient }),
     };
   } catch {
     return invalidConfiguration();

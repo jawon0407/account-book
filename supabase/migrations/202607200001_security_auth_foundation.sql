@@ -1,12 +1,18 @@
 do $$
 begin
+  -- Hosted Supabase의 postgres는 SUPERUSER가 아니다. 위험한 기존 역할을 조용히 재사용하지 않는다.
+  if exists (select 1 from pg_roles where rolname = 'app_session_bff' and (rolsuper or rolreplication or rolbypassrls)) then
+    raise exception 'UNSAFE_APP_SESSION_BFF_ROLE';
+  end if;
   if not exists (select 1 from pg_roles where rolname = 'app_session_bff') then
     create role app_session_bff nologin nosuperuser nocreatedb nocreaterole noinherit noreplication nobypassrls;
   end if;
 end
 $$;
 
-alter role app_session_bff nologin nosuperuser nocreatedb nocreaterole noinherit noreplication nobypassrls;
+-- SUPERUSER/REPLICATION/BYPASSRLS는 생성 시 false이며 위에서 재검증했다.
+-- 비슈퍼유저도 변경 가능한 속성만 정규화한다.
+alter role app_session_bff nologin nocreatedb nocreaterole noinherit;
 
 create schema if not exists app_private;
 revoke all privileges on schema app_private from public, anon, authenticated, service_role, app_session_bff;

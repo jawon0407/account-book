@@ -1,8 +1,10 @@
 # 회원·금융 원장 전체 기본 스키마 설계
 
+2026-09-30 이름 변경: 사용자 `user.users`, `user.roles`, `user.role_history`; 금융 `finance.accounts`, `finance.transaction_categories`, `finance.transaction_history`, `finance.account_transfers`, `finance.request_deduplication`. SQL에서 user 스키마는 `"user"`로 인용한다. 기존 migration 파일은 당시 이름을 유지하며 새 `202609300001_readable_schema_names.sql`을 이어서 적용한다. 실행 결과는 [이름 변경 기록](../../status/2026-09-30-readable-schema-names.ko.md)을 확인한다.
+
 - 작성일: 2026-09-29
-- 상태: 전체 기본 스키마 범위는 사용자 선택 완료. 아래 상세 설계는 검토용이며 SQL 구현·개발 DB 적용은 아직 하지 않았다.
-- 기준: `feature/bank-state-transitions`, HEAD `f72f91f`. 인증 연결 작업의 미커밋 변경은 보존한다.
+- 상태: 사용자 승인 후 SQL·타입·검증 구현 완료. 2026-09-29 16:00:58 KST 개발 Supabase에 신규 8개 테이블 적용 완료. [적용 기록](../../status/2026-09-29-core-schema-application.ko.md) 참조.
+- 기준: `feature/bank-state-transitions`, 구현 기준 HEAD `10ec214`. 기존 인증 연결 및 이번 구현은 미커밋 상태로 보존하며 커밋·푸시하지 않았다.
 - 범위: 신규 8개 테이블. 기존 Supabase Auth, 앱 인증 7개, 은행 연결 3개 테이블의 책임을 유지한다.
 - 선행 계약: [공용 원장 계약 설계](2026-08-26-ledger-public-contracts-design.md), [웹·모바일 공유 원장](2026-07-27-web-native-mobile-shared-ledger-design.md).
 
@@ -31,10 +33,10 @@
 | `auth` | Supabase 로그인 계정·인증 | 기존 사용자 보존. `auth.users.id`만 관계 키로 참조 |
 | `app_private` | BFF 세션·OAuth·요청 제한·JWT replay | 이미 적용한 7개 테이블 유지 |
 | `app_bank` | 은행 연결 신청·연결·암호화 자격정보 | 기존 SQL 3개 테이블 재사용. 이번에 동일 기능을 중복 생성하지 않음 |
-| `app_identity` | 앱 프로필·역할·권한 변경 이력 | 신규 3개 |
-| `app_ledger` | 개인 계좌·카테고리·거래·이체·멱등성 | 신규 5개 |
+| `user` | 앱 프로필·역할·권한 변경 이력 | 신규 3개 |
+| `finance` | 개인 계좌·카테고리·거래·이체·멱등성 | 신규 5개 |
 
-새 개발 Supabase에 실제 적용 확인된 앱 테이블은 현재 `app_private` 7개뿐이다. `app_bank`는 저장소에 migration이 있지만 이 개발 프로젝트에 적용 완료했다고 주장하지 않는다. 금융 원장 5개는 은행 연결 없이 수동 기록부터 사용할 수 있게 독립시킨다.
+새 개발 Supabase에 실제 적용 확인된 앱 테이블은 `app_private` 7개와 이번 `user` 3개·`finance` 5개다. `app_bank`는 저장소에 migration이 있지만 이 개발 프로젝트에 적용 완료했다고 주장하지 않는다. 금융 원장 5개는 은행 연결 없이 수동 기록부터 사용할 수 있게 독립시켰으며, 이를 사용하는 API/화면은 후속 구현이다.
 
 신규 스키마는 Supabase Data API의 Exposed schemas에 추가하지 않는다. 브라우저·모바일이 publishable key로 금융 테이블을 직접 조회하지 않는다. Table Editor는 관리자 도구이므로 비공개 스키마와 API 비노출은 별개다.
 
@@ -58,19 +60,35 @@ erDiagram
 
 ## 5. 회원 기반: 신규 3개
 
-### 5.1 `app_identity.profiles`
+### 5.1 `user.users`
 
 | 열 | 형식 | 규칙·의미 |
 | --- | --- | --- |
 | `user_id` | UUID, PK/FK | `auth.users.id`와 1:1. 이메일을 관계 키로 쓰지 않음 |
 | `nickname` | text, nullable | 미설정은 NULL. 설정 시 앞뒤 공백 제거 후 1~50자. 중복 닉네임 허용 |
 | `avatar_object_key` | text, nullable | 이미지 자체나 외부 URL이 아니라 Storage 내부 경로. 최대 512자, 본인 UUID 디렉터리 아래 경로만 허용. `..`, 역슬래시, URL 금지 |
+| `signup_provider` | text | 최초 가입 경로: `email`, `google`, `kakao`, `naver`, `unknown`. 서버가 초기화하며 일반 프로필 수정으로 변경 불가 |
 | `version` | bigint | 1부터 시작, 수정 때 증가. 최대 9,007,199,254,740,991 |
 | `created_at`, `updated_at` | timestamptz | 서버 생성. 유한 시각, 수정 시각은 생성 시각 이상 |
+| `deleted_at` | timestamptz, nullable | 기본값 NULL은 미탈퇴. 값이 있으면 앱에서 탈퇴 처리된 시각. 유한 시각이며 `created_at` 이상. 일반 프로필 수정으로 설정·복구 불가 |
 
 프로필을 읽을 때마다 Auth metadata와 동기화하지 않는다. 이 테이블을 앱 프로필의 원본으로 삼는다. 이메일·비밀번호·토큰·관리자 역할은 이 테이블에 복제하지 않는다. Storage bucket·업로드 API·이미지 검사·파일 삭제 처리는 별도 구현이며, 경로 열이 있다는 것만으로 업로드 기능 완료가 아니다.
 
-### 5.2 `app_identity.user_roles`
+`signup_provider`는 **최초 가입 방식**이지 최근 로그인 방식이나 현재 연결된 소셜 계정 목록이 아니다. 이메일로 가입한 뒤 Google을 연결해도 `email`을 유지한다. 현재 이메일 기반 사이트 직접 가입을 `email`로 표현하며, 웹/모바일 구분이나 광고 유입 경로를 뜻하지 않는다.
+
+| 인증 서버의 최초 provider | 저장값 | 화면 표시 예시 |
+| --- | --- | --- |
+| `email` | `email` | 이메일 직접 가입 |
+| `google` | `google` | Google 가입 |
+| `kakao` | `kakao` | Kakao 가입 |
+| `custom:naver` | `naver` | Naver 가입 |
+| 누락 또는 미지원 값 | `unknown` | 가입 경로 확인 필요 |
+
+근거는 Supabase가 관리하는 `auth.users.raw_app_meta_data`의 `provider`다. 공식 문서에서 `app_metadata.provider`는 최초 가입 공급자, `providers`는 사용 가능한 로그인 공급자 목록으로 구분한다. 사용자 입력 `user_metadata`, 요청 본문의 가입 경로, 최근 로그인 결과로 대체하지 않는다. Naver 매핑은 현재 `supabase-auth-adapter.ts`의 `custom:naver` 설정과 일치시킨다. 가입 INSERT 시 해당 metadata가 실제로 준비되어 있는지는 통합 테스트로 검증한다. 확인할 수 없으면 이메일로 추측하지 않고 `unknown`을 저장하며, 이후 신뢰할 수 있는 원본이 확인될 때 제한된 보정 절차만 `unknown`을 채울 수 있다. 이미 확인된 가입 경로는 계정 연결·재로그인·프로필 수정으로 덮어쓰지 않는다.
+
+`deleted_at`은 행을 즉시 지우지 않고 탈퇴 상태를 기록하는 **소프트 삭제**용이다. NULL이어도 이메일 인증 완료·정상 로그인 가능을 보장하지 않으며, 값이 생겼다고 Supabase 계정·세션·금융정보가 자동 삭제되는 것도 아니다. 실제 영구 삭제 완료 시각과 구분한다. 탈퇴 전용 서버 절차에서만 기록하고, 일반 PATCH나 재로그인으로 NULL로 되돌리지 않는다. 접근 차단·세션 폐기·보존 기간 후 데이터 정리는 §7의 별도 책임이다.
+
+### 5.2 `user.roles`
 
 | 열 | 형식 | 규칙·의미 |
 | --- | --- | --- |
@@ -82,7 +100,7 @@ Supabase의 DB 역할 `authenticated`, `app_api`와 서비스 역할 `member`/`a
 
 구현 후 API 런타임에는 본인의 역할 조회만 허용하고 INSERT/UPDATE/DELETE는 금지한다. 관리자의 역할 부여·회수 UI/API는 이번 범위가 아니며, 향후 별도 제한된 관리자 경로와 재인증·감사 기록을 설계한다.
 
-### 5.3 `app_identity.role_change_events`
+### 5.3 `user.role_history`
 
 | 열 | 형식 | 규칙·의미 |
 | --- | --- | --- |
@@ -97,9 +115,9 @@ Supabase의 DB 역할 `authenticated`, `app_api`와 서비스 역할 `member`/`a
 
 ### 5.4 기존·신규 가입 계정 초기화
 
-기존 회원은 `auth.users.id`만 읽어 누락된 프로필과 `member` 행을 채운다. 기존 프로필이나 이미 부여된 역할을 덮어쓰지 않는다. 계정 비밀번호·이메일·세션은 변경하지 않는다.
+기존 회원은 `auth.users.id`와 인증 서버가 관리하는 최초 `provider`만 읽어 누락된 프로필과 `member` 행을 채운다. 신뢰할 가입 경로가 없으면 `unknown`으로 남긴다. 기존 프로필·탈퇴 상태·이미 부여된 역할을 덮어쓰지 않는다. 계정 비밀번호·이메일·세션은 변경하지 않는다.
 
-신규 회원은 `auth.users` INSERT 후 제한된 초기화 트리거로 프로필·일반 역할·bootstrap 이벤트를 같은 트랜잭션에서 만든다. 외부 HTTP/Storage 호출은 하지 않으며, metadata의 nickname·role·URL을 복사하지 않는다. 함수는 고정된 테이블만 사용하고 `search_path`를 비우며 PUBLIC·런타임의 직접 실행 권한을 철회한다.
+신규 회원은 `auth.users` INSERT 후 제한된 초기화 트리거로 프로필·일반 역할·bootstrap 이벤트를 같은 트랜잭션에서 만든다. `signup_provider`는 §5.1의 허용 목록으로 정규화하고 `deleted_at`은 NULL로 시작한다. 외부 HTTP/Storage 호출은 하지 않으며, 사용자 metadata의 nickname·role·URL·signup_provider·deleted_at을 복사하지 않는다. 함수는 고정된 테이블만 사용하고 `search_path`를 비우며 PUBLIC·런타임의 직접 실행 권한을 철회한다.
 
 **주요 위험:** 이 트리거가 실패하면 회원가입 자체가 실패할 수 있다. 실제 PostgreSQL에서 신규 가입·재실행·기존 회원 보존·악성 metadata를 시험한 뒤 적용한다. 오류를 무시해 프로필·역할이 절반만 생성되는 방식은 쓰지 않는다. 기존 인증 코드와 Supabase 관리 테이블의 열·인덱스를 임의 변경하지 않는다.
 
@@ -109,7 +127,7 @@ Supabase의 DB 역할 `authenticated`, `app_api`와 서비스 역할 `member`/`a
 
 아래에서 nullable로 표시하지 않은 열은 NOT NULL이다. 모든 version은 기본값 1, 상한 9,007,199,254,740,991이며 profiles/accounts/categories/일반 transactions의 수정 시 DB 트리거가 이전 값에서 1을 증가시키고 updated_at을 설정한다. ID·user_id·created_at은 생성 후 바꾸지 못한다. API가 version 열을 직접 덮어쓰지는 못하지만 후속 repository에서 expectedVersion 조건은 반드시 별도로 검사해야 한다.
 
-### 6.1 `app_ledger.accounts`
+### 6.1 `finance.accounts`
 
 - `id UUID PK`, `user_id UUID NOT NULL FK auth.users.id`
 - `kind`: `cash`/`bank`/`card`; 생성 후 불변
@@ -123,7 +141,7 @@ Supabase의 DB 역할 `authenticated`, `app_api`와 서비스 역할 `member`/`a
 
 잔액은 계좌의 활성 원장 행 합계에서 계산한다. 별도의 수정 가능한 잔액을 중복 저장하지 않는다. 은행에서 조회한 잔액 스냅샷은 추후 별도 모델로 추가하며 장부 잔액과 혼동하지 않는다.
 
-### 6.2 `app_ledger.categories`
+### 6.2 `finance.transaction_categories`
 
 - `id UUID PK`, `user_id UUID NOT NULL FK auth.users.id`
 - `kind`: `income`/`expense`; 생성 후 불변
@@ -134,7 +152,7 @@ Supabase의 DB 역할 `authenticated`, `app_api`와 서비스 역할 `member`/`a
 
 archive된 카테고리로 신규 거래를 만들 수 없지만 과거 거래의 연결은 유지한다. 기본 카테고리는 이번 migration에서 임의로 전 사용자에게 대량 생성하지 않는다.
 
-### 6.3 `app_ledger.transactions`
+### 6.3 `finance.transaction_history`
 
 - `id UUID PK`, `user_id UUID NOT NULL`, `account_id UUID NOT NULL`
 - `kind`: `income`, `expense`, `transfer_out`, `transfer_in`, `opening_balance`
@@ -157,7 +175,7 @@ archive된 카테고리로 신규 거래를 만들 수 없지만 과거 거래�
 
 동일 사용자의 유효한 계좌/카테고리만 새로 연결한다. archive 이후에도 기존 기록을 읽을 수 있다. 계좌·카테고리의 활성 여부 확인은 연결 대상 행 잠금과 함께 구현해야 archive와 신규 거래 생성의 경쟁을 막을 수 있다.
 
-### 6.4 `app_ledger.transfers`
+### 6.4 `finance.account_transfers`
 
 - `id UUID PK`, `user_id UUID NOT NULL`
 - `from_account_id`, `to_account_id`: 같은 사용자의 서로 다른 계좌, 각각 복합 FK
@@ -169,7 +187,7 @@ archive된 카테고리로 신규 거래를 만들 수 없지만 과거 거래�
 
 이번 공개 계약에는 이체 수정·삭제가 없다. 런타임에 header 변경·삭제 및 연결된 transaction의 변경·삭제를 허용하지 않는다. 나중에 수정·취소 기능을 추가할 때 두 원장 행을 함께 처리하는 별도 명령을 만든다. 이체는 통장 간 이동 기록이며 실제 송금 기능이 아니다.
 
-### 6.5 `app_ledger.idempotency_requests`
+### 6.5 `finance.request_deduplication`
 
 - 복합 PK: `(user_id, operation, idempotency_key)`
 - `user_id UUID`: `auth.users.id`를 참조하며 소유자 삭제에는 RESTRICT 적용
@@ -196,11 +214,15 @@ snapshot은 거래 후 수정된 현재 행과 최초 생성 응답을 구분하
 
 기존 은행 저장소 패턴에 맞춰 검증된 API principal을 transaction-local `app.user_id`로 전달한다. 미설정은 접근 거부, 다른 사용자 행은 반환하지 않는다. pool에서 재사용한 연결에 이전 사용자 문맥이 남지 않음을 시험한다. 이 방식이 침해된 API의 임의 SQL/GUC 조작까지 막는다고 주장하지 않는다.
 
+프로필·역할·금융 RLS에는 소유자 검사뿐 아니라 **프로필 존재 및 `deleted_at IS NULL`** 조건이 필요하다. profiles 자체 정책을 다른 테이블과 상호 참조해 재귀가 생기지 않게 구현 계획에서 분리한다. 일반 `app_api`에는 `signup_provider`/`deleted_at` UPDATE 권한을 주지 않는다. 제한된 탈퇴 절차가 삭제 상태를 커밋한 뒤 시작하는 새 요청은 기존 토큰이 남아 있어도 API에서 거부해야 하며, 은행 연결·동기화 경로에도 같은 상태 검사가 필요하다. 이미 실행 중인 요청이 열 추가만으로 취소된다고 보장하지 않는다. 이 상태 검사와 기존 인증·은행 경로 연동은 후속 API 통합 테스트까지 완료해야 작동하는 탈퇴 기능으로 표시할 수 있다.
+
 수정은 `(user_id,id,expectedVersion)` 조건을 하나의 원자적 UPDATE에 포함하고 version을 올린다. 계좌 관련 잠금은 UUID 오름차순으로 획득해 이체·동시 수정의 교착 가능성을 낮춘다. 스키마의 version 열만으로 낙관적 동시성 제어가 구현됐다고 표시하지 않는다.
 
 개별 금액은 안전 정수 범위로 제한해도 합계는 범위를 넘을 수 있다. DB에서는 정확한 정수/수치 합산을 하고 후속 API는 범위를 검사한 뒤에만 JSON number로 변환한다. 범위 초과를 조용히 반올림하지 않는다. 이 검사·잔액 응답 경로는 repository/API 구현 시 별도 완료 기준이다.
 
 프로필·현재 역할의 FK는 사용자 삭제에 CASCADE를 적용하고 금융 소유자 FK는 RESTRICT로 보호한다. 따라서 금융 데이터가 생긴 후 Auth Users에서 계정만 먼저 삭제하려 하면 전체 삭제가 거부되어 프로필·역할도 보존된다. 계정 탈퇴는 원장·멱등성·은행 연결·Storage·세션·감사 정책을 포함한 별도 정리 절차로 구현한다. 이 절차와 보존 고지가 없으면 실제 금융정보 베타를 열지 않는다.
+
+탈퇴 절차에는 삭제 상태 기록, BFF 세션과 API 접근 차단, Supabase 인증 갱신 차단·세션 회수, 은행 연결 자격정보 폐기, Storage 및 보존 대상 데이터 정리가 포함된다. Supabase에서 세션을 회수해도 이미 발급된 토큰의 취급을 별도로 검증해야 한다. `deleted_at`만 수동 입력하는 작업을 이 절차의 완료로 간주하지 않는다. 보존 기간·복구 허용 여부는 아직 확정하지 않았으며, 무기한 소프트 삭제 보관을 승인한 것으로 해석하지 않는다.
 
 ## 8. 조회 인덱스와 초급 개발자용 예시
 
@@ -212,6 +234,28 @@ snapshot은 거래 후 수정된 현재 행과 최초 생성 응답을 구분하
 - 멱등성 조회: 복합 PK 사용
 
 예를 들어 커피 4,500원 지출은 로그인 계정에 연결된 계좌와 지출 카테고리를 참조하는 거래 한 행이다. account_id만 맞고 user_id가 다른 조합은 복합 FK로 거부한다. 10,000원 통장 간 이동은 transfer header와 transfer_out/transfer_in 두 행이다. 두 행 모두 수입·지출 통계에서는 제외하지만 각 계좌 잔액에는 반영한다.
+
+### 8.1 세 테이블이 각각 필요한 이유
+
+`finance`는 관련 테이블을 모아 둔 DB의 이름 공간이다. `transaction_history`는 **계좌별 돈의 움직임 한 건**을 저장한다. 수입·지출뿐 아니라 내부 이동의 입금/출금과 시작 잔액도 들어간다. 여기서 거래 행(transaction)과 여러 SQL 작업을 한꺼번에 성공/취소시키는 DB 트랜잭션(transaction)은 다른 의미다.
+
+`account_transfers`는 **내 계좌 사이 한 번의 이동을 묶는 공통 기록**이다. 예를 들어 국민은행 장부에서 토스뱅크 장부로 10,000원을 옮겼다고 기록하면 다음 3행을 함께 저장한다. 아래 ID는 설명용 이름이고 실제 저장 ID는 UUID다.
+
+| 테이블 | 예시 ID | 내용 |
+| --- | --- | --- |
+| `account_transfers` | T1 | 국민 → 토스, 10,000원, 날짜·메모 |
+| `transaction_history` | X1 | 국민 계좌, `transfer_out`, 10,000원, `transfer_id=T1` |
+| `transaction_history` | X2 | 토스 계좌, `transfer_in`, 10,000원, `transfer_id=T1` |
+
+한쪽만 저장되면 두 계좌 잔액이 어긋나므로 3행 모두 저장하거나 모두 취소한다. 사용자의 전체 자산 이동이므로 수입 10,000원과 지출 10,000원으로 통계를 부풀리지 않는다. 이 기록을 추가한다고 은행에 실제 송금되는 것은 아니다.
+
+`request_deduplication`는 **이미 처리한 생성 요청의 접수 기록과 결과**다. 커피 4,500원 저장은 성공했지만 응답을 받기 전에 네트워크가 끊겼다면, 같은 요청 키 K1로 재전송해도 새 지출을 추가하지 않고 첫 성공 결과를 돌려준다. 이체 생성이라면 K1의 성공 결과가 T1을 가리킨다. 금융 행과 이 접수 기록도 같은 DB 트랜잭션으로 저장해야 한다.
+
+- `transaction_history.id`는 저장된 거래 행의 ID다. `account_transfers.id`는 이체 전체의 ID다.
+- `idempotency_key`는 사용자가 의도한 **한 번의 생성 작업**을 식별한다. UUID v4를 한 번 생성하고 네트워크 재시도에는 재사용한다.
+- 같은 사용자·작업·키라도 금액 등 내용이 바뀌면 충돌로 거부한다. 새로운 거래를 의도한 경우에는 새 키를 만든다.
+- 별도 키로 보낸 중복 입력이나 은행 자동수집의 중복까지 이 테이블 하나가 찾아 주지는 않는다. 은행 원본 거래의 식별·중복 제거는 별도 설계다.
+- 첫 응답 snapshot을 반환하는 규칙과 동시 재시도 처리는 후속 repository/API 로직이 필요하다. 테이블만 만들어도 재시도 처리가 완성되는 것은 아니다.
 
 개인 거래 목록에 필요한 인덱스만 먼저 만들며 모든 열에 인덱스를 추가하지 않는다. 실제 EXPLAIN/조회 측정 전 응답 시간 향상이나 FCP 개선 수치를 약속하지 않는다.
 
@@ -226,7 +270,7 @@ snapshot은 거래 후 수정된 현재 행과 최초 생성 응답을 구분하
 | `supabase/migrations/202609290003_ledger_storage.sql` | 신규 | 금융 5개 테이블·복합 FK·인덱스 |
 | `supabase/migrations/202609290004_ledger_integrity.sql` | 신규 | 이체 쌍·불변 필드·archive 연결 제약 |
 | `supabase/migrations/202609290005_ledger_access.sql` | 신규 | 원장 RLS·최소 권한 |
-| `packages/database/src/schema/identity-*.ts`, `ledger-*.ts` | 신규 | SQL과 대응하는 역할별 TypeScript 선언 |
+| `packages/database/src/schema/identity.ts`, `ledger-*.ts` | 신규 | SQL과 대응하는 역할별 TypeScript 선언 |
 | `packages/database/src/index.ts` | 수정 | 검증된 선언 export |
 | `tests/database/support/core-*.ts` | 신규 | 폐기용 테스트 DB·합성 사용자·역할 fixture |
 | `tests/database/identity-*.test.ts`, `ledger-*.test.ts` | 신규 | 실제 SQL 제약·권한·이체·동시성·타입 일치 검사 |
@@ -238,7 +282,7 @@ snapshot은 거래 후 수정된 현재 행과 최초 생성 응답을 구분하
 ## 10. 검증 및 적용 게이트
 
 1. 실패 테스트를 먼저 작성하고 미구현 상태의 RED를 확인한다.
-2. 회원 3개: 기존 회원 보존·신규 초기화·metadata 관리자 주입 무시·직접 역할 변경 거부·감사 원자성·본인/타인 프로필·허용 열만 수정.
+2. 회원 3개: 기존 회원 보존·신규 초기화·metadata 관리자 주입 무시·직접 역할 변경 거부·감사 원자성·본인/타인 프로필·허용 열만 수정. 가입 경로 4종(`custom:naver` 매핑 포함), 누락/미지원 값의 unknown 처리, 사용자 metadata 위조 무시, 계정 연결 시 최초 값 보존, signup_provider/deleted_at 직접 수정 거부, 삭제 시각 경계와 탈퇴 상태 접근 거부를 검증한다. 기존 세션·토큰·은행 경로의 탈퇴 차단은 후속 API 통합 검증 항목으로도 유지한다.
 3. 금융 5개: 금액·날짜·메모 경계, 타인 계좌/카테고리, 카테고리 종류, 시작 잔액 중복, archive 경쟁, 이체 1/3행 거부, 동일 계좌·상이한 금액·한쪽 수정 거부.
 4. 멱등성: 사용자·작업별 키 격리, 재시도·충돌·동시 요청 처리. UNIQUE 검사 성공과 전체 repository 기능 완료는 구분한다.
 5. RLS/GRANT: app_api·BFF·anon·authenticated·service_role, 미설정·변경된 사용자 문맥, pool 문맥 잔류, owner 전환 거부.
@@ -247,24 +291,29 @@ snapshot은 거래 후 수정된 현재 행과 최초 생성 응답을 구분하
 8. 검증된 SQL과 신규 계정 초기화 영향 검토 후에만 개발 Supabase 적용. 이미 있는 객체가 예상과 다르면 중단하며 `IF NOT EXISTS`로 충돌을 숨기지 않는다.
 9. 적용 결과는 테이블 수·권한 메타데이터·기존 계정 보존 여부만 기록한다. 이메일·토큰·DB 비밀번호·실제 거래를 로그/Notion으로 복사하지 않는다.
 
-현재 PC에서 `docker`, `psql`, `pg_ctl`, `initdb` 명령은 발견하지 못했다. 기존의 폐기용 PostgreSQL CI 검증 경로를 이용하거나 안전한 로컬 테스트 환경을 먼저 준비해야 한다. 이 제한을 이유로 hosted Supabase에 파괴적인 `pnpm test:db`를 실행하지 않는다. 실제 SQL 검증 전에는 개발 DB 적용 완료를 주장하지 않는다.
+초기에는 PC에서 PostgreSQL 도구를 찾지 못해, 공식 EDB portable PostgreSQL 17.11을 별도 Temp 디렉터리에서 loopback 전용으로 실행했다. 로컬 폐기용 DB 193개·전체 회귀 1,203개, 타입·린트·빌드를 통과한 뒤 개발 DB rollback 검사와 실제 적용을 완료했다. hosted Supabase에 파괴적인 `pnpm test:db`를 실행하지 않았다. 관리형 postgres의 역할 전환 권한을 확대하지 않고 적용 후 실제 BFF/API 로그인 계정으로 접근 검사 13개를 통과했다.
+
+선언 비교의 한계: 현재 parity는 열 이름·타입·NULL·기본값 존재, PK 열, 제약/인덱스 이름·고유/부분 여부, RLS까지만 비교한다. 모든 CHECK/기본값 표현식·FK 동작·인덱스 열 순서까지 자동 비교하는 확대 작업은 남아 있다. 핵심 제약은 별도 실제 SQL 동작 테스트로 검증했다.
 
 ## 11. 후속 기능과 이번 작업의 경계
 
 - 이번 포함: 8개 기본 테이블, DB 보안·정합성 규칙, 기존 회원 연결, TypeScript 선언·검증·문서.
 - 다음 구현: repository, NestJS API, 프로필/장부 웹 화면, 로그인 후 `/app`, 웹·모바일 공통 데이터 경로.
 - 별도 확장: 예산, 반복 거래, 영수증, 알림, 자동수집 원본/분류 대기함, 은행 잔액 스냅샷, raon-app 연결, 공동장부 권한, 관리자 UI, 다중통화.
-- 아직 하지 않은 것: SQL 파일 생성·원격 DB 적용·사용자 역할 변경·프로필 backfill·새 계정 생성·전체 회귀 테스트.
+- 이번 완료: SQL 5개·타입·회귀 테스트, 개발 DB 8개 테이블 적용, 기존 회원 1명의 프로필/member 역할 backfill, 최소 권한·RLS 확인.
+- 아직 하지 않은 것: 새 실사용자 생성과 실제 가입 전체 여정 재검증, 프로필/금융 repository·API·화면, 전체 탈퇴 처리, 운영 배포. 관리자 승격은 하지 않았다.
 
 ## 12. 근거와 검토 기록
 
 - [Supabase 사용자 데이터 관리](https://supabase.com/docs/guides/auth/managing-user-data): 앱 프로필은 별도 테이블로 연결 가능하며 가입 트리거 실패가 가입을 막을 수 있음.
+- [Supabase User 객체](https://supabase.com/docs/guides/auth/users): app_metadata의 최초 provider와 로그인 가능 providers를 구분하고 사용자 수정 가능한 user_metadata를 보안 판단에 사용하지 않음. 2026-09-29 공식 문서 재확인.
 - [PostgreSQL 17 제약조건](https://www.postgresql.org/docs/17/ddl-constraints.html): 복합 FK·고유 제약과 행 간 규칙 구분.
 - [PostgreSQL 17 RLS](https://www.postgresql.org/docs/17/ddl-rowsecurity.html): 정책과 테이블 권한, owner/BYPASSRLS의 별도 신뢰 경계.
 - 기존 계약 원문과 `packages/contracts/src/accounts.ts`, `categories.ts`, `transactions.ts`, `ledger-common.ts`를 대조했다.
 - 자체 검토: 금액·날짜·이체·ID·멱등성·version 계약을 보존했다. 관리자 자동 부여, 공개 API 노출, 실제 송금, 공동장부 선구현을 제외했다. DB 구현과 API 기능 완료를 구분했다.
-- 이번에는 설계 문서와 색인·Notion만 갱신한다. 기존 인증 연결 변경은 미커밋 상태로 보존하며 이 설계가 적용된 것으로 기록하지 않는다.
+- 2026-09-29 초기 설계 수정: profiles에 signup_provider/deleted_at, 가입 초기화·권한·탈퇴 검증, 거래/이체/멱등성 예제를 추가했다. 이 초기 단계에서는 DB를 변경하지 않았다.
+- 2026-09-29 후속 사용자 승인 후: 두 구현 계획을 실행하고 독립 리뷰의 중복 감사 기록 결함을 RED→GREEN으로 수정했다. SQL·TypeScript·개발 DB 적용 및 기존 회원 보존을 실제 검증했다. API/화면은 별도이며 기존 인증 연결 변경은 보존한다.
 
 ## English summary
 
-Design proposal for eight new tables: profiles, application roles, role-change events, accounts, categories, transactions, transfers, and idempotency requests. Supabase Auth stays authoritative for login; identity and ledger data stay in API-only private schemas. Existing personal-owner contracts and integer KRW amounts are preserved. Shared ledgers, bank ingestion, UI and live migrations are not completed by this design. Review the signup bootstrap trigger and test real PostgreSQL constraints/RLS before applying it to the existing development project.
+Approved and implemented eight-table schema: profiles, application roles, role-change events, accounts, categories, transactions, transfers, and idempotency requests. Applied to the approved development Supabase project after real PostgreSQL tests and a rolled-back dry run; the existing user was preserved. Profiles retain the initial signup provider and a soft-deletion timestamp; neither is user-editable, and the timestamp alone does not implement complete account revocation or data erasure. Supabase Auth stays authoritative for login; identity and ledger data stay in API-only private schemas. Shared ledgers, bank ingestion, repositories, application APIs, UI and production deployment remain separate work.

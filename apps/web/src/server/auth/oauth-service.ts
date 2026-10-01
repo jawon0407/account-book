@@ -154,7 +154,7 @@ function sameDigest(left: Uint8Array, right: Uint8Array): boolean { return left.
 function trustedPair(value: AuthTokenPair, now: Date): AuthTokenPair {
   const user = CurrentUserSchema.safeParse(value?.user);
   if (
-    !user.success || !user.data.emailVerified || user.data.id !== value?.userId || !validUuid(value?.userId) || !validUuid(value?.supabaseSessionId) ||
+    !user.success || (user.data.email !== null && !user.data.emailVerified) || user.data.id !== value?.userId || !validUuid(value?.userId) || !validUuid(value?.supabaseSessionId) ||
     typeof value?.accessToken !== "string" || value.accessToken.length === 0 || typeof value?.refreshToken !== "string" || value.refreshToken.length === 0 ||
     !Number.isSafeInteger(value?.issuedAtSeconds) || value.issuedAtSeconds <= 0 || value.issuedAtSeconds > Math.floor(now.getTime() / 1000) ||
     !validDate(value?.accessTokenExpiresAt) || value.accessTokenExpiresAt.getTime() <= now.getTime() || value.accessTokenExpiresAt.getTime() <= value.issuedAtSeconds * 1000
@@ -285,7 +285,7 @@ export class OAuthService {
       const record = trustedClaim(claimed, input);
       const codeVerifier = decryptToken(record.encryptedPkceVerifier, { recordId: record.id, tokenKind: "pkce" }, this.keyring);
       derivePkceChallenge(codeVerifier);
-      const providerPair = await this.provider.exchangeOAuthCode({ code, codeVerifier });
+      const providerPair = await this.provider.exchangeOAuthCode({ code, codeVerifier, provider: record.provider });
       const completedAt = postProviderTime(this.clock);
       const pair = trustedPair(providerPair, completedAt);
       const created = await this.sessions.create({ accessToken: pair.accessToken, refreshToken: pair.refreshToken, userId: pair.userId, supabaseSessionId: pair.supabaseSessionId, issuedAtSeconds: pair.issuedAtSeconds, accessTokenExpiresAt: pair.accessTokenExpiresAt }, completedAt);

@@ -1,5 +1,6 @@
 export {
   AuthProviderSchema,
+  OAuthAvailabilitySchema,
   CurrentUserSchema,
   PasswordResetRequestInputSchema,
   PasswordUpdateInputSchema,
@@ -27,3 +28,5 @@ export { TransactionInputTypeSchema, CreateTransactionInputSchema, UpdateTransac
 export type { TransactionInputType, CreateTransactionInput, UpdateTransactionInput, DeleteTransactionInput, Transaction, TransactionTombstone, CreateTransferInput, CreateTransferResult, TransactionListQuery, TransactionListResponse } from "./transactions.js";
 export { BankConnectionRequestIdSchema, BankConnectionStatusSchema, BankConnectionRequestStatusSchema } from "./bank-connections.js";
 export type { BankConnectionRequestStatus } from "./bank-connections.js";
+export { ProfileSchema, UpdateProfileInputSchema } from "./profiles.js";
+export type { Profile, UpdateProfileInput } from "./profiles.js";

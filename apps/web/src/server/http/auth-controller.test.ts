@@ -171,6 +171,7 @@ function setup(overrides: Record<string, unknown> = {}) {
   const controller = new AuthController!({
     configuredOrigin: new URL("https://app.example.test"),
     secureCookies: true,
+    enabledProviders: ["google", "kakao", "naver"],
     csrfKey,
     now: () => new Date(now),
     createInteractionSelector: () => freshSelector,
@@ -577,6 +578,19 @@ describe("AuthController", () => {
 
     expect(response.status).toBe(503);
     expect(await response.json()).toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: true });
+  });
+
+  it.each([[], undefined])("blocks disabled OAuth at start, continue and callback without creating a session (%s)", async (enabledProviders) => {
+    const subject = setup({ enabledProviders });
+    const start = await subject.controller.oauthStart!(request("/api/auth/oauth/google/start", { method: "POST", body: JSON.stringify({ returnPath: "/app" }) }), { provider: "google" });
+    expect(start.status).toBe(503);
+    expect(start.headers.get("Set-Cookie")).toBeNull();
+    const continued = await subject.controller.oauthContinue!(request("/api/auth/oauth/google/continue?returnPath=%2Fapp", { headers: { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" } }), { provider: "google" });
+    expect(continued.status).toBe(503);
+    const callback = await subject.controller.oauthCallback!(request(`/api/auth/callback?provider=google&state=${selector}&code=secret-code`));
+    expect(callback.headers.get("Set-Cookie")).not.toContain("__Host-ab_session=");
+    expect(subject.oauth.start).not.toHaveBeenCalled();
+    expect(subject.oauth.complete).not.toHaveBeenCalled();
   });
 
   it("fails OAuth callback closed and removes code/state from the next redirect", async () => {

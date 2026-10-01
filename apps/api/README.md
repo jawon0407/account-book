@@ -1,8 +1,8 @@
 # API 애플리케이션
 
-이 폴더는 NestJS로 요청 처리 구조를 만들고 Fastify로 HTTP 요청을 받는 서버다. 현재는 공개 상태 확인 `GET /health`와, BFF가 발급한 위임 JWT로 보호되는 현재 사용자 조회 `GET /v1/me`가 구현되어 있다.
+이 폴더는 NestJS로 요청 처리 구조를 만들고 Fastify로 HTTP 요청을 받는 서버다. 공개 상태 확인 `GET /health`, 보호된 `GET /v1/me` 및 프로필·계좌·카테고리 10개 경로가 구현되어 있다. 모두 Node.js에서 동작한다.
 
-아직 계좌·카테고리·거래·이체 API나 금융 데이터 저장은 구현되어 있지 않다. 해당 입력/응답 모양은 `packages/contracts`에 정의되어 있다. 금융 자원의 사용자별 소유권 확인, 버전 충돌 검사, 같은 생성 요청의 중복 실행 방지, 잔액 변경은 앞으로 금융 API에서 구현해야 할 책임이다. 현재 JWT의 재사용 차단을 금융 요청의 중복 처리 방지와 혼동하면 안 된다.
+프로필 조회/닉네임 수정, 계좌·카테고리의 조회/생성/수정/보관을 실제 SQL 저장소에 연결했다. 사용자 격리, version 충돌, 생성 멱등성과 원장 기반 잔액 조회를 포함한다. 거래·이체 쓰기 API와 웹 BFF·화면 연결은 후속이다. JWT 재사용 차단과 금융 생성 요청 멱등성은 별개다. 재시도는 새 JWT와 기존 요청 키를 사용한다. [한국어 개발 흐름과 10개 경로](../../docs/guides/core-api-development.ko.md), [검증·남은 작업](../../docs/status/2026-09-29-core-api.ko.md)을 먼저 읽는다.
 
 ## 코드를 읽는 순서
 
@@ -11,8 +11,10 @@
 3. `src/auth/auth.guard.ts`: 원시 헤더의 중복, Bearer 형식, 요청 ID, 본문 길이, 경로 권한을 검사한다.
 4. `src/auth/jwt-verifier.ts`: 서명·클레임·실제 요청 해시를 검증하고 토큰 사용 사실을 기록한다.
 5. `src/persistence/postgres-replay-store.ts`: PostgreSQL 기본키와 단일 INSERT로 같은 토큰의 재사용을 막는다.
-6. `src/me/me.controller.ts`: 검증된 사용자 ID를 반환한다. 현재 email은 null, emailVerified는 true로 고정하며 별도 프로필 조회는 하지 않는다.
+6. `src/me/me.controller.ts`: 검증된 사용자 ID를 반환한다. 이메일 증거를 전달받지 않으므로 email은 null, emailVerified는 false다. 사용자 인증 실패라는 뜻이 아니며 별도 프로필 조회는 하지 않는다.
 7. `src/common`: 응답 추적 ID를 일관되게 붙이고 내부 오류를 안전한 고정 응답으로 바꾼다.
+8. `src/core`: 기존 풀을 재사용하는 사용자별 transaction·입력·멱등성·숫자 변환 경계다.
+9. `src/profiles`, `src/accounts`, `src/categories`: 기능별 controller와 실제 SQL repository다.
 
 `GET /health`의 성공은 HTTP 처리가 살아 있다는 뜻이지 DB 연결이나 전체 인증 경로가 정상이라는 증거는 아니다.
 

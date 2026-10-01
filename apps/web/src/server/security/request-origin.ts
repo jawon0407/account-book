@@ -133,10 +133,25 @@ function refererAllowed(value: string | null, origins: ReadonlySet<string>): boo
  * @throws 검증 실패를 AuthRequestRejectedError로 통일합니다.
  */
 export function verifyCsrfRequest(request: AuthRequest, context: Readonly<{ selector: string }>, policy: CsrfRequestPolicy): void {
+  verifyRequest(request, context, policy, false);
+}
+
+/**
+ * 금융 변경 경계에서 POST/PATCH만 허용하고 인증과 동일한 출처·세션 결합 검사를 적용합니다.
+ * @param request JSON 변경 요청. @param context 세션 식별자. @param policy 서버 시각·키·출처.
+ * @throws 검사 실패 시 세부값 없는 CSRF 오류. 기존 인증 경로의 POST 제한은 유지합니다.
+ */
+export function verifyMutationCsrfRequest(request: AuthRequest, context: Readonly<{ selector: string }>, policy: CsrfRequestPolicy): void {
+  verifyRequest(request, context, policy, true);
+}
+
+/** @param request 검증할 요청. @param context 토큰 결합 문맥. @param policy 서버 정책. @param allowPatch 금융 경계의 PATCH 허용 여부. */
+function verifyRequest(request: AuthRequest, context: Readonly<{ selector: string }>, policy: CsrfRequestPolicy, allowPatch: boolean): void {
   try {
     const origins = allowedOrigins(policy);
     const contentType = header(request, "Content-Type");
-    if ((request as { method?: unknown }).method !== "POST" || !jsonContentType(contentType)) return rejected();
+    const method = (request as { method?: unknown }).method;
+    if (!(method === "POST" || (allowPatch && method === "PATCH")) || !jsonContentType(contentType)) return rejected();
     const origin = header(request, "Origin");
     if (origin === null ? !refererAllowed(header(request, "Referer"), origins) : !allowedOrigin(origin, origins)) return rejected();
     const site = header(request, "Sec-Fetch-Site");

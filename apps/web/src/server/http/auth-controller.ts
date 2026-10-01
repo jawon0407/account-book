@@ -11,6 +11,7 @@ import {
   SignUpInputSchema,
   type ApiError,
   type CurrentUser,
+  type AuthProvider,
 } from "@account-book/contracts";
 import { z } from "zod";
 import type { AuthProviderPort } from "../auth/auth-provider-port.js";
@@ -79,6 +80,7 @@ type SessionBoundary = Pick<SessionService, "refresh" | "revokeCurrent" | "markR
 
 /** Request-owned services and immutable configuration used by one controller instance. */
 export type AuthControllerDependencies = Readonly<{
+  enabledProviders?: readonly AuthProvider[];
   configuredOrigin: URL;
   secureCookies: true;
   csrfKey: Uint8Array;
@@ -458,6 +460,7 @@ export class AuthController {
       this.verifyMutation(request);
       const provider = AuthProviderSchema.safeParse(parameters.provider);
       if (!provider.success) return fail("AUTH_OAUTH_TRANSACTION_INVALID", 422);
+      this.requireEnabledProvider(provider.data);
       const input = parse(OAuthStartBodySchema, await body(request));
       const selected = this.createInteractionSelector();
       const query = new URLSearchParams({ returnPath: input.returnPath });
@@ -478,6 +481,7 @@ export class AuthController {
       const selected = this.interactionSelector(request);
       const provider = AuthProviderSchema.safeParse(parameters.provider);
       if (!provider.success) return fail("AUTH_OAUTH_TRANSACTION_INVALID", 400);
+      this.requireEnabledProvider(provider.data);
       const search = new URL(request.url).searchParams;
       if ([...search.keys()].some((key) => key !== "returnPath") || search.getAll("returnPath").length !== 1) return fail("AUTH_OAUTH_TRANSACTION_INVALID", 400);
       const returnPath = ReturnPathSchema.safeParse(search.get("returnPath"));
@@ -541,6 +545,7 @@ export class AuthController {
       const search = new URL(request.url).searchParams;
       const provider = AuthProviderSchema.safeParse(search.get("provider"));
       if (!provider.success) return fail("AUTH_OAUTH_TRANSACTION_INVALID", 400);
+      this.requireEnabledProvider(provider.data);
       const state = callbackValue(search.get("state"));
       hashSessionSelector(state);
       const code = callbackValue(search.get("code"));
@@ -707,6 +712,11 @@ export class AuthController {
       allowedOrigins: new Set([this.origin.origin]),
     });
     return selected;
+  }
+
+  /** @param provider 검증된 공급자. 허용 목록이 없거나 빠져 있으면 부작용 전에 503으로 거부한다. */
+  private requireEnabledProvider(provider: AuthProvider): void {
+    if (!this.dependencies.enabledProviders?.includes(provider)) fail("AUTH_PROVIDER_UNAVAILABLE", 503);
   }
 
   /**

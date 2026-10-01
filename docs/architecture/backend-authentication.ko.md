@@ -137,7 +137,7 @@ flowchart LR
 6. `sub`, session UUID, `jti`가 canonical 형식인지 확인하고 PostgreSQL에서 `jti`를 원자적으로 한 번만 consume한 뒤 최소 immutable `AuthPrincipal`을 만든다.
 7. 모든 검증이 끝난 뒤에만 Fastify request에 principal을 부착한다.
 
-따라서 body, query, 일반 header나 이메일·역할 같은 임의 JWT claim으로 사용자 소유권을 결정할 수 없다. `/v1/me`는 공유 `CurrentUser` 계약에 맞춰 검증된 `userId`, `email: null`, 기존 verified-session 불변조건을 나타내는 `emailVerified: true`만 반환한다.
+따라서 body, query, 일반 header나 이메일·역할 같은 임의 JWT claim으로 사용자 소유권을 결정할 수 없다. `/v1/me`는 공유 `CurrentUser` 계약에 맞춰 검증된 `userId`, `email: null`, `emailVerified: false`를 반환한다. API는 이메일 인증 증거를 전달받지 않으므로 검증 완료라고 주장하지 않는다. 이 false는 세션 인증 실패가 아니라 이메일 미확인 표시이며 인가는 검증된 사용자 ID와 서버 권한으로 판단한다.
 
 잘못된 credential은 세부 원인을 구분하지 않는 401 `AUTH_SESSION_EXPIRED`, keyring·replay store·내부 운영 실패는 503 `AUTH_PROVIDER_UNAVAILABLE`로 고정한다. 두 경우 모두 strict `ApiError`, 서버 생성 UUID `X-Request-Id`, `Cache-Control: private, no-store`를 사용하며 exception, token, 공급자 URL/message, header/body나 환경값을 직렬화하거나 로그로 남기지 않는다. Helmet은 등록하고 CORS는 등록하지 않는다.
 
@@ -232,6 +232,10 @@ provider 교환이 실패해도 claim은 되돌리지 않는다. 사용자는 �
 7. BFF는 검증된 HTTPS 또는 exact loopback HTTP provider URL만 `303 Location`으로 전달한다. credential·fragment·public HTTP URL은 거부한다.
 
 Supabase provider mapping은 Google `google`, Kakao `kakao`, Naver `custom:naver`로 고정된다.
+
+2026-09-30 후속: `AUTH_ENABLED_PROVIDERS`는 기본 `[]`인 서버 허용 목록이다. start·continue·callback 모두 이 목록을 검사한다. 공개 `GET /api/auth/providers`에는 활성 이름만 넣고 DB·키를 전달하지 않는다. UI는 조회 중/오류/과거 캐시 재검증 중에는 버튼을 비활성화한다. 실제 콘솔 설정과 별개이며 목록 변경 후 실행 환경 재시작/재배포가 필요하다.
+
+이메일 없는 OAuth는 고정 Supabase 응답에서 비익명 사용자, OAuth AMR, 기대 공급자와 동일 user ID의 identity 및 비어 있지 않은 sub가 확인될 때만 세션을 만든다. 공개 값은 `email: null`, `emailVerified: false`다. 이메일이 있는 미인증 계정·이메일 비밀번호·확인·복구에는 이 예외를 적용하지 않는다. 파서는 브라우저가 제출한 JWT 검증기가 아니며 기존 서버 HTTPS 공급자 경계에만 적용한다. 실제 Google/Kakao/Naver 응답과 갱신 여정은 아직 미검증이다. [준비·활성화 가이드](../guides/social-auth-readiness.ko.md).
 
 ### 완료
 

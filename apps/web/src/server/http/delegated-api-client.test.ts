@@ -85,6 +85,8 @@ describe("DelegatedApiClient", () => {
           "x-request-id": requestId,
         },
         signal: timeoutSignal,
+        redirect: "error",
+        cache: "no-store",
       });
       expect(init.body).toBe(signedBody);
       expect(timeout).toHaveBeenCalledOnce();
@@ -172,6 +174,8 @@ describe("DelegatedApiClient", () => {
           "x-request-id": requestId,
         },
         signal: timeoutSignal,
+        redirect: "error",
+        cache: "no-store",
       });
       expect(Object.hasOwn(init, "body")).toBe(false);
       expect(new Headers(init.headers).has("content-type")).toBe(false);

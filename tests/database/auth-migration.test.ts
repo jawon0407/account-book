@@ -119,6 +119,26 @@ afterAll(async () => {
 });
 
 describe("private authentication migration", () => {
+  it("runs with a non-superuser migration manager rather than requiring SUPERUSER attribute changes", async () => {
+    await admin.query("begin");
+    try {
+      // 폐기용 DB 트랜잭션 안에서만 Supabase와 같은 비슈퍼유저 실행자를 재현한다.
+      await admin.query("create role auth_migration_manager nologin nosuperuser createdb createrole inherit noreplication nobypassrls");
+      await admin.query("grant postgres to auth_migration_manager");
+      await admin.query("grant app_session_bff, app_api to auth_migration_manager with admin option");
+      await admin.query("set local role auth_migration_manager");
+      const role = await admin.query<{ rolsuper: boolean }>("select rolsuper from pg_roles where rolname = current_user");
+      expect(role.rows[0]?.rolsuper).toBe(false);
+      await admin.query("drop schema app_private cascade");
+      await admin.query(baseMigration);
+      await admin.query(replayMigration);
+      const unsafe = await admin.query("select rolname from pg_roles where rolname in ('app_session_bff', 'app_api') and (rolsuper or rolreplication or rolbypassrls)");
+      expect(unsafe.rowCount).toBe(0);
+    } finally {
+      await admin.query("rollback");
+    }
+  });
+
   it("uses identifier-safe SQL to remove every direct app_api parent-role membership", () => {
     expect(replayMigration).toMatch(/from pg_auth_members memberships[\s\S]*join pg_roles parent_roles[\s\S]*join pg_roles member_roles[\s\S]*where member_roles\.rolname = 'app_api'/iu);
     expect(replayMigration).toMatch(/execute format\('revoke %I from app_api', parent_role\)/iu);

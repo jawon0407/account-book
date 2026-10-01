@@ -170,7 +170,7 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
   );
   assert.equal(
     pkg.scripts["test:legacy"],
-    "node --test scripts/verify-structure.test.mjs scripts/workspace-policy.test.mjs scripts/security/*.test.mjs scripts/security-gate.test.mjs scripts/setup-hooks.test.mjs",
+    "node --test scripts/verify-structure.test.mjs scripts/workspace-policy.test.mjs scripts/security/*.test.mjs scripts/security-gate.test.mjs scripts/setup-hooks.test.mjs scripts/local-auth/*.test.mjs",
   );
   for (const [name, command] of Object.entries(expectedScripts)) {
     assert.equal(pkg.scripts[name], command);

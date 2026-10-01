@@ -31,6 +31,7 @@ type PasswordFormProps = Readonly<{
   onSuccess?(): void;
 }>;
 type ProviderButtonsProps = Readonly<{
+  enabledProviders?: readonly Provider[];
   /** @param provider 선택한 허용 공급자 이름. @returns BFF의 같은 출처 계속 경로 Promise. */
   start(provider: Provider): Promise<Readonly<{ authorizationPath: string }>>;
   /** @param path 검증된 같은 출처 계속 경로. 테스트에서는 실제 이동 대신 호출을 기록한다. */
@@ -191,6 +192,18 @@ describe("authentication forms", () => {
 });
 
 describe("provider and shell interactions", () => {
+  it("keeps unconfigured providers disabled while showing their availability", async () => {
+    if (ProviderButtons === undefined) throw new Error("ProviderButtons missing");
+    const start = vi.fn();
+    render(<ProviderButtons start={start} />);
+    for (const name of ["Google", "Kakao", "Naver"]) {
+      const button = screen.getByRole("button", { name: `${name} 준비 중` }) as HTMLButtonElement;
+      expect(button.disabled).toBe(true);
+      fireEvent.click(button);
+    }
+    expect(start).not.toHaveBeenCalled();
+  });
+
   it("blocks duplicate provider actions while navigating only to the returned same-origin path", async () => {
     expect(ProviderButtons).toBeTypeOf("function");
     if (ProviderButtons === undefined) return;
@@ -198,7 +211,7 @@ describe("provider and shell interactions", () => {
     const start = vi.fn(() => new Promise<Readonly<{ authorizationPath: string }>>((resolve) => { resolveStart = resolve; }));
     const navigate = vi.fn();
     const user = userEvent.setup();
-    render(<ProviderButtons start={start} navigate={navigate} />);
+    render(<ProviderButtons start={start} navigate={navigate} enabledProviders={["google", "kakao", "naver"]} />);
 
     await user.click(screen.getByRole("button", { name: "Google로 계속" }));
     expect((screen.getByRole("button", { name: "Google로 이동 중" }) as HTMLButtonElement).disabled).toBe(true);
