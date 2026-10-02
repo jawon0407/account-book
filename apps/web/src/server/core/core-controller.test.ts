@@ -74,6 +74,8 @@ describe("Core BFF", () => {
     ["categoriesArchive", `/api/categories/${id}/archive`, "POST", { expectedVersion: 1 }, { id }, "category:write", category, 200],
     ["transactionsList", "/api/transactions?limit=2&type=expense", "GET", undefined, {}, "transaction:read", { items: [transaction], nextCursor: null }, 200],
     ["transactionsCreate", "/api/transactions", "POST", transactionInput, {}, "transaction:write", transaction, 201],
+    ["transactionsUpdate", `/api/transactions/${id}`, "PATCH", { memo: null, expectedVersion: 1 }, { id }, "transaction:write", transaction, 200],
+    ["transactionsDelete", `/api/transactions/${id}`, "DELETE", { expectedVersion: 1 }, { id }, "transaction:write", { id, version: 2, deletedAt: now.toISOString() }, 200],
   ] as const)("binds %s to its exact method/scope/target and returns only contract data", async (operation, path, method, body, params, scope, output, status) => {
     const { controller, fetcher, signer } = setup(Response.json(output, { status, headers: { "set-cookie": "upstream-secret", "x-internal": "private-secret" } }));
     const response = await controller.handle(operation, request(path, method, body, { authorization: "attacker", "x-user-id": "attacker", "x-request-id": "attacker" }), params);

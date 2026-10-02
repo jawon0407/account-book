@@ -94,4 +94,16 @@ describe("authentication queries", () => {
     await expect(oauthStartMutationOptions!(client).mutationFn({ provider: "google", returnPath: "/app" })).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE", retryable: false });
     expect(JSON.stringify(client.post.mock.calls)).not.toContain("provider.example.test");
   });
+
+  it("binds signup intent into both the POST and its exact handoff path", async () => {
+    const path = "/api/auth/oauth/google/continue?returnPath=%2Fapp&intent=sign_up";
+    const client = {
+      get: vi.fn(() => result({ csrfToken: "csrf-token" })),
+      post: vi.fn().mockReturnValueOnce(result({ authorizationPath: path })).mockReturnValueOnce(result({ authorizationPath: "/api/auth/oauth/google/continue?returnPath=%2Fapp" })),
+    };
+    const input = { provider: "google", returnPath: "/app", intent: "sign_up" };
+    await expect(oauthStartMutationOptions!(client).mutationFn(input)).resolves.toEqual({ authorizationPath: path });
+    expect(client.post).toHaveBeenCalledWith("auth/oauth/google/start", { json: { returnPath: "/app", intent: "sign_up" }, headers: { "X-CSRF-Token": "csrf-token" } });
+    await expect(oauthStartMutationOptions!(client).mutationFn(input)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+  });
 });

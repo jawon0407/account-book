@@ -12,6 +12,20 @@ function setup(responses: unknown[]) {
   return { calls, api: createTransactionsApi(http, id) };
 }
 describe("transaction browser transport", () => {
+  it("binds update/delete to UUID, expectedVersion, CSRF and the current account", async () => {
+    const tombstone = { id, version: 2, deletedAt: row.createdAt };
+    const { api, calls } = setup([{ csrfToken: "test" }, row, { csrfToken: "test" }, tombstone]);
+    await api.update(id, { memo: null, expectedVersion: 1 });
+    expect(await api.remove(id, { expectedVersion: 1 })).toEqual(tombstone);
+    expect(calls.map(r => r.method)).toEqual(["GET", "PATCH", "GET", "DELETE"]);
+    for (const request of [calls[1]!, calls[3]!]) {
+      expect(request.url).toBe(`https://test.local/api/transactions/${id}`); expect(request.cache).toBe("no-store");
+      expect(request.headers.get("X-CSRF-Token")).toBe("test"); expect(request.headers.get("X-Account-Book-User")).toBe(id);
+    }
+    expect(await calls[1]!.json()).toEqual({ memo: null, expectedVersion: 1 });
+    await expect(api.update("bad", { memo: null, expectedVersion: 1 })).rejects.toBeDefined();
+    await expect(api.remove(id, { expectedVersion: 0 })).rejects.toBeDefined(); expect(calls).toHaveLength(4);
+  });
   it("binds user/filter/cursor and no-store without automatic retries", async () => {
     const { api, calls } = setup([{ items: [row], nextCursor: null }]);
     expect((await api.list({ type: "expense", limit: 2 })).items).toHaveLength(1);

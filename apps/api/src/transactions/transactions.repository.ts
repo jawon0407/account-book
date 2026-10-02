@@ -1,15 +1,26 @@
-import { CreateTransactionInputSchema, TransactionSchema, TransactionListQuerySchema, type CreateTransactionInput, type Transaction, type TransactionListQuery, type TransactionListResponse } from "@account-book/contracts";
+import { CreateTransactionInputSchema, UpdateTransactionInputSchema, DeleteTransactionInputSchema, LedgerIdSchema, TransactionSchema, TransactionListQuerySchema, type UpdateTransactionInput, type DeleteTransactionInput, type CreateTransactionInput, type Transaction, type TransactionListQuery, type TransactionListResponse } from "@account-book/contracts";
 import { CoreError } from "../core/core-error.js";
 import { idempotentCreate } from "../core/idempotency.js";
 import { input } from "../core/validation.js";
 import { UserDatabase } from "../core/user-database.js";
 import { decodeCursor, encodeCursor } from "./transaction-cursor.js";
 import { transaction } from "./transaction-mapping.js";
+import { updateTransaction, deleteTransaction } from "./transaction-changes.js";
 
 /** 사용자별 RLS transaction 안에서 거래만 다룬다. 이체·시작 잔액 생성은 별도 명령의 책임이다. */
 export class TransactionsRepository {
   /** @param database 최소 권한 사용자 transaction 경계. */
   public constructor(private readonly database: UserDatabase) {}
+  /** @param userId 인증 소유자. @param id 거래 UUID. @param raw 변경값과 기대 버전. 삭제/타인 거래는 같은 404다. */
+  public async update(userId: string, id: string, raw: UpdateTransactionInput): Promise<Transaction> {
+    const target = input(LedgerIdSchema, id), value = input(UpdateTransactionInputSchema, raw);
+    return this.database.run(userId, client => updateTransaction(client, userId, target, value));
+  }
+  /** @param userId 인증 소유자. @param id 거래 UUID. @param raw 기대 버전. 재삭제는 404이며 기존 기록을 부활시키지 않는다. */
+  public async remove(userId: string, id: string, raw: DeleteTransactionInput) {
+    const target = input(LedgerIdSchema, id), value = input(DeleteTransactionInputSchema, raw);
+    return this.database.run(userId, client => deleteTransaction(client, userId, target, value.expectedVersion));
+  }
   /** @param userId 인증 소유자. @param query 필터/커서/페이지 크기. @returns 삭제 제외, 최신 날짜·UUID순 한 페이지. */
   public async list(userId: string, query: TransactionListQuery): Promise<TransactionListResponse> {
     const value = input(TransactionListQuerySchema, query), cursor = decodeCursor(userId, value), limit = value.limit ?? 50;

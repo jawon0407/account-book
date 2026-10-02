@@ -109,7 +109,7 @@ function setup(overrides: Record<string, unknown> = {}) {
      * 실제 코드 교환 없이 앱 복귀 경로가 포함된 정상 OAuth 결과를 만듭니다.
      * @returns 공개 세션 정보와 /app 복귀 경로.
      */
-    complete: vi.fn(async () => ({ selector: freshSelector, user, accessTokenExpiresAt: new Date(now.getTime() + 120_000), absoluteExpiresAt: new Date(now.getTime() + 86_400_000), returnPath: "/app" })),
+    complete: vi.fn(async (): Promise<Record<string, unknown>> => ({ selector: freshSelector, user, accessTokenExpiresAt: new Date(now.getTime() + 120_000), absoluteExpiresAt: new Date(now.getTime() + 86_400_000), returnPath: "/app" })),
   };
   const recovery = {
     /**
@@ -181,10 +181,118 @@ function setup(overrides: Record<string, unknown> = {}) {
     sessions,
     provider,
     delegatedApiClient,
+    accountAccess: { check: vi.fn(async (_email: string, kind: string) => kind === "sign_up" ? "absent" : "present") },
     ...overrides,
   });
   return { controller, email, oauth, recovery, sessions, provider, delegatedApiClient, events };
 }
+
+describe("public account recovery and duplicate signup", () => {
+  it.each(["signUp", "passwordResetRequest"])("preserves the browser budget across accepted %s interaction rotations", async (operation) => {
+    const body = JSON.stringify(operation === "signUp" ? { email: "person@example.test", password: "a".repeat(12) } : { email: "person@example.test" });
+    const counts = new Map<string, number>();
+    const check = vi.fn(async (_email: string, _kind: string, budget: string) => {
+      const count = (counts.get(budget) ?? 0) + 1;
+      counts.set(budget, count);
+      if (count > 2) throw { code: "AUTH_RATE_LIMITED" };
+      return operation === "signUp" ? "absent" : "present";
+    });
+    const subject = setup({ accountAccess: { check } });
+    const first = await subject.controller[operation]!(request("/api/auth/request", { method: "POST", body }));
+    expect(first.status).toBe(200);
+    const budgetHeader = first.headers.getSetCookie().find((value) => value.startsWith("__Host-ab_auth_budget="));
+    expect(budgetHeader).toBeTypeOf("string");
+    expect(budgetHeader).toMatch(/^__Host-ab_auth_budget=[A-Za-z0-9_-]{43}; HttpOnly; Secure; SameSite=Lax; Path=\/; Priority=High; Max-Age=600$/u);
+    const budget = budgetHeader!.split(";")[0]!.split("=")[1]!;
+    expect(budget).not.toBe(selector);
+    expect(budget).not.toBe(freshSelector);
+    expect(first.headers.get("Set-Cookie")).toContain(`__Host-ab_interaction=${freshSelector}`);
+
+    const headers = { Cookie: `__Host-ab_interaction=${freshSelector}; __Host-ab_auth_budget=${budget}`, "X-CSRF-Token": issueCsrfToken({ selector: freshSelector }, now, csrfKey) };
+    const second = await subject.controller[operation]!(request("/api/auth/request", { method: "POST", body, headers }));
+    expect(second.status).toBe(200);
+    expect(second.headers.getSetCookie()).toContain(budgetHeader);
+    const third = await subject.controller[operation]!(request("/api/auth/request", { method: "POST", body, headers }));
+    expect(third.status).toBe(429);
+    expect(third.headers.getSetCookie()).toEqual([budgetHeader]);
+    expect(check.mock.calls.map((call) => call[2])).toEqual([budget, budget, budget]);
+  });
+
+  it.each(["signUp", "passwordResetRequest"])("does not allocate a budget before %s CSRF and body validation", async (operation) => {
+    const check = vi.fn();
+    const subject = setup({ accountAccess: { check } });
+    const body = JSON.stringify(operation === "signUp" ? { email: "person@example.test", password: "a".repeat(12) } : { email: "person@example.test" });
+    const csrfRejected = await subject.controller[operation]!(request("/api/auth/request", { method: "POST", body, headers: { "X-CSRF-Token": "invalid" } }));
+    expect(csrfRejected.status).toBe(403);
+    expect(csrfRejected.headers.get("Set-Cookie")).toBeNull();
+    const bodyRejected = await subject.controller[operation]!(request("/api/auth/request", { method: "POST", body: "{}" }));
+    expect(bodyRejected.status).toBe(422);
+    expect(bodyRejected.headers.get("Set-Cookie")).toBeNull();
+    expect(check).not.toHaveBeenCalled();
+  });
+
+  it.each(["malformed", "_".repeat(43), `${selector}; __Host-ab_auth_budget=${freshSelector}`])("replaces invalid or duplicate budget cookies after valid CSRF: %s", async (budget) => {
+    const check = vi.fn<(email: string, kind: string, budget: string) => Promise<string>>(async () => "present");
+    const subject = setup({ accountAccess: { check } });
+    const response = await subject.controller.signUp!(request("/api/auth/sign-up", { method: "POST", body: JSON.stringify({ email: "person@example.test", password: "a".repeat(12) }), headers: { Cookie: `__Host-ab_interaction=${selector}; __Host-ab_auth_budget=${budget}` } }));
+    expect(response.status).toBe(409);
+    const selectedBudget = check.mock.calls[0]?.[2];
+    expect(selectedBudget).toMatch(/^[A-Za-z0-9_-]{43}$/u);
+    expect(selectedBudget).not.toBe(budget);
+    expect(selectedBudget).not.toBe(selector);
+    expect(response.headers.getSetCookie()).toHaveLength(1);
+    expect(response.headers.get("Set-Cookie")).toContain(`__Host-ab_auth_budget=${selectedBudget}`);
+  });
+
+  it.each(["signUp", "passwordResetRequest"])("retains the budget cookie when the downstream %s mail operation fails", async (operation) => {
+    const subject = setup();
+    const provider = operation === "signUp" ? subject.email.signUp : subject.recovery.start;
+    provider.mockRejectedValueOnce({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    const response = await subject.controller[operation]!(request("/api/auth/request", { method: "POST", body: JSON.stringify(operation === "signUp" ? { email: "person@example.test", password: "a".repeat(12) } : { email: "person@example.test" }), headers: { Cookie: `__Host-ab_interaction=${selector}; __Host-ab_auth_budget=${sessionSelector}` } }));
+    expect(response.status).toBe(503);
+    expect(response.headers.getSetCookie()).toEqual([`__Host-ab_auth_budget=${sessionSelector}; HttpOnly; Secure; SameSite=Lax; Path=/; Priority=High; Max-Age=600`]);
+  });
+
+  it("returns an anonymous recovery failure to a public recovery page without leaking callback values", async () => {
+    const subject = setup();
+    const response = await subject.controller.passwordCallback!(request("/api/auth/password/callback?error=otp_expired&code=private-code", {}, ""));
+    expect(response.status).toBe(303);
+    expect(response.headers.get("Location")).toBe("https://app.example.test/forgot-password/invalid-link");
+    expect(response.headers.get("Set-Cookie")).toContain("Max-Age=0");
+    expect(subject.sessions.resolve).not.toHaveBeenCalled();
+    expect(subject.recovery.exchange).not.toHaveBeenCalled();
+  });
+
+  it("rejects an existing email before signup and does not rotate the interaction cookie", async () => {
+    const subject = setup({ accountAccess: { check: vi.fn(async () => "present") } });
+    const response = await subject.controller.signUp!(request("/api/auth/sign-up", { method: "POST", body: JSON.stringify({ email: "person@example.test", password: "a".repeat(12) }) }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "AUTH_ACCOUNT_EXISTS", retryable: false });
+    expect(subject.email.signUp).not.toHaveBeenCalled();
+    expect(response.headers.get("Set-Cookie")).toContain("__Host-ab_auth_budget=");
+    expect(response.headers.get("Set-Cookie")).not.toContain("__Host-ab_interaction=");
+  });
+
+  it("rejects an absent email before requesting a reset message", async () => {
+    const subject = setup({ accountAccess: { check: vi.fn(async () => "absent") } });
+    const response = await subject.controller.passwordResetRequest!(request("/api/auth/password/reset-request", { method: "POST", body: JSON.stringify({ email: "person@example.test" }) }));
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ code: "AUTH_ACCOUNT_NOT_FOUND", retryable: false });
+    expect(subject.recovery.start).not.toHaveBeenCalled();
+    expect(response.headers.get("Set-Cookie")).toContain("__Host-ab_auth_budget=");
+  });
+
+  it.each(["signUp", "passwordResetRequest"])("fails %s closed when lookup is unavailable or rate limited", async (operation) => {
+    for (const code of ["AUTH_RATE_LIMITED", "AUTH_PROVIDER_UNAVAILABLE"]) {
+      const subject = setup({ accountAccess: { check: vi.fn(async () => { throw { code }; }) } });
+      const response = await subject.controller[operation]!(request("/api/auth/request", { method: "POST", body: JSON.stringify(operation === "signUp" ? { email: "person@example.test", password: "a".repeat(12) } : { email: "person@example.test" }) }));
+      expect(response.status).toBe(code === "AUTH_RATE_LIMITED" ? 429 : 503);
+      expect(subject.email.signUp).not.toHaveBeenCalled();
+      expect(subject.recovery.start).not.toHaveBeenCalled();
+      expect(response.headers.get("Set-Cookie")).toContain("__Host-ab_auth_budget=");
+    }
+  });
+});
 
 /**
  * 세션 쿠키가 필요한 세 엔드포인트를 동일 조건으로 호출합니다. refresh에만 POST와 빈 JSON을 사용합니다.
@@ -294,6 +402,36 @@ describe("AuthController", () => {
       const url = context.emailRedirectUrl ?? context.callbackBaseUrl ?? context.passwordResetRedirectUrl;
       return url?.origin === "https://app.example.test" && !url.toString().includes("evil.test");
     });
+  });
+
+  it("carries explicit signup intent from the validated start request into the transaction", async () => {
+    const subject = setup();
+    const start = await subject.controller.oauthStart!(request("/api/auth/oauth/google/start", { method: "POST", body: JSON.stringify({ returnPath: "/app", intent: "sign_up" }) }), { provider: "google" });
+    expect(start.status).toBe(200);
+    const { authorizationPath } = await start.json();
+    expect(authorizationPath).toBe("/api/auth/oauth/google/continue?returnPath=%2Fapp&intent=sign_up");
+    const response = await subject.controller.oauthContinue!(request(authorizationPath, { headers: { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" } }), { provider: "google" });
+    expect(response.status).toBe(303);
+    expect(subject.oauth.start).toHaveBeenCalledWith("google", expect.objectContaining({ intent: "sign_up" }));
+  });
+
+  it.each(["admin", "sign_up&intent=sign_in"])("rejects invalid or duplicated OAuth intent %s before provider start", async (intent) => {
+    const subject = setup();
+    const response = await subject.controller.oauthContinue!(request(`/api/auth/oauth/google/continue?returnPath=%2Fapp&intent=${intent}`, { headers: { "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "navigate", "Sec-Fetch-Dest": "document" } }), { provider: "google" });
+    expect(response.status).toBe(400);
+    expect(subject.oauth.start).not.toHaveBeenCalled();
+  });
+
+  it("redirects verified social signup to login without issuing any session cookie", async () => {
+    const subject = setup();
+    subject.oauth.complete.mockResolvedValueOnce({ status: "sign_in_required" });
+    const response = await subject.controller.oauthCallback!(request(`/api/auth/callback?provider=google&state=${selector}&code=secret-code&intent=sign_in`));
+    expect(response.status).toBe(303);
+    expect(response.headers.get("Location")).toBe("https://app.example.test/login?notice=social-signup");
+    expect(response.headers.get("Set-Cookie")).toContain("__Host-ab_interaction=;");
+    expect(response.headers.get("Set-Cookie")).not.toContain("__Host-ab_session");
+    expect(subject.oauth.complete).toHaveBeenCalledWith({ provider: "google", state: selector, code: "secret-code" }, expect.any(Object));
+    expectNoStore(response);
   });
 
   it("keeps OAuth state out of JSON and creates it only during a same-origin navigation handoff", async () => {

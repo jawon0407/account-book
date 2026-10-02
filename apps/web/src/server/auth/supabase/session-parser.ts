@@ -1,6 +1,7 @@
 import "server-only";
 
 import { CurrentUserSchema } from "@account-book/contracts";
+import { PROVIDER_CLOCK_SKEW_SECONDS, validProviderIssuedAt } from "../../security/provider-time.js";
 import type { AuthTokenPair } from "../auth-provider-port.js";
 import { fail, mappedProviderError } from "./error-mapper.js";
 import { object, token, uuid } from "./validation.js";
@@ -62,7 +63,7 @@ function jwtClaims(accessToken: string): Readonly<{ userId: string; sessionId: s
     const expiresAt = claims.exp;
     const nowSeconds = Math.floor(Date.now() / 1000);
     if (
-      typeof issuedAt !== "number" || !Number.isSafeInteger(issuedAt) || issuedAt <= 0 || issuedAt > nowSeconds ||
+      !validProviderIssuedAt(issuedAt, nowSeconds * 1000) ||
       typeof expiresAt !== "number" || !Number.isSafeInteger(expiresAt) || expiresAt <= issuedAt || expiresAt <= nowSeconds
     ) return fail();
     return { userId: uuid(claims.sub), sessionId: uuid(claims.session_id), issuedAt, expiresAt, source: claims };
@@ -84,7 +85,7 @@ function commonTokenPair(sessionValue: unknown, policy?: SocialSessionPolicy): R
   const confirmation = user.email_confirmed_at;
   const confirmedAt = typeof confirmation === "string" ? new Date(confirmation) : new Date("invalid");
   const email = user.email === "" || user.email === undefined || user.email === null ? null : user.email;
-  const parsedUser = CurrentUserSchema.safeParse({ id: user.id, email, emailVerified: email !== null && Number.isFinite(confirmedAt.getTime()) && confirmedAt.getTime() <= Date.now() });
+  const parsedUser = CurrentUserSchema.safeParse({ id: user.id, email, emailVerified: email !== null && Number.isFinite(confirmedAt.getTime()) && confirmedAt.getTime() <= Date.now() + PROVIDER_CLOCK_SKEW_SECONDS * 1000 });
   if (!parsedUser.success) return fail("AUTH_EMAIL_VERIFICATION_REQUIRED");
   const claims = jwtClaims(accessToken);
   if (!parsedUser.data.emailVerified && !(email === null && hasEmailLessSocialIdentity(user, claims.source, policy))) return fail("AUTH_EMAIL_VERIFICATION_REQUIRED");
@@ -97,7 +98,7 @@ function commonTokenPair(sessionValue: unknown, policy?: SocialSessionPolicy): R
 }
 
 /**
- * SDK 세션의 expires_at과 JWT exp가 정확히 같은지 추가 검증합니다.
+ * SDK가 로컬 시각으로 계산할 수 있는 expires_at의 오차를 제한하고 실제 만료는 JWT exp를 사용합니다.
  * @param sessionValue SDK 세션 응답.
  * @param policy 갱신에서만 이메일 없는 기존 OAuth 세션을 허용한다. 생략 시 이메일 필수.
  * @returns 검증된 내부 토큰 쌍.
@@ -105,7 +106,7 @@ function commonTokenPair(sessionValue: unknown, policy?: SocialSessionPolicy): R
  */
 export function tokenPair(sessionValue: unknown, policy?: SocialSessionPolicy): AuthTokenPair {
   const { session, pair, claims } = commonTokenPair(sessionValue, policy);
-  if (typeof session.expires_at !== "number" || !Number.isSafeInteger(session.expires_at) || claims.expiresAt !== session.expires_at) return fail();
+  if (typeof session.expires_at !== "number" || !Number.isSafeInteger(session.expires_at) || Math.abs(claims.expiresAt - session.expires_at) > PROVIDER_CLOCK_SKEW_SECONDS) return fail();
   return pair;
 }
 

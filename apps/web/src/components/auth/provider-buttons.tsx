@@ -11,6 +11,7 @@ const PROVIDERS = [
 ] as const satisfies readonly Readonly<{ value: AuthProvider; label: string }>[];
 
 type ProviderButtonsProps = Readonly<{
+  intent?: "sign_in" | "sign_up";
   enabledProviders?: readonly AuthProvider[];
   availability?: "loading" | "ready" | "unavailable";
   start(provider: AuthProvider): Promise<Readonly<{ authorizationPath: string }>>;
@@ -32,7 +33,7 @@ function navigateDocument(path: string): void {
  * @param props - start(provider)는 시작 요청, navigate(path)는 이동 함수다. enabledProviders는 서버 허용 목록이며 availability가 ready일 때만 클릭할 수 있다.
  * @returns 공급자 버튼 UI. 클릭 시 시작 요청과 페이지 이동이 발생하며 실패는 고정 문구로 표시한다.
  */
-export function ProviderButtons({ start, navigate = navigateDocument, enabledProviders = [], availability = "ready" }: ProviderButtonsProps) {
+export function ProviderButtons({ start, navigate = navigateDocument, enabledProviders = [], availability = "ready", intent }: ProviderButtonsProps) {
   const [pending, setPending] = useState<AuthProvider | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,7 +50,7 @@ export function ProviderButtons({ start, navigate = navigateDocument, enabledPro
     setError(null);
     try {
       const result = await start(provider);
-      const expected = `/api/auth/oauth/${provider}/continue?returnPath=%2Fapp`;
+      const expected = `/api/auth/oauth/${provider}/continue?returnPath=%2Fapp${intent === undefined ? "" : `&intent=${intent}`}`;
       if (result.authorizationPath !== expected) throw new Error("AUTH_CLIENT_PATH_INVALID");
       navigate(result.authorizationPath);
     } catch {

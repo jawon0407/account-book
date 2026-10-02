@@ -8,6 +8,7 @@ import {
 } from "node:crypto";
 import { createDatabaseClient } from "@account-book/database";
 import { EmailAuthService } from "./auth/email-auth-service.js";
+import { AccountAccess } from "./auth/account-access.js";
 import { FakeAuthProvider } from "./auth/fake-auth-provider.js";
 import { OAuthService } from "./auth/oauth-service.js";
 import { enabledOAuthProviders } from "./auth/oauth-configuration.js";
@@ -279,6 +280,7 @@ export function createRequestContainer(environment: Readonly<Record<string, stri
     });
     const delegatedApiClient = new DelegatedApiClient(apiInternalUrl, delegatedJwtSigner);
     const authController = new AuthController({
+      accountAccess: new AccountAccess((text, values) => databaseClient(databaseUrl).$client.query(text, values), csrfKey),
       enabledProviders: runtime.enabledProviders,
       configuredOrigin: runtime.origin,
       secureCookies: true,

@@ -1,6 +1,6 @@
 # 개발용 Supabase 인증 연결과 로컬 실행
 
-확인일: 2026-09-29. 운영 배포 가이드가 아니라 **승인된 새 개발 프로젝트**를 연결한 기록이다. 실제 금융정보를 입력하는 베타 준비 완료를 뜻하지 않는다.
+확인일: 2026-10-01. 운영 배포 가이드가 아니라 **승인된 개발 프로젝트**를 연결한 기록이다. 실제 금융정보를 입력하는 베타 준비 완료를 뜻하지 않는다. 최초 초기화는 9월 29일, 이번 인증 보정은 [10월 1일 수정 기록](../status/2026-10-01-auth-corrections.ko.md)을 따른다.
 
 ## 1. 무엇이 연결되었나요?
 
@@ -23,9 +23,9 @@ PC 브라우저 ── HTTPS ── Next.js BFF ── HTTPS ── Supabase Aut
 | 주체 | 허용 범위 | 금지 범위 |
 | --- | --- | --- |
 | 초기화용 `postgres` | 승인된 SQL 적용과 권한 설정 | 앱 프로세스 환경에 전달 금지 |
-| `app_session_bff` | 인증 테이블 6개의 SELECT/INSERT/UPDATE/DELETE를 묶은 NOLOGIN 그룹 | 직접 접속, 테이블 생성, API replay 접근 |
+| `app_session_bff` | 인증 테이블 6개의 CRUD 및 제한된 이메일 존재 확인 함수 실행을 묶은 NOLOGIN 그룹 | 직접 접속, 테이블 생성, API replay 접근, auth.users 직접 조회 |
 | `app_bff_login` | 별도 비밀번호로 접속, 위 BFF 그룹만 상속 | owner/API 역할 전환, Supabase auth.users 직접 조회 |
-| `app_api` | `api_jwt_replays` INSERT | 인증 테이블 조회, replay 조회/삭제, owner/BFF 역할 전환 |
+| `app_api` | `api_jwt_replays` INSERT 및 후속 user/finance 스키마의 제한된 도메인 권한 | 인증 테이블 조회, replay 조회/삭제, owner/BFF 역할 전환 |
 
 테이블 6개는 `auth_sessions`, `oauth_transactions`, `auth_recovery_transactions`, `auth_rate_limits`, `email_confirmation_transactions`, `auth_user_security_state`다. 일회성 인증 요청, 세션, 요청 속도 제한, 비밀번호 변경 이후 세션 무효화 상태를 저장한다. 사용자 계정 자체는 Supabase Auth가 관리한다.
 
@@ -100,7 +100,9 @@ https://localhost:3000/api/auth/callback
 
 사용자 제공 화면에서 위 Redirect URLs 3개는 확인했다. Site URL은 `http://localhost:3000`으로 표시되어 HTTPS로 변경·저장 안내를 했으며 완료 확인은 아직 남아 있다. 포트가 같더라도 HTTP와 HTTPS는 같은 출처가 아니다.
 
-현재 `/` 및 `/app` 화면은 아직 없어 404가 나온다. 직접 진입할 때는 `/sign-up` 또는 `/login`을 사용한다. 로그인 이후 `/app` 404를 가입 실패로 혼동하지 말고 세션/API 인증 성공과 장부 화면 구현을 분리해서 확인한다. Google·Kakao·Naver는 별도 개발자 앱 및 Supabase 공급자 설정이 필요하다.
+현재 `/app`에는 계좌와 거래 화면이 있고 분류·프로필 화면도 연결되어 있다. 로그인 전에는 `/sign-up` 또는 `/login`을 사용한다. Google·Kakao·Naver는 별도 개발자 앱 및 Supabase 공급자 설정이 필요하며 기본 비활성 상태다.
+
+비밀번호 복구는 로그아웃 상태에서 `/forgot-password`를 연다. 계정이 없으면 빨간 오류, 이미 가입한 이메일로 가입을 시도하면 로그인 링크를 안내한다. 이는 사용자가 위험을 수용한 계정 존재 여부 공개 정책이며 호출 제한이 적용된다. 복구 메일 링크는 요청한 브라우저에서 열어야 한다. 실패하면 공개 재요청 안내로 돌아간다. 변경 직후 새 로그인은 보안 적용을 위해 1~2분 대기가 필요할 수 있다.
 
 ## 6. 검증 명령과 증거의 한계
 
@@ -117,7 +119,7 @@ pnpm build
 - DB 검사: 실제 두 역할의 TLS·권한·금지 동작을 검사하고 시험 쓰기를 ROLLBACK한다. 사용자 데이터 행은 읽지 않는다.
 - HTTP 검사: CSRF·보안 쿠키·비인증/교차 출처 차단·잘못된 로그인·서명 JWT·replay를 확인한다. 계정 생성과 메일 발송은 하지 않는다. 실패 로그인 rate-limit 기록과 짧은 수명 replay digest는 남을 수 있다.
 - JWT 성공 검사는 가상 UUID로 BFF→API 신뢰 경계를 검증한다. 실제 Supabase 사용자 로그인 성공의 증거가 아니다.
-- 이번 브라우저 자동화는 Windows helper의 `apply deny-read ACLs` 오류로 시작하지 못했다. HTTPS HTTP 검증을 브라우저/실기기 E2E라고 부르지 않는다.
+- 최초 9월 29일의 브라우저 도구 제한은 이후 해소했다. 10월 1일에는 실제 Playwright로 복구/가입 안내와 PC 도메인 기능을 검증했다. 합성 IdP·폐기용 DB 검증은 실제 외부 소셜 로그인 성공과 구분한다.
 - `pnpm test:db`는 스키마를 삭제하는 폐기용 DB 테스트다. **이 Supabase 개발 프로젝트에는 절대 실행하지 않는다.** 새 비슈퍼유저 회귀 테스트는 폐기용 CI DB에서 별도로 실행해야 한다.
 
 ## 7. 초기화 도구와 실제로 발견한 문제
@@ -132,4 +134,4 @@ pnpm build
 
 ## English summary
 
-The new development project now has seven private authentication tables and separate least-privilege BFF/API logins. Local HTTPS and delegated JWT integration have been exercised. With explicit user approval, the existing development CA was trusted in Windows CurrentUser Root only; a normal Windows HTTPS request to sign-up returned 200. Real email confirmation and browser sign-in remain unverified; the HTTPS Site URL save still needs confirmation. No financial data, bank API calls, production deployment or paid changes were performed.
+The development project has private authentication storage and separate least-privilege BFF/API logins, plus user/finance domain tables. Local HTTPS and delegated JWT integration have been exercised. October 1 corrections add a BFF-only rate-limited email-presence gate, public recovery failure guidance, persisted OAuth signup intent, and bounded clock handling with a conservative recovery revocation barrier. Real-user login retry and real social-provider journeys remain unverified. No bank API calls, production deployment or paid changes were performed.

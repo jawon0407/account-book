@@ -109,7 +109,7 @@ export function signInMutationOptions(http: BrowserApiClient | typeof apiClient 
 }
 
 /**
- * 가입 입력을 검사하고 계정 존재 여부를 드러내지 않는 accepted 응답을 검증한다.
+ * 가입 입력을 검사하고 accepted 응답을 검증한다. 이미 가입한 이메일은 승인된 정책에 따라 409로 안내한다.
  * @param http - CSRF 보호 가입 요청에 사용할 HTTP 구현이다.
  * @returns {email, password}를 받아 {accepted: true}를 반환하는 mutation 설정. 실행 전에는 요청하지 않는다.
  * @remarks 입력/요청 오류를 전파하고 자동 재시도하지 않는다. accepted는 이메일 인증 완료를 뜻하지 않는다.
@@ -132,7 +132,7 @@ export function signOutMutationOptions(http: BrowserApiClient | typeof apiClient
  * 재설정 이메일 요청 입력과 accepted 응답을 검사할 설정을 만든다.
  * @param http - CSRF 보호 재설정 요청에 사용할 HTTP 구현이다.
  * @returns {email}을 받아 {accepted: true}를 검증하는 mutation 설정.
- * @remarks 실행하면 메일 요청이 발생할 수 있다. 계정 존재 여부는 응답에 드러내지 않으며 입력/요청 오류는 전파한다.
+ * @remarks 실행하면 메일 요청이 발생할 수 있다. 사용자 승인 정책에 따라 미가입 이메일은 404이며 입력/요청 오류를 전파한다.
  */
 export function passwordResetMutationOptions(http: BrowserApiClient | typeof apiClient = apiClient) {
   return mutationOptions({ mutationFn: (input: PasswordResetRequestInput) => parsedMutation("auth/password/reset-request", PasswordResetRequestInputSchema.parse(input), AcceptedSchema, http), retry: false });
@@ -151,15 +151,16 @@ export function passwordUpdateMutationOptions(http: BrowserApiClient | typeof ap
 /**
  * 공급자 로그인 시작 요청과 같은 출처 계속 경로 검증을 연결한다.
  * @param http - CSRF 조회와 OAuth 시작 POST에 사용할 HTTP 구현이다.
- * @returns {provider, returnPath}를 받는 mutation 설정. provider는 AuthProvider, returnPath 타입은 /app 또는 /settings/security다.
+ * @returns {provider, returnPath, intent?}를 받는 mutation 설정. 의도 생략은 로그인이며 명시한 의도는 계속 경로까지 정확히 일치해야 한다.
  * @remarks 실행하면 서버 OAuth 절차를 시작한다. 응답 경로 불일치는 공개 오류가 되고 화면 이동은 호출자가 담당한다.
  */
 export function oauthStartMutationOptions(http: BrowserApiClient | typeof apiClient = apiClient) {
   return mutationOptions({
-    mutationFn: (input: Readonly<{ provider: AuthProvider; returnPath: "/app" | "/settings/security" }>) => {
+    mutationFn: (input: Readonly<{ provider: AuthProvider; returnPath: "/app" | "/settings/security"; intent?: "sign_in" | "sign_up" }>) => {
       // callback은 요청한 값으로 기대 경로를 직접 만들고 응답이 정확히 같은 문자열인지 검사한다.
-      const authorizationPath = `/api/auth/oauth/${input.provider}/continue?${new URLSearchParams({ returnPath: input.returnPath }).toString()}`;
-      return parsedMutation(`auth/oauth/${input.provider}/start`, { returnPath: input.returnPath }, z.object({ authorizationPath: z.literal(authorizationPath) }).strict(), http);
+      const payload = { returnPath: input.returnPath, ...(input.intent === undefined ? {} : { intent: input.intent }) };
+      const authorizationPath = `/api/auth/oauth/${input.provider}/continue?${new URLSearchParams(payload).toString()}`;
+      return parsedMutation(`auth/oauth/${input.provider}/start`, payload, z.object({ authorizationPath: z.literal(authorizationPath) }).strict(), http);
     },
     retry: false,
   });

@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import { PROVIDER_CLOCK_SKEW_SECONDS } from "../security/provider-time.js";
 
 type TokenEnvelope = Readonly<{ version: 1; keyId: string; iv: string; ciphertext: string; tag: string }>;
 type SessionRecord = Readonly<{
@@ -258,7 +259,7 @@ class SerializedSecurityRepository extends TestRepository {
   public async completeRecovery(user: string, completedAt: Date): Promise<void> {
     await this.exclusive(async () => {
       await this.pauseAt("recovery");
-      this.minimumAcceptedIat = Math.max(this.minimumAcceptedIat, Math.floor(completedAt.getTime() / 1000) + 1);
+      this.minimumAcceptedIat = Math.max(this.minimumAcceptedIat, Math.floor(completedAt.getTime() / 1000) + PROVIDER_CLOCK_SKEW_SECONDS + 1);
       if (this.record?.userId === user && this.record.revokedAt === null) this.record = { ...this.record, revokedAt: new Date(completedAt) };
     });
   }
@@ -373,7 +374,7 @@ describe("SessionService", () => {
     await expectSafeFailure(() => subject.create(tokenPair({ supabaseSessionId: "not-a-uuid" }), now), "not-a-uuid");
     await expectSafeFailure(() => subject.create(tokenPair({ issuedAtSeconds: 0 }), now));
     await expectSafeFailure(() => subject.create(tokenPair({ issuedAtSeconds: 1.5 }), now));
-    await expectSafeFailure(() => subject.create(tokenPair({ issuedAtSeconds: Math.floor(now.getTime() / 1000) + 1 }), now));
+    await expectSafeFailure(() => subject.create(tokenPair({ issuedAtSeconds: Math.floor(now.getTime() / 1000) + 61, accessTokenExpiresAt: new Date(now.getTime() + 3600_000) }), now));
     await expectSafeFailure(() => subject.create(tokenPair({ accessTokenExpiresAt: new Date("invalid") }), now));
     await expectSafeFailure(() => subject.create(tokenPair(), new Date("invalid")));
     const nearMaximumNow = new Date(8_640_000_000_000_000 - 1);
@@ -400,32 +401,73 @@ describe("SessionService", () => {
     expect(repository.calls.createSession).toBe(2);
   });
 
-  it("leaves no stale session alive under either deterministic recovery race ordering", async () => {
-    const issuedAtSeconds = Math.floor(now.getTime() / 1000);
+  it.each([1, 60])("accepts %i seconds of provider skew for creation and refresh without shifting the issuance gate", async (skewSeconds) => {
+    const issuedAtSeconds = Math.floor(now.getTime() / 1000) + skewSeconds;
+    const pair = tokenPair({ issuedAtSeconds, accessTokenExpiresAt: new Date(now.getTime() + 3600_000) });
+    const repository = new TestRepository();
+    const subject = service(repository, vi.fn(async () => pair)).service;
+    repository.minimumAcceptedIat = issuedAtSeconds;
+    const created = await subject.create(pair, now);
+    await expect(subject.refresh(created.selector, now)).resolves.toEqual({ status: "refreshed" });
+    expect(repository.record).toMatchObject({ createdAt: now, accessTokenExpiresAt: pair.accessTokenExpiresAt, rotationVersion: 1 });
+
+    repository.minimumAcceptedIat = issuedAtSeconds + 1;
+    await expectSafeFailure(() => subject.create(pair, now));
+    expect(repository.calls.createSession).toBe(2);
+  });
+
+  it.each([0, 1, 30, 60])("leaves no stale session alive under either recovery race ordering with %i seconds of provider skew", async (skewSeconds) => {
+    const databaseNow = new Date(now);
+    const bffNow = new Date(now.getTime() + 500);
+    const providerNow = new Date(databaseNow.getTime() + skewSeconds * 1000);
+    const issuedAtSeconds = Math.floor(providerNow.getTime() / 1000);
+    const pair = tokenPair({ issuedAtSeconds, accessTokenExpiresAt: new Date(now.getTime() + 3600_000) });
 
     const sessionFirstRepository = new SerializedSecurityRepository();
     const sessionFirst = service(sessionFirstRepository).service;
     const sessionPause = sessionFirstRepository.pauseNext("session");
-    const sessionCreation = sessionFirst.create(tokenPair({ issuedAtSeconds }), now);
-    await sessionPause.reached;
-    const recoveryAfterSession = sessionFirstRepository.completeRecovery(userId, now);
+    const sessionCreation = sessionFirst.create(pair, bffNow);
+    await Promise.race([sessionPause.reached, sessionCreation]);
+    const recoveryAfterSession = sessionFirstRepository.completeRecovery(userId, databaseNow);
     sessionPause.release();
     await expect(sessionCreation).resolves.toMatchObject({ userId });
     await recoveryAfterSession;
-    expect(sessionFirstRepository.record?.revokedAt).toEqual(now);
-    expect(sessionFirstRepository.minimumAcceptedIat).toBe(issuedAtSeconds + 1);
+    expect(sessionFirstRepository.record?.revokedAt).toEqual(databaseNow);
 
     const recoveryFirstRepository = new SerializedSecurityRepository();
     const recoveryFirst = service(recoveryFirstRepository).service;
     const recoveryPause = recoveryFirstRepository.pauseNext("recovery");
-    const recoveryBeforeSession = recoveryFirstRepository.completeRecovery(userId, now);
+    const recoveryBeforeSession = recoveryFirstRepository.completeRecovery(userId, databaseNow);
     await recoveryPause.reached;
-    const staleCreation = recoveryFirst.create(tokenPair({ issuedAtSeconds }), now);
+    const staleCreation = recoveryFirst.create(pair, bffNow);
     recoveryPause.release();
     await recoveryBeforeSession;
     await expectSafeFailure(() => staleCreation);
     expect(recoveryFirstRepository.record).toBeNull();
-    expect(recoveryFirstRepository.minimumAcceptedIat).toBe(issuedAtSeconds + 1);
+    expect(recoveryFirstRepository.minimumAcceptedIat).toBe(Math.floor(databaseNow.getTime() / 1000) + 61);
+    expect(sessionFirstRepository.minimumAcceptedIat).toBe(Math.floor(databaseNow.getTime() / 1000) + 61);
+  });
+
+  it("allows a newly issued token after cooldown but never revives the pre-reset future token", async () => {
+    const repository = new SerializedSecurityRepository();
+    const subject = service(repository).service;
+    const databaseNow = new Date(now);
+    const preResetIssuedAt = Math.floor(now.getTime() / 1000) + 30;
+    await repository.completeRecovery(userId, databaseNow);
+    const afterCooldown = new Date(now.getTime() + 61_000);
+    await expectSafeFailure(() => subject.create(tokenPair({ issuedAtSeconds: preResetIssuedAt, accessTokenExpiresAt: new Date(now.getTime() + 3600_000) }), afterCooldown));
+    await expect(subject.create(tokenPair({ issuedAtSeconds: Math.floor(afterCooldown.getTime() / 1000), accessTokenExpiresAt: new Date(now.getTime() + 3600_000) }), afterCooldown)).resolves.toMatchObject({ userId });
+  });
+
+  it.each([[-60, 121], [0, 61], [60, 1]])("requires %i-second Auth skew to cross the reset barrier at %i elapsed seconds", async (providerOffset, elapsedSeconds) => {
+    const repository = new SerializedSecurityRepository();
+    const subject = service(repository).service;
+    await repository.completeRecovery(userId, now);
+    const before = new Date(now.getTime() + (elapsedSeconds - 1) * 1000);
+    const after = new Date(now.getTime() + elapsedSeconds * 1000);
+    const expiry = new Date(now.getTime() + 3600_000);
+    await expectSafeFailure(() => subject.create(tokenPair({ issuedAtSeconds: Math.floor(before.getTime() / 1000) + providerOffset, accessTokenExpiresAt: expiry }), before));
+    await expect(subject.create(tokenPair({ issuedAtSeconds: Math.floor(after.getTime() / 1000) + providerOffset, accessTokenExpiresAt: expiry }), after)).resolves.toMatchObject({ userId });
   });
 
   it("resolves without writes or refreshes", async () => {
@@ -508,6 +550,7 @@ describe("SessionService", () => {
     ["non-object token pair", undefined as unknown as TokenPair],
     ["empty access token", tokenPair({ accessToken: "" })],
     ["expired access token", tokenPair({ accessTokenExpiresAt: now })],
+    ["issued beyond the clock skew bound", tokenPair({ issuedAtSeconds: Math.floor(now.getTime() / 1000) + 61, accessTokenExpiresAt: new Date(now.getTime() + 3600_000) })],
   ] as const)("classifies a malformed replacement pair as expired: %s", async (_label, replacement) => {
     const { repository, created } = await createSession();
     const subject = new SessionService!(repository, keyring, async () => replacement, () => id, () => new Date(now));

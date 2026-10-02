@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 const cookieModule = await import("./auth-cookie.js").catch(() => ({} as Record<string, unknown>));
 const sessionCookie = cookieModule.sessionCookie as ((value: string, secure: boolean) => unknown) | undefined;
 const interactionCookie = cookieModule.interactionCookie as ((value: string, secure: boolean) => unknown) | undefined;
+const authBudgetCookie = cookieModule.authBudgetCookie as ((value: string, secure: boolean) => unknown) | undefined;
 const clearAuthCookie = cookieModule.clearAuthCookie as ((name: string, secure: boolean) => unknown) | undefined;
 const SESSION_COOKIE_NAME = cookieModule.SESSION_COOKIE_NAME as string | undefined;
 const INTERACTION_COOKIE_NAME = cookieModule.INTERACTION_COOKIE_NAME as string | undefined;
@@ -27,6 +28,14 @@ function expectInvalid(action: () => unknown, supplied?: string): void {
 }
 
 describe("auth cookies", () => {
+  it("creates a ten-minute host-only browser budget cookie independent of interaction cookies", () => {
+    expect(authBudgetCookie).toBeTypeOf("function");
+    expect(authBudgetCookie?.(selector, true)).toEqual({
+      name: "__Host-ab_auth_budget", value: selector, httpOnly: true, secure: true,
+      sameSite: "lax", path: "/", priority: "high", maxAge: 600,
+    });
+  });
+
   it("creates exact host-only HttpOnly cookies for canonical selectors", () => {
     expect(sessionCookie).toBeTypeOf("function");
     expect(interactionCookie).toBeTypeOf("function");
@@ -89,7 +98,7 @@ describe("auth cookies", () => {
     `${selector}\n`,
     "_".repeat(43),
   ])("rejects an invalid cookie selector without echoing it", (invalid) => {
-    for (const buildCookie of [sessionCookie, interactionCookie]) {
+    for (const buildCookie of [sessionCookie, interactionCookie, authBudgetCookie]) {
       expectInvalid(() => buildCookie?.(invalid, true), invalid);
     }
   });
@@ -106,5 +115,6 @@ describe("auth cookies", () => {
 
   it.each([false, "true", 1, null, undefined])("rejects any secure flag other than literal true", (secure) => {
     expectInvalid(() => sessionCookie?.(selector, secure as unknown as boolean), String(secure));
+    expectInvalid(() => authBudgetCookie?.(selector, secure as unknown as boolean), String(secure));
   });
 });

@@ -92,4 +92,58 @@ describe("transaction repository with real RLS", () => {
     await repository.create(a.user, { ...value, type: "income", categoryId: income, amountKrw: Number.MAX_SAFE_INTEGER, idempotencyKey: randomUUID() });
     await expect(accounts.list(a.user, false)).rejects.toMatchObject({ status: 503 });
   });
+  it("updates amount/date/memo and moves balances between owned accounts with one new version", async () => {
+    const a = await setup(), id = await seed(a), other = await seedAccount(fixture.admin, a.user), income = await seedCategory(fixture.admin, a.user, "income");
+    const changed = await repository.update(a.user, id, { expectedVersion: 1, amountKrw: 500, memo: " 수정 ", occurredOn: "2026-09-30", accountId: other, type: "income", categoryId: income });
+    expect(changed).toMatchObject({ id, version: 2, amountKrw: 500, memo: "수정", occurredOn: "2026-09-30", kind: "income", accountId: other, categoryId: income });
+    expect((await repository.update(a.user, id, { expectedVersion: 2, amountKrw: 600 })).memo).toBe("수정");
+    expect((await repository.update(a.user, id, { expectedVersion: 3, memo: null })).memo).toBeNull();
+    const balances = (await new AccountsRepository(new UserDatabase(pool)).list(a.user, false)).items;
+    expect(balances.find(row => row.id === a.accountId)?.currentBalanceKrw).toBe(0);
+    expect(balances.find(row => row.id === other)?.currentBalanceKrw).toBe(600);
+  });
+  it("isolates users and validates shape, UUID and references without changing the row", async () => {
+    const a = await setup(), b = await setup(), id = await seed(a);
+    for (const target of [id, randomUUID()]) {
+      await expect(repository.update(b.user, target, { expectedVersion: 1, memo: "x" })).rejects.toMatchObject({ status: 404 });
+      await expect(repository.remove(b.user, target, { expectedVersion: 1 })).rejects.toMatchObject({ status: 404 });
+    }
+    for (const change of [{ accountId: b.accountId }, { categoryId: b.categoryId }])
+      await expect(repository.update(a.user, id, { expectedVersion: 1, ...change })).rejects.toMatchObject({ status: 404 });
+    await expect(repository.update(a.user, id, { expectedVersion: 1, type: "income" })).rejects.toMatchObject({ code: "LEDGER_CATEGORY_UNAVAILABLE" });
+    for (const value of [{ expectedVersion: 1 }, { expectedVersion: 1, amountKrw: 0 }, { expectedVersion: 1, userId: b.user, memo: "x" }])
+      await expect(repository.update(a.user, id, value as never)).rejects.toMatchObject({ status: 400 });
+    await expect(repository.remove(a.user, "invalid", { expectedVersion: 1 })).rejects.toMatchObject({ status: 400 });
+    expect((await repository.list(a.user, {})).items[0]).toMatchObject({ version: 1, amountKrw: 100 });
+  });
+  it("allows existing archived references but rejects selecting archived parents", async () => {
+    const a = await setup(), id = await seed(a), other = await seedAccount(fixture.admin, a.user), category = await seedCategory(fixture.admin, a.user);
+    await fixture.admin.query("update finance.accounts set archived_at=now() where user_id=$1", [a.user]);
+    await fixture.admin.query("update finance.transaction_categories set archived_at=now() where user_id=$1", [a.user]);
+    expect((await repository.update(a.user, id, { expectedVersion: 1, memo: "옛 기록", accountId: a.accountId, categoryId: a.categoryId })).version).toBe(2);
+    await expect(repository.update(a.user, id, { expectedVersion: 2, accountId: other })).rejects.toMatchObject({ code: "LEDGER_ACCOUNT_UNAVAILABLE" });
+    await expect(repository.update(a.user, id, { expectedVersion: 2, categoryId: category })).rejects.toMatchObject({ code: "LEDGER_CATEGORY_UNAVAILABLE" });
+    expect((await repository.remove(a.user, id, { expectedVersion: 2 })).version).toBe(3);
+  });
+  it("serializes concurrent versions and preserves a soft-deleted tombstone without balance", async () => {
+    const a = await setup(), id = await seed(a);
+    const results = await Promise.allSettled([repository.update(a.user, id, { expectedVersion: 1, memo: "첫 요청" }), repository.update(a.user, id, { expectedVersion: 1, memo: "다른 요청" })]);
+    expect(results.filter(r => r.status === "fulfilled")).toHaveLength(1);
+    expect(results.find(r => r.status === "rejected")).toMatchObject({ reason: { code: "LEDGER_VERSION_CONFLICT" } });
+    await expect(repository.remove(a.user, id, { expectedVersion: 1 })).rejects.toMatchObject({ status: 409 });
+    const tombstone = await repository.remove(a.user, id, { expectedVersion: 2 });
+    expect(tombstone).toEqual({ id, version: 3, deletedAt: expect.any(String) });
+    expect((await repository.list(a.user, {})).items).toEqual([]);
+    expect((await new AccountsRepository(new UserDatabase(pool)).list(a.user, false)).items[0]?.currentBalanceKrw).toBe(0);
+    expect((await fixture.admin.query("select count(*)::int n from finance.transaction_history where id=$1", [id])).rows[0].n).toBe(1);
+    await expect(repository.remove(a.user, id, { expectedVersion: 2 })).rejects.toMatchObject({ status: 404 });
+    await expect(repository.update(a.user, id, { expectedVersion: 3, memo: "부활" })).rejects.toMatchObject({ status: 404 });
+  });
+  it("rejects opening balance edits and deletion", async () => {
+    const a = await setup();
+    const result = await fixture.admin.query("insert into finance.transaction_history(user_id,account_id,kind,amount_krw,occurred_on,opening_direction) values($1,$2,'opening_balance',100,'2026-10-01','asset') returning id", [a.user, a.accountId]);
+    const id = result.rows[0].id;
+    await expect(repository.update(a.user, id, { expectedVersion: 1, memo: "x" })).rejects.toMatchObject({ code: "LEDGER_VALIDATION_FAILED" });
+    await expect(repository.remove(a.user, id, { expectedVersion: 1 })).rejects.toMatchObject({ code: "LEDGER_VALIDATION_FAILED" });
+  });
 });

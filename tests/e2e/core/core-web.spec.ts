@@ -162,7 +162,13 @@ test("PC transactions survive response loss, filter/paginate, update balance and
   await page.route("**/api/transactions", async route => {
     if (route.request().method() !== "POST") return route.continue();
     attempts.push(route.request().postDataJSON());
-    if (attempts.length === 1) { await route.fetch(); return route.abort("failed"); }
+    if (attempts.length === 1) {
+      // 대역 전송의 Fetch Metadata를 복원하고 실제 저장 성공을 확인한 후 응답만 유실시킨다.
+      expect(new URL(route.request().url()).origin).toBe(new URL(page.url()).origin);
+      const response = await route.fetch({ headers: { ...await route.request().allHeaders(), "sec-fetch-site": "same-origin" } });
+      expect(response.status()).toBe(201);
+      return route.abort("failed");
+    }
     if (attempts.length === 2) return route.fulfill({ status: 429, json: buildApiError({ code: "AUTH_RATE_LIMITED", retryable: true }) });
     return route.continue();
   });

@@ -1,9 +1,9 @@
-import { Controller, Get, Header, Inject, Post, Req, UseGuards } from "@nestjs/common";
+import { Controller, Delete, Get, Header, Inject, Param, Patch, Post, Req, UseGuards } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
-import { CreateTransactionInputSchema, type Transaction, type TransactionListResponse } from "@account-book/contracts";
+import { CreateTransactionInputSchema, UpdateTransactionInputSchema, DeleteTransactionInputSchema, LedgerIdSchema, type Transaction, type TransactionListResponse } from "@account-book/contracts";
 import { AuthGuard } from "../auth/auth.guard.js";
 import { RequireDelegatedScope } from "../auth/delegated-scope.js";
-import { body, owner } from "../core/http-input.js";
+import { body, input, owner } from "../core/http-input.js";
 import { parseTransactionQuery } from "./transaction-query.js";
 import { TransactionsRepository } from "./transactions.repository.js";
 
@@ -26,5 +26,19 @@ export class TransactionsController {
   @Header("Cache-Control", "private, no-store")
   public create(@Req() request: FastifyRequest): Promise<Transaction> {
     return this.repository.create(owner(request), body(CreateTransactionInputSchema, request));
+  }
+  /** @param id 대상 UUID. @param request 변경값과 기대 버전. 소유자는 JWT에서만 가져온다. */
+  @Patch(":id")
+  @RequireDelegatedScope("transaction:write")
+  @Header("Cache-Control", "private, no-store")
+  public update(@Param("id") id: string, @Req() request: FastifyRequest): Promise<Transaction> {
+    return this.repository.update(owner(request), input(LedgerIdSchema, id), body(UpdateTransactionInputSchema, request));
+  }
+  /** @param id 대상 UUID. @param request 기대 버전 JSON. @returns 삭제된 ID·버전·시간만 포함한 tombstone. */
+  @Delete(":id")
+  @RequireDelegatedScope("transaction:write")
+  @Header("Cache-Control", "private, no-store")
+  public remove(@Param("id") id: string, @Req() request: FastifyRequest) {
+    return this.repository.remove(owner(request), input(LedgerIdSchema, id), body(DeleteTransactionInputSchema, request));
   }
 }

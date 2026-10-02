@@ -27,7 +27,7 @@ describe("core API signed HTTP boundary", () => {
   const profileRepo = { get: vi.fn(async () => profile), update: vi.fn(async () => ({ ...profile, nickname: "닉네임", version: 2 })) };
   const accountRepo = { list: vi.fn(async () => ({ items: [account] })), create: vi.fn(async () => account), update: vi.fn(async () => account), archive: vi.fn(async () => account) };
   const categoryRepo = { list: vi.fn(async () => ({ items: [category] })), create: vi.fn(async () => category), update: vi.fn(async () => category), archive: vi.fn(async () => category) };
-  const transactionRepo = { list: vi.fn(async () => ({ items: [], nextCursor: null })), create: vi.fn(async () => ({ id: resource })) };
+  const transactionRepo = { list: vi.fn(async () => ({ items: [], nextCursor: null })), create: vi.fn(async () => ({ id: resource })), update: vi.fn(async () => ({ id: resource, version: 2 })), remove: vi.fn(async () => ({ id: resource, version: 2, deletedAt: profile.createdAt })) };
   beforeAll(async () => {
     const keys = await generateKeyPair("ES256"); privateKey = keys.privateKey;
     const used = new Set<string>();
@@ -45,7 +45,7 @@ describe("core API signed HTTP boundary", () => {
   afterAll(async () => { await app?.close(); });
 
   /** @param method HTTP 메서드. @param target 실제 요청 URL. @param scope 요청 전용 권한. @param body 서명할 JSON. @returns 새 one-use JWT 헤더. */
-  async function headers(method: "GET" | "POST" | "PATCH", target: string, scope: DelegatedScope, body = "") {
+  async function headers(method: "GET" | "POST" | "PATCH" | "DELETE", target: string, scope: DelegatedScope, body = "") {
     const requestId = randomUUID(), now = Math.floor(Date.now() / 1000);
     const contentType = method === "GET" ? null : "application/json";
     const rbh = createHash("sha256").update(canonicalDelegatedRequest({ method, target, contentType, bodySha256: createHash("sha256").update(body).digest("base64url"), requestId })).digest("base64url");
@@ -54,7 +54,7 @@ describe("core API signed HTTP boundary", () => {
     return { authorization: `Bearer ${token}`, "x-request-id": requestId, ...(contentType ? { "content-type": contentType } : {}) };
   }
   /** @param method 메서드. @param url 경로. @param scope 권한. @param input JSON 입력. @returns 실제 Nest/Fastify 응답. */
-  async function send(method: "GET" | "POST" | "PATCH", url: string, scope: DelegatedScope, input?: unknown) {
+  async function send(method: "GET" | "POST" | "PATCH" | "DELETE", url: string, scope: DelegatedScope, input?: unknown) {
     const body = input === undefined ? "" : JSON.stringify(input);
     return app.inject({ method, url, headers: await headers(method, url, scope, body), ...(input !== undefined ? { payload: body } : {}) });
   }
@@ -101,6 +101,17 @@ describe("core API signed HTTP boundary", () => {
     expect((await send("POST", "/v1/transactions", "transaction:read", value)).statusCode).toBe(401);
     for (const change of [{ amountKrw: 0 }, { amountKrw: 1.5 }, { amountKrw: "100" }, { memo: " " }, { memo: "x".repeat(501) }, { occurredOn: "2026-02-30" }, { userId }, { type: "transfer_in" }])
       expect((await send("POST", "/v1/transactions", "transaction:write", { ...value, ...change })).statusCode).toBe(400);
+  });
+  it.each(["PATCH", "DELETE"] as const)("guards %s transaction mutation scope, identity and input", async method => {
+    const value = { expectedVersion: 1, ...(method === "PATCH" ? { memo: null } : {}) };
+    const response = await send(method, `/v1/transactions/${resource}`, "transaction:write", value);
+    expect(response.statusCode).toBe(200); expect(response.headers["cache-control"]).toBe("private, no-store");
+    expect(transactionRepo[method === "PATCH" ? "update" : "remove"]).toHaveBeenCalledWith(userId, resource, value);
+    expect((await send(method, `/v1/transactions/${resource}`, "transaction:read", value)).statusCode).toBe(401);
+    for (const invalid of [{}, { ...value, userId }, { ...value, expectedVersion: 0 }])
+      expect((await send(method, `/v1/transactions/${resource}`, "transaction:write", invalid)).statusCode).toBe(400);
+    expect((await send(method, "/v1/transactions/invalid", "transaction:write", value)).statusCode).toBe(400);
+    expect((await send(method, `/v1/transactions/${resource}?owner=x`, "transaction:write", value)).statusCode).toBe(400);
   });
   it.each(["true&includeArchived=false", "1", "TRUE", "false&owner=x", "false&includeArchived[]=true"])("rejects ambiguous query %s", async value => {
     expect((await send("GET", `/v1/accounts?includeArchived=${value}`, "account:read")).statusCode).toBe(400);

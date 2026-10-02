@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { CurrentUserSchema, SignInInputSchema, SignUpInputSchema, type CurrentUser } from "@account-book/contracts";
 import type { AuthRepository, EmailConfirmationTransactionRecord } from "../persistence/auth-repository.js";
 import { createPkceVerifier, derivePkceChallenge } from "../security/pkce.js";
+import { validProviderIssuedAt } from "../security/provider-time.js";
 import { hashSessionSelector } from "../security/session-selector.js";
 import { decryptToken, encryptToken, type TokenKeyring } from "../security/token-envelope.js";
 import type { SessionTokenPair } from "../session/session-service.js";
@@ -119,7 +120,7 @@ function providerFailure(error: unknown): never {
 function verifiedPair(pair: AuthTokenPair, now: Date): AuthTokenPair {
   const parsed = CurrentUserSchema.safeParse(pair?.user);
   if (!parsed.success || !parsed.data.emailVerified || parsed.data.id !== pair?.userId) return fail("AUTH_EMAIL_VERIFICATION_REQUIRED");
-  if (!validUuid(pair?.userId) || !validUuid(pair?.supabaseSessionId) || typeof pair?.accessToken !== "string" || pair.accessToken.length === 0 || typeof pair?.refreshToken !== "string" || pair.refreshToken.length === 0 || !Number.isSafeInteger(pair?.issuedAtSeconds) || pair.issuedAtSeconds <= 0 || pair.issuedAtSeconds > Math.floor(now.getTime() / 1000) || !validDate(pair?.accessTokenExpiresAt) || pair.accessTokenExpiresAt.getTime() <= now.getTime() || pair.accessTokenExpiresAt.getTime() <= pair.issuedAtSeconds * 1000) return fail();
+  if (!validUuid(pair?.userId) || !validUuid(pair?.supabaseSessionId) || typeof pair?.accessToken !== "string" || pair.accessToken.length === 0 || typeof pair?.refreshToken !== "string" || pair.refreshToken.length === 0 || !validProviderIssuedAt(pair?.issuedAtSeconds, now.getTime()) || !validDate(pair?.accessTokenExpiresAt) || pair.accessTokenExpiresAt.getTime() <= now.getTime() || pair.accessTokenExpiresAt.getTime() <= pair.issuedAtSeconds * 1000) return fail();
   return pair;
 }
 /**

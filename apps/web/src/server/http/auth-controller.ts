@@ -15,15 +15,18 @@ import {
 } from "@account-book/contracts";
 import { z } from "zod";
 import type { AuthProviderPort } from "../auth/auth-provider-port.js";
+import type { AccountAccessPort } from "../auth/account-access.js";
 import type { EmailAuthService } from "../auth/email-auth-service.js";
 import type { OAuthService } from "../auth/oauth-service.js";
 import type { PasswordRecoveryService } from "../auth/password-recovery-service.js";
 import {
+  authBudgetCookie,
   clearAuthCookie,
   interactionCookie,
   sessionCookie,
   INTERACTION_COOKIE_NAME,
   SESSION_COOKIE_NAME,
+  AUTH_BUDGET_COOKIE_NAME,
   type AuthCookie,
 } from "../security/auth-cookie.js";
 import { issueCsrfToken } from "../security/csrf.js";
@@ -38,7 +41,8 @@ const REFRESH_THRESHOLD_MS = 60_000;
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const ReturnPathSchema = z.enum(["/app", "/settings/security"]);
 const CsrfContextSchema = z.enum(["session", "interaction"]);
-const OAuthStartBodySchema = z.object({ returnPath: ReturnPathSchema }).strict();
+const OAuthIntentSchema = z.enum(["sign_in", "sign_up"]);
+const OAuthStartBodySchema = z.object({ returnPath: ReturnPathSchema, intent: OAuthIntentSchema.optional() }).strict();
 const EmptyBodySchema = z.object({}).strict();
 
 type AuthErrorCode = Extract<ApiError["code"], `AUTH_${string}`>;
@@ -80,6 +84,7 @@ type SessionBoundary = Pick<SessionService, "refresh" | "revokeCurrent" | "markR
 
 /** Request-owned services and immutable configuration used by one controller instance. */
 export type AuthControllerDependencies = Readonly<{
+  accountAccess: AccountAccessPort;
   enabledProviders?: readonly AuthProvider[];
   configuredOrigin: URL;
   secureCookies: true;
@@ -197,6 +202,8 @@ function sessionFailureResponse(error: SessionOperationError): Response {
  */
 function statusFor(code: AuthErrorCode): number {
   switch (code) {
+    case "AUTH_ACCOUNT_EXISTS": return 409;
+    case "AUTH_ACCOUNT_NOT_FOUND": return 404;
     case "AUTH_INVALID_CREDENTIALS": return 401;
     case "AUTH_EMAIL_VERIFICATION_REQUIRED": return 403;
     case "AUTH_SESSION_EXPIRED":
@@ -230,7 +237,7 @@ function json(body: unknown, status = 200, cookies: readonly string[] = []): Res
  * @param cookies 함께 설정·삭제할 쿠키 문자열 목록.
  * @returns 캐시 금지 Location 응답.
  */
-function redirect(origin: URL, path: "/app" | "/reset-password" | "/settings/security", cookies: readonly string[] = []): Response {
+function redirect(origin: URL, path: "/app" | "/reset-password" | "/settings/security" | "/forgot-password/invalid-link" | "/login?notice=social-signup", cookies: readonly string[] = []): Response {
   const headers = noStoreHeaders();
   headers.set("Location", new URL(path, origin).toString());
   for (const cookieValue of cookies) headers.append("Set-Cookie", cookieValue);
@@ -256,21 +263,21 @@ function providerRedirect(value: URL): Response {
  * @param value 생성 또는 삭제할 인증 쿠키 데이터.
  * @returns Set-Cookie 헤더 값.
  */
-function serializedCookie(value: AuthCookie & Partial<Readonly<{ maxAge: 0 }>>): string {
+function serializedCookie(value: AuthCookie & Partial<Readonly<{ maxAge: 0 | 600 }>>): string {
   const attributes = [`${value.name}=${value.value}`, "HttpOnly"];
   if (value.secure) attributes.push("Secure");
   attributes.push("SameSite=Lax", "Path=/", "Priority=High");
-  if (value.maxAge === 0) attributes.push("Max-Age=0");
+  if (value.maxAge !== undefined) attributes.push(`Max-Age=${value.maxAge}`);
   return attributes.join("; ");
 }
 
 /**
  * 지정 이름이 정확히 한 번 나타나는 쿠키를 찾아 식별자 형식을 검사합니다. 중복·누락·잘못된 값은 거부합니다.
  * @param request Cookie 헤더를 읽을 요청.
- * @param name 세션 또는 상호작용 쿠키 이름.
+ * @param name 세션·상호작용·브라우저 요청 예산 쿠키 이름.
  * @returns 검증된 식별자 또는 null.
  */
-function cookie(request: Request, name: typeof SESSION_COOKIE_NAME | typeof INTERACTION_COOKIE_NAME): string | null {
+function cookie(request: Request, name: AuthCookie["name"]): string | null {
   const raw = request.headers.get("Cookie");
   if (raw === null) return null;
   const matches = raw.split(";").map((part) => part.trim()).filter((part) => part.startsWith(`${name}=`));
@@ -439,13 +446,21 @@ export class AuthController {
    * @returns accepted JSON과 새 상호작용 쿠키 또는 오류 응답.
    */
   public async signUp(request: Request): Promise<Response> {
+    let budgetCookie: string | undefined;
     try {
       this.verifyMutation(request);
       const input = parse(SignUpInputSchema, await body(request));
+      const budgetSelector = cookie(request, AUTH_BUDGET_COOKIE_NAME) ?? createSessionSelector();
+      budgetCookie = serializedCookie(authBudgetCookie(budgetSelector, this.dependencies.secureCookies));
+      if (await this.dependencies.accountAccess.check(input.email, "sign_up", budgetSelector) === "present") return fail("AUTH_ACCOUNT_EXISTS", 409);
       const selected = this.createInteractionSelector();
       await this.dependencies.email.signUp(input, this.emailContext(selected));
-      return json({ accepted: true }, 200, [serializedCookie(interactionCookie(selected, this.dependencies.secureCookies))]);
-    } catch (error) { return errorResponse(error); }
+      return json({ accepted: true }, 200, [budgetCookie, serializedCookie(interactionCookie(selected, this.dependencies.secureCookies))]);
+    } catch (error) {
+      const response = errorResponse(error);
+      if (budgetCookie !== undefined) response.headers.append("Set-Cookie", budgetCookie);
+      return response;
+    }
   }
 
   /** Returns only a fixed same-origin navigation path after creating a fresh interaction. */
@@ -464,6 +479,7 @@ export class AuthController {
       const input = parse(OAuthStartBodySchema, await body(request));
       const selected = this.createInteractionSelector();
       const query = new URLSearchParams({ returnPath: input.returnPath });
+      if (input.intent !== undefined) query.set("intent", input.intent);
       return json({ authorizationPath: `/api/auth/oauth/${provider.data}/continue?${query.toString()}` }, 200, [serializedCookie(interactionCookie(selected, this.dependencies.secureCookies))]);
     } catch (error) { return errorResponse(error); }
   }
@@ -483,13 +499,16 @@ export class AuthController {
       if (!provider.success) return fail("AUTH_OAUTH_TRANSACTION_INVALID", 400);
       this.requireEnabledProvider(provider.data);
       const search = new URL(request.url).searchParams;
-      if ([...search.keys()].some((key) => key !== "returnPath") || search.getAll("returnPath").length !== 1) return fail("AUTH_OAUTH_TRANSACTION_INVALID", 400);
+      if ([...search.keys()].some((key) => key !== "returnPath" && key !== "intent") || search.getAll("returnPath").length !== 1 || search.getAll("intent").length > 1) return fail("AUTH_OAUTH_TRANSACTION_INVALID", 400);
       const returnPath = ReturnPathSchema.safeParse(search.get("returnPath"));
       if (!returnPath.success) return fail("AUTH_OAUTH_TRANSACTION_INVALID", 400);
+      const intent = OAuthIntentSchema.safeParse(search.get("intent") ?? "sign_in");
+      if (!intent.success) return fail("AUTH_OAUTH_TRANSACTION_INVALID", 400);
       const result = await this.dependencies.oauth.start(provider.data, {
         callbackBaseUrl: new URL("/api/auth/callback", this.origin),
         interactionSelector: selected,
         returnPath: returnPath.data,
+        intent: intent.data,
         now: safeNow(this.dependencies.now),
       });
       return providerRedirect(result.authorizationUrl);
@@ -503,17 +522,25 @@ export class AuthController {
    * @returns accepted JSON과 새 상호작용 쿠키 또는 오류 응답.
    */
   public async passwordResetRequest(request: Request): Promise<Response> {
+    let budgetCookie: string | undefined;
     try {
       this.verifyMutation(request);
       const input = parse(PasswordResetRequestInputSchema, await body(request));
+      const budgetSelector = cookie(request, AUTH_BUDGET_COOKIE_NAME) ?? createSessionSelector();
+      budgetCookie = serializedCookie(authBudgetCookie(budgetSelector, this.dependencies.secureCookies));
+      if (await this.dependencies.accountAccess.check(input.email, "password_reset", budgetSelector) === "absent") return fail("AUTH_ACCOUNT_NOT_FOUND", 404);
       const selected = this.createInteractionSelector();
       await this.dependencies.recovery.start(input.email, {
         passwordResetRedirectUrl: new URL("/api/auth/password/callback", this.origin),
         interactionSelector: selected,
         now: safeNow(this.dependencies.now),
       });
-      return json({ accepted: true }, 200, [serializedCookie(interactionCookie(selected, this.dependencies.secureCookies))]);
-    } catch (error) { return errorResponse(error); }
+      return json({ accepted: true }, 200, [budgetCookie, serializedCookie(interactionCookie(selected, this.dependencies.secureCookies))]);
+    } catch (error) {
+      const response = errorResponse(error);
+      if (budgetCookie !== undefined) response.headers.append("Set-Cookie", budgetCookie);
+      return response;
+    }
   }
 
   /** Exchanges one email confirmation code and redirects without preserving it in browser history. */
@@ -537,7 +564,7 @@ export class AuthController {
   /**
    * 제공자·state·코드와 브라우저 상호작용으로 OAuth를 완료하고 저장된 허용 경로로 이동시킵니다.
    * @param request 표준 브라우저 Request; 헤더·쿠키·본문을 검증하며 사용합니다.
-   * @returns 성공 시 세션 쿠키와 저장된 경로로 303, 실패 시 상호작용 쿠키 삭제와 /app 이동.
+   * @returns 로그인 성공은 세션 쿠키와 저장된 경로로 303, 가입 인증은 세션 없이 고정 로그인 안내로 303, 실패는 상호작용 쿠키 삭제와 /app 이동.
    */
   public async oauthCallback(request: Request): Promise<Response> {
     try {
@@ -550,6 +577,9 @@ export class AuthController {
       hashSessionSelector(state);
       const code = callbackValue(search.get("code"));
       const result = await this.dependencies.oauth.complete({ provider: provider.data, state, code }, { interactionSelector: selected, now: safeNow(this.dependencies.now) });
+      if ("status" in result) {
+        return redirect(this.origin, "/login?notice=social-signup", [serializedCookie(clearAuthCookie(INTERACTION_COOKIE_NAME, this.dependencies.secureCookies))]);
+      }
       return this.sessionRedirect(result, result.returnPath);
     } catch {
       return redirect(this.origin, "/app", [serializedCookie(clearAuthCookie(INTERACTION_COOKIE_NAME, this.dependencies.secureCookies))]);
@@ -578,7 +608,7 @@ export class AuthController {
   /**
    * 복구 코드를 서버의 제한된 복구 자격 증명으로 교환합니다. 앱 로그인 세션은 만들지 않습니다.
    * @param request 표준 브라우저 Request; 헤더·쿠키·본문을 검증하며 사용합니다.
-   * @returns 성공 시 /reset-password 이동, 실패 시 상호작용 쿠키 삭제 후 /app 이동.
+   * @returns 성공 시 /reset-password 이동, 실패 시 로그인 불필요 복구 안내로 이동.
    */
   public async passwordCallback(request: Request): Promise<Response> {
     try {
@@ -587,7 +617,7 @@ export class AuthController {
       await this.dependencies.recovery.exchange({ code }, this.recoveryContext(selected));
       return redirect(this.origin, "/reset-password");
     } catch {
-      return redirect(this.origin, "/app", [serializedCookie(clearAuthCookie(INTERACTION_COOKIE_NAME, this.dependencies.secureCookies))]);
+      return redirect(this.origin, "/forgot-password/invalid-link", [serializedCookie(clearAuthCookie(INTERACTION_COOKIE_NAME, this.dependencies.secureCookies))]);
     }
   }
 

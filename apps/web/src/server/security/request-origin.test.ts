@@ -77,16 +77,22 @@ function expectRejected(input: unknown, supplied = "", activePolicy: unknown = p
 }
 
 describe("state-changing request boundary", () => {
-  it.each(["POST", "PATCH"])("accepts a bound same-origin JSON %s on the ledger mutation boundary", (method) => {
+  it.each(["POST", "PATCH", "DELETE"])("accepts a bound same-origin JSON %s on the ledger mutation boundary", (method) => {
     expect(verifyMutationCsrfRequest).toBeTypeOf("function");
     expect(() => verifyMutationCsrfRequest!(request(validHeaders(), method), context, policy)).not.toThrow();
   });
 
-  it("keeps authentication POST-only while rejecting mutation verbs outside POST/PATCH", () => {
+  it("keeps authentication POST-only while rejecting mutation verbs outside POST/PATCH/DELETE", () => {
     expect(() => verifyCsrfRequest!(request(validHeaders(), "PATCH"), context, policy)).toThrow(AuthRequestRejectedError);
-    for (const method of ["PUT", "DELETE", "OPTIONS", "HEAD", "patch"]) {
+    expect(() => verifyCsrfRequest!(request(validHeaders(), "DELETE"), context, policy)).toThrow(AuthRequestRejectedError);
+    for (const method of ["PUT", "OPTIONS", "HEAD", "patch", "delete"]) {
       expect(() => verifyMutationCsrfRequest!(request(validHeaders(), method), context, policy)).toThrow(AuthRequestRejectedError);
     }
+  });
+  it("rejects DELETE with missing CSRF, a different session or a foreign origin", () => {
+    for (const changed of [{ "X-CSRF-Token": "" }, { Origin: "https://evil.example" }, { "Sec-Fetch-Site": "cross-site" }])
+      expect(() => verifyMutationCsrfRequest!(request({ ...validHeaders(), ...changed }, "DELETE"), context, policy)).toThrow(AuthRequestRejectedError);
+    expect(() => verifyMutationCsrfRequest!(request(validHeaders(), "DELETE"), { selector: Buffer.alloc(32, 99).toString("base64url") }, policy)).toThrow(AuthRequestRejectedError);
   });
 
   it("does not accept a PATCH token bound to another browser session", () => {

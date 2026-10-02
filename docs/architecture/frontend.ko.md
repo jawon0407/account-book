@@ -8,7 +8,7 @@
 
 | 구분 | 현재 소스에서 확인할 수 있는 것 | 계획 또는 제외 |
 |---|---|---|
-| 화면 | 인증 5화면, 계좌·분류·닉네임 관리, `/app/transactions` 거래 목록·수입/지출 입력 | 거래 수정/삭제·시작 잔액·이체·대시보드는 후속 |
+| 화면 | 인증 화면, 계좌·분류·닉네임 관리, `/app/transactions` 거래 목록·수입/지출 입력·수정·삭제 확인 | 시작 잔액·이체·대시보드는 후속 |
 | HTTP | ky 공통 클라이언트와 같은 출처 `/api` BFF, 사용자별 금융 query/mutation | 은행·이체 화면 연결은 후속 |
 | 상태 | TanStack Query와 React 로컬 state/ref | Zustand는 아직 없음. 여러 화면 공통의 비서버 UI 상태가 필요할 때 검토 |
 | 모바일 | 웹·모바일이 공유할 계약 설계 | React Native·Expo 및 모바일 인증/화면은 미구현 |
@@ -134,7 +134,8 @@ TanStack Query와 ky의 일반 자동 재시도는 꺼져 있다. 위 갱신은 
 | `/login` | `LoginPage` → `SignInForm` / `ProviderButtons` | 이메일 로그인은 `/app` 이동 |
 | `/sign-up` | `SignUpPage` → `SignUpForm` / `ProviderButtons` | 이메일 가입 수락 시 `/verify-email` 이동 |
 | `/verify-email` | `VerifyEmailPage` → `AuthStatus` | 안내만 표시. 여기서 메일을 발송하거나 인증 여부를 조회하지 않음 |
-| `/forgot-password` | `ForgotPasswordPage` → `PasswordResetRequestForm` | 계정 존재 여부를 숨긴 메일 안내 |
+| `/forgot-password` | `ForgotPasswordPage` → `PasswordResetRequestForm` | 비로그인 공개 요청. 사용자 승인 정책에 따라 미가입은 404 오류, 접수는 발송 요청 안내 |
+| `/forgot-password/invalid-link` | `InvalidRecoveryLinkPage` | 만료·실패 복구 링크의 공개 안내와 재요청 이동. 로그인 불필요 |
 | `/reset-password` | `ResetPasswordPage` → `PasswordUpdateForm` | 비밀번호 변경 후 `/login` 이동 |
 
 OAuth는 외부 계정으로 로그인하는 절차다. `ProviderButtons.begin(provider, label)`은 전체 공급자 버튼을 진행 상태로 잠그고 `start(provider)`를 기다린다. query 계층과 버튼 양쪽에서 계속 경로를 확인한다.

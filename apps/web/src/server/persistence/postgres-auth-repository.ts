@@ -13,6 +13,7 @@ import type {
   RotateSessionInput,
 } from "./auth-repository.js";
 import type { TokenEnvelope } from "../security/token-envelope.js";
+import { PROVIDER_CLOCK_SKEW_SECONDS } from "../security/provider-time.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const IDLE_LIFETIME_MS = 7 * DAY_MS;
@@ -146,12 +147,14 @@ function toRecord(value: unknown): AuthSessionRecord | null {
 function toOAuthRecord(value: unknown): OAuthTransactionRecord | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
+  if (row.intent !== "sign_in" && row.intent !== "sign_up") return null;
   if (!isUuid(String(row.id)) || !validDigest(row.stateHash) || !validDigest(row.interactionHash) || !["google", "kakao", "naver"].includes(String(row.provider)) || !validEnvelope(row.encryptedPkceVerifier) || !["/app", "/settings/security"].includes(String(row.returnPath)) || !validDate(row.createdAt) || !validDate(row.expiresAt) || (row.consumedAt !== null && !validDate(row.consumedAt))) return null;
   return {
     id: row.id as string,
     stateHash: Uint8Array.from(row.stateHash),
     interactionHash: Uint8Array.from(row.interactionHash),
     provider: row.provider as OAuthTransactionRecord["provider"],
+    intent: row.intent,
     encryptedPkceVerifier: row.encryptedPkceVerifier,
     returnPath: row.returnPath as OAuthTransactionRecord["returnPath"],
     createdAt: new Date(row.createdAt),
@@ -392,6 +395,7 @@ export class PostgresAuthRepository implements AuthRepository {
       stateHash: toBuffer(input.stateHash),
       interactionHash: toBuffer(input.interactionHash),
       provider: input.provider,
+      intent: input.intent,
       encryptedPkceVerifier: input.encryptedPkceVerifier,
       returnPath: input.returnPath,
       createdAt: new Date(input.createdAt),
@@ -576,7 +580,8 @@ export class PostgresAuthRepository implements AuthRepository {
       if (rows.length !== 1) return false;
       await transaction.insert(authUserSecurityState).values({ userId: input.userId, minimumAcceptedIat: 0 }).onConflictDoNothing();
       const gates = await transaction.update(authUserSecurityState).set({
-        minimumAcceptedIat: sql`greatest(${authUserSecurityState.minimumAcceptedIat}, floor(extract(epoch from clock_timestamp()))::bigint + 1)`,
+        // Auth가 DB보다 최대 허용 오차만큼 앞서 발급한 변경 전 토큰도 다시 세션이 되지 못하게 한다.
+        minimumAcceptedIat: sql`greatest(${authUserSecurityState.minimumAcceptedIat}, floor(extract(epoch from clock_timestamp()))::bigint + ${PROVIDER_CLOCK_SKEW_SECONDS} + 1)`,
       }).where(eq(authUserSecurityState.userId, input.userId)).returning();
       if (gates.length !== 1) throw new Error("AUTH_USER_SECURITY_STATE_LOCK_FAILED");
       await transaction.update(authSessions).set({ revokedAt: new Date(input.now) }).where(and(

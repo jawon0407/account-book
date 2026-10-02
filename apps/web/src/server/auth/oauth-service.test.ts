@@ -34,6 +34,7 @@ type RecordShape = {
   stateHash: Uint8Array;
   interactionHash: Uint8Array;
   provider: "google" | "kakao" | "naver";
+  intent: "sign_in" | "sign_up";
   encryptedPkceVerifier: TokenEnvelope;
   returnPath: "/app" | "/settings/security";
   createdAt: Date;
@@ -133,6 +134,40 @@ function digest(value: string): Uint8Array {
 }
 
 describe("OAuthService", () => {
+  it.each(["google", "kakao", "naver"])("requires login continuation after %s signup without issuing an app session", async (provider) => {
+    const subject = setup();
+    await subject.service.start(provider, { ...subject.startContext, intent: "sign_up" });
+    expect(subject.repository.record?.intent).toBe("sign_up");
+    const result = await subject.service.complete({ provider, state, code: "provider-code", intent: "sign_in" }, subject.completeContext);
+    expect(result).toEqual({ status: "sign_in_required" });
+    expect(subject.sessions.create).not.toHaveBeenCalled();
+    expect(subject.repository.record?.consumedAt).not.toBeNull();
+    await expect(subject.service.complete({ provider, state, code: "provider-code" }, subject.completeContext)).rejects.toMatchObject({ code: "AUTH_OAUTH_TRANSACTION_INVALID" });
+  });
+
+  it("defaults omitted intent to login and ignores callback signup intent", async () => {
+    const subject = setup();
+    await subject.service.start("google", subject.startContext);
+    expect(subject.repository.record?.intent).toBe("sign_in");
+    await expect(subject.service.complete({ provider: "google", state, code: "code", intent: "sign_up" }, subject.completeContext)).resolves.toMatchObject({ selector: "opaque-session-selector" });
+  });
+
+  it("still validates provider identity before allowing signup continuation", async () => {
+    const subject = setup();
+    await subject.service.start("google", { ...subject.startContext, intent: "sign_up" });
+    subject.provider.exchangeOAuthCode.mockResolvedValueOnce({ ...tokens, userId: transactionId });
+    await expect(subject.service.complete({ provider: "google", state, code: "code" }, subject.completeContext)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    expect(subject.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed persisted intent before provider exchange", async () => {
+    const subject = setup();
+    await subject.service.start("google", subject.startContext);
+    Object.assign(subject.repository.record!, { intent: "admin" });
+    await expect(subject.service.complete({ provider: "google", state, code: "code" }, subject.completeContext)).rejects.toMatchObject({ code: "AUTH_OAUTH_TRANSACTION_INVALID" });
+    expect(subject.provider.exchangeOAuthCode).not.toHaveBeenCalled();
+  });
+
   it("persists only digests and an encrypted verifier before returning the authorize URL", async () => {
     const subject = setup();
     const result = await subject.service.start("google", subject.startContext) as Record<string, unknown>;
@@ -185,6 +220,21 @@ describe("OAuthService", () => {
 
     await expect(subject.service.complete({ provider: "google", state, code: "code" }, subject.completeContext)).resolves.toMatchObject({ selector: "opaque-session-selector" });
     expect(subject.sessions.create).toHaveBeenCalledWith(expect.objectContaining({ issuedAtSeconds: nextSecondTokens.issuedAtSeconds }), providerCompletedAt);
+  });
+
+  it.each([60, 61])("bounds provider issuance skew at %s seconds without rewriting provider timestamps", async (ahead) => {
+    const subject = setup(() => now);
+    const issuedAtSeconds = Math.floor(now.getTime() / 1000) + ahead;
+    subject.provider.exchangeOAuthCode.mockResolvedValueOnce({ ...tokens, issuedAtSeconds, accessTokenExpiresAt: new Date(now.getTime() + 120_000) });
+    await subject.service.start("google", subject.startContext);
+    const completed = subject.service.complete({ provider: "google", state, code: "code" }, subject.completeContext);
+    if (ahead === 60) {
+      await expect(completed).resolves.toMatchObject({ selector: "opaque-session-selector" });
+      expect(subject.sessions.create).toHaveBeenCalledWith(expect.objectContaining({ issuedAtSeconds, accessTokenExpiresAt: new Date(now.getTime() + 120_000) }), now);
+    } else {
+      await expect(completed).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+      expect(subject.sessions.create).not.toHaveBeenCalled();
+    }
   });
 
   it("creates a session for an adapter-verified social identity without inventing an email", async () => {
@@ -247,6 +297,8 @@ describe("OAuthService", () => {
   });
 
   it.each([
+    { intent: "admin" },
+    { intent: null },
     { returnPath: "/admin" },
     { callbackBaseUrl: new URL("http://public.example.test/callback") },
     { callbackBaseUrl: new URL("https://user:pass@app.example.test/callback") },

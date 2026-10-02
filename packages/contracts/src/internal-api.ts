@@ -21,6 +21,8 @@ export const DelegatedScopeSchema = z.enum([
   "transaction:read",
   "transaction:write",
   "dashboard:read",
+  "bank-connection:read",
+  "bank-connection:write",
 ]);
 export type DelegatedScope = z.infer<typeof DelegatedScopeSchema>;
 

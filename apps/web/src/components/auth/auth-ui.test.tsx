@@ -180,7 +180,7 @@ describe("authentication forms", () => {
     render(<PasswordResetRequestForm submit={async () => undefined} />);
     await user.type(screen.getByLabelText("이메일"), "person@example.test");
     await user.click(screen.getByRole("button", { name: "재설정 링크 받기" }));
-    expect(screen.getByRole("status").textContent).toContain("메일함을 확인해 주세요");
+    expect(screen.getByRole("status").textContent).toContain("재설정 메일 발송을 요청했어요");
     cleanup();
 
     render(<PasswordUpdateForm submit={async () => undefined} />);
@@ -188,6 +188,7 @@ describe("authentication forms", () => {
     await user.type(screen.getByLabelText("새 비밀번호"), "new-safe-password");
     await user.click(screen.getByRole("button", { name: "비밀번호 변경" }));
     expect(screen.getByRole("status").textContent).toContain("비밀번호를 변경했어요");
+    expect(screen.getByRole("status").textContent).toContain("1~2분");
   });
 });
 

@@ -3,7 +3,7 @@ import {
   AccountSchema, AccountListResponseSchema, CreateAccountInputSchema, UpdateAccountInputSchema, ArchiveAccountInputSchema,
   CategorySchema, CategoryListResponseSchema, CreateCategoryInputSchema, UpdateCategoryInputSchema, ArchiveCategoryInputSchema,
   LedgerIdSchema,
-  TransactionSchema, TransactionListResponseSchema, CreateTransactionInputSchema,
+  TransactionSchema, TransactionListResponseSchema, CreateTransactionInputSchema, UpdateTransactionInputSchema, DeleteTransactionInputSchema, TransactionTombstoneSchema,
 } from "@account-book/contracts";
 import type { DelegatedScope } from "@account-book/contracts/internal-api";
 import type { z } from "zod";
@@ -11,7 +11,7 @@ import { CoreBoundaryError } from "./http-boundary.js";
 import { transactionTarget } from "./transaction-target.js";
 
 type Operation = Readonly<{
-  method: "GET" | "POST" | "PATCH";
+  method: "GET" | "POST" | "PATCH" | "DELETE";
   scope: DelegatedScope;
   path: "/v1/profile" | "/v1/accounts" | "/v1/categories" | "/v1/transactions";
   item?: true;
@@ -24,6 +24,8 @@ type Operation = Readonly<{
 
 /** 코드가 선택하는 닫힌 작업 표. 브라우저는 내부 주소·scope·응답 계약을 지정할 수 없다. */
 const operations = {
+  transactionsUpdate: { method: "PATCH", scope: "transaction:write", path: "/v1/transactions", item: true, input: UpdateTransactionInputSchema, output: TransactionSchema, status: 200 },
+  transactionsDelete: { method: "DELETE", scope: "transaction:write", path: "/v1/transactions", item: true, input: DeleteTransactionInputSchema, output: TransactionTombstoneSchema, status: 200 },
   transactionsList: { method: "GET", scope: "transaction:read", path: "/v1/transactions", list: true, output: TransactionListResponseSchema, status: 200 },
   transactionsCreate: { method: "POST", scope: "transaction:write", path: "/v1/transactions", input: CreateTransactionInputSchema, output: TransactionSchema, status: 201 },
   profileGet: { method: "GET", scope: "profile:read", path: "/v1/profile", output: ProfileSchema, status: 200 },

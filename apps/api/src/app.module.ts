@@ -3,6 +3,7 @@ import { APP_FILTER } from "@nestjs/core";
 import { ApiErrorFilter } from "./common/api-error.filter.js";
 import { MeModule } from "./me/me.module.js";
 import { CoreModule } from "./core/core.module.js";
+import { BankModule } from "./bank-connections/bank.module.js";
 
 @Controller("health")
 class HealthController {
@@ -18,7 +19,7 @@ class HealthController {
 
 /** 공개 상태 확인, 보호된 사용자 조회, 내부 오류를 숨기는 공통 오류 필터를 연결한다. */
 @Module({
-  imports: [MeModule, CoreModule],
+  imports: [MeModule, CoreModule, BankModule],
   controllers: [HealthController],
   providers: [{ provide: APP_FILTER, useClass: ApiErrorFilter }],
 })

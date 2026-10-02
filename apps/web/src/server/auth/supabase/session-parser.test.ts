@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
-import { accepted, tokenPair } from "./session-parser.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { SupabaseAuthAdapter } from "../supabase-auth-adapter.js";
+import { accepted, rawTokenPair, tokenPair } from "./session-parser.js";
 import {
   accessToken,
   adapter,
@@ -20,6 +21,7 @@ import {
 } from "./test-fixtures.js";
 
 vi.mock("server-only", () => ({}));
+afterEach(() => vi.restoreAllMocks());
 
 it("validates errors even when no result data is expected", () => {
   expect(() => accepted({ error: { status: 429 } })).toThrow("AUTH_RATE_LIMITED");
@@ -45,11 +47,66 @@ const overflowRawSession = { ...rawSession, access_token: overflowAccessToken, e
 const overflowSdkSession = { ...session, access_token: overflowAccessToken, expires_at: overflowExpiresAtSeconds };
 
 describe("Supabase session parsing through public flows", () => {
+  it.each([1, 60])("accepts provider issuance %i seconds ahead without changing the JWT expiry", (skewSeconds) => {
+    vi.spyOn(Date, "now").mockReturnValue(issuedAtSeconds * 1000);
+    const response = { ...rawSession, access_token: jwt({ iat: issuedAtSeconds + skewSeconds, exp: nowSeconds + skewSeconds }), expires_at: nowSeconds + skewSeconds };
+    for (const parse of [tokenPair, rawTokenPair]) {
+      expect(parse(response)).toMatchObject({ issuedAtSeconds: issuedAtSeconds + skewSeconds, accessTokenExpiresAt: new Date((nowSeconds + skewSeconds) * 1000) });
+    }
+  });
+
+  it.each([61, 3600])("rejects provider issuance %i seconds ahead on both token paths", (skewSeconds) => {
+    vi.spyOn(Date, "now").mockReturnValue(issuedAtSeconds * 1000);
+    const response = { ...rawSession, access_token: jwt({ iat: issuedAtSeconds + skewSeconds, exp: nowSeconds + skewSeconds }), expires_at: nowSeconds + skewSeconds };
+    for (const parse of [tokenPair, rawTokenPair]) expect(() => parse(response)).toThrow("AUTH_PROVIDER_UNAVAILABLE");
+  });
+
+  it.each([-60, -1, 1, 60])("uses JWT expiry when SDK absolute expiry differs by %i seconds", (difference) => {
+    vi.spyOn(Date, "now").mockReturnValue(issuedAtSeconds * 1000);
+    expect(tokenPair({ ...session, expires_at: nowSeconds + difference }).accessTokenExpiresAt).toEqual(new Date(nowSeconds * 1000));
+    expect(() => rawTokenPair({ ...rawSession, expires_at: nowSeconds + difference })).toThrow("AUTH_PROVIDER_UNAVAILABLE");
+  });
+
+  it.each([-61, 61])("rejects SDK expiry drift of %i seconds", (difference) => {
+    vi.spyOn(Date, "now").mockReturnValue(issuedAtSeconds * 1000);
+    expect(() => tokenPair({ ...session, expires_at: nowSeconds + difference })).toThrow("AUTH_PROVIDER_UNAVAILABLE");
+  });
+
+  it.each([0, -1])("does not extend an actually expired JWT by the skew allowance (%i seconds)", (difference) => {
+    vi.spyOn(Date, "now").mockReturnValue(issuedAtSeconds * 1000);
+    const response = { ...rawSession, access_token: jwt({ iat: issuedAtSeconds - 3600, exp: issuedAtSeconds + difference }), expires_at: issuedAtSeconds + 60, expires_in: 3600 + difference };
+    for (const parse of [tokenPair, rawTokenPair]) expect(() => parse(response)).toThrow("AUTH_PROVIDER_UNAVAILABLE");
+  });
+
+  it.each(["signInWithPassword", "refresh"] as const)("accepts the real SDK's synthesized expiry after %s", async (operation) => {
+    vi.spyOn(Date, "now").mockReturnValue(issuedAtSeconds * 1000 + 750);
+    const response = { ...rawSession, expires_at: undefined };
+    const fetcher = vi.fn<typeof fetch>(async () => jsonResponse(response));
+    const subject = new SupabaseAuthAdapter({ url: "https://project.supabase.co", anonKey: "anon-key" }, undefined, fetcher);
+    const result = operation === "signInWithPassword"
+      ? await subject.signInWithPassword({ email: "person@example.test", password: "a".repeat(12) })
+      : await subject.refresh("refresh-token");
+    expect(result.accessTokenExpiresAt).toEqual(new Date(nowSeconds * 1000));
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([1, 60])("accepts a newly confirmed email %i seconds ahead on both token paths", (skewSeconds) => {
+    vi.spyOn(Date, "now").mockReturnValue(issuedAtSeconds * 1000);
+    const response = { ...rawSession, user: { ...session.user, email_confirmed_at: new Date((issuedAtSeconds + skewSeconds) * 1000).toISOString() } };
+    for (const parse of [tokenPair, rawTokenPair]) expect(parse(response).user.emailVerified).toBe(true);
+  });
+
+  it("rejects email confirmation beyond the clock skew bound", () => {
+    vi.spyOn(Date, "now").mockReturnValue(issuedAtSeconds * 1000);
+    const response = { ...rawSession, user: { ...session.user, email_confirmed_at: new Date((issuedAtSeconds + 61) * 1000).toISOString() } };
+    for (const parse of [tokenPair, rawTokenPair]) expect(() => parse(response)).toThrow("AUTH_EMAIL_VERIFICATION_REQUIRED");
+  });
+
   it.each([
     ["missing JWT issuance", { access_token: jwt({ iat: undefined }) }, "AUTH_PROVIDER_UNAVAILABLE"],
     ["mismatched JWT subject", { access_token: jwt({ sub: "123e4567-e89b-12d3-a456-426614174099" }) }, "AUTH_PROVIDER_UNAVAILABLE"],
     ["missing JWT session", { access_token: jwt({ session_id: undefined }) }, "AUTH_PROVIDER_UNAVAILABLE"],
-    ["mismatched absolute expiry", { expires_at: nowSeconds + 1 }, "AUTH_PROVIDER_UNAVAILABLE"],
+    ["mismatched absolute expiry", { expires_at: nowSeconds + 61 }, "AUTH_PROVIDER_UNAVAILABLE"],
     ["unconfirmed email", { user: { ...session.user, email_confirmed_at: null } }, "AUTH_EMAIL_VERIFICATION_REQUIRED"],
   ] as const)("rejects an SDK-normalized session with %s", async (_label, override, expected) => {
     const malformed = { ...session, ...override };

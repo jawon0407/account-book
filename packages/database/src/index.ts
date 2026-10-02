@@ -3,6 +3,7 @@ export { apiJwtReplays } from "./schema/api.js";
 export { bankConnections } from "./schema/bank-connections.js";
 export { bankConnectionRequests } from "./schema/bank-requests.js";
 export { bankConnectionCredentials } from "./schema/bank-credentials.js";
+export { bankRequestLimits } from "./schema/bank-limits.js";
 export { profiles, userRoles, roleChangeEvents } from "./schema/identity.js";
 export { ledgerAccounts } from "./schema/ledger-accounts.js";
 export { ledgerCategories } from "./schema/ledger-categories.js";

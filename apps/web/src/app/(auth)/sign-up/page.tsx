@@ -10,7 +10,7 @@ import { oauthStartMutationOptions, signUpMutationOptions } from "../../../queri
 /**
  * 가입·소셜 로그인 mutation을 공통 인증 화면에 연결한다.
  * @returns 인증 화면 JSX. 페이지 매개변수는 받지 않는다.
- * @remarks 이메일 가입 수락 시 /verify-email로 이동한다. 소셜 로그인은 /app 복귀 경로를 사용한다.
+ * @remarks 이메일 가입 수락 시 /verify-email로 이동한다. 소셜 가입 의도는 서버에 저장되며 인증 완료 후 로그인 안내로 이어진다.
  */
 export default function SignUpPage() {
   const signUp = useMutation(signUpMutationOptions());
@@ -20,7 +20,7 @@ export default function SignUpPage() {
   return (
     <AuthShell title="계정 만들기" description="이메일로 시작하거나 익숙한 계정으로 안전하게 가입하세요." footer={<p>이미 계정이 있나요? <a href="/login">로그인으로 돌아가기</a></p>}>
       <SignUpForm submit={(input) => signUp.mutateAsync(input)} onSuccess={() => window.location.assign("/verify-email")} />
-      <ProviderButtons {...availability} start={(provider) => oauth.mutateAsync({ provider, returnPath: "/app" })} />
+      <ProviderButtons {...availability} intent="sign_up" start={(provider) => oauth.mutateAsync({ provider, returnPath: "/app", intent: "sign_up" })} />
     </AuthShell>
   );
 }

@@ -1,7 +1,8 @@
-import { expect, it, vi } from "vitest";
-import { adapter, client, issuedAtSeconds, jsonResponse, jwt, ok, rawSession, session, userId, verifier } from "./test-fixtures.js";
+import { afterEach, expect, it, vi } from "vitest";
+import { adapter, client, issuedAtSeconds, jsonResponse, jwt, nowSeconds, ok, rawSession, session, userId, verifier } from "./test-fixtures.js";
 
 vi.mock("server-only", () => ({}));
+afterEach(() => vi.restoreAllMocks());
 
 /** Supabase 서버가 반환하는 이메일 없는 OAuth 세션의 합성 fixture. 실제 계정·서명은 사용하지 않는다. */
 function social(provider = "kakao") {
@@ -22,6 +23,14 @@ it.each(["kakao", "naver"] as const)("accepts an email-less %s OAuth identity wi
 it("refreshes an email-less OAuth session without inventing an email", async () => {
   const result = await adapter([], client({ refreshSession: vi.fn(async () => ok({ session: social() })) })).adapter.refresh("refresh-token");
   expect(result.user).toEqual({ id: userId, email: null, emailVerified: false });
+});
+
+it.each([1, 60])("accepts OAuth proof and issuance skewed together by %i seconds", async (skewSeconds) => {
+  vi.spyOn(Date, "now").mockReturnValue(issuedAtSeconds * 1000);
+  const response = { ...social(), expires_at: nowSeconds + skewSeconds,
+    access_token: jwt({ iat: issuedAtSeconds + skewSeconds, exp: nowSeconds + skewSeconds, amr: [{ method: "oauth", timestamp: issuedAtSeconds + skewSeconds }], is_anonymous: false }) };
+  const result = await adapter([jsonResponse(response)]).adapter.exchangeOAuthCode({ code: "code", codeVerifier: verifier, provider: "kakao" });
+  expect(result).toMatchObject({ issuedAtSeconds: issuedAtSeconds + skewSeconds, user: { email: null, emailVerified: false } });
 });
 
 it.each([
