@@ -18,6 +18,7 @@ import { SupabaseAuthAdapter } from "./auth/supabase-auth-adapter.js";
 import { AuthController } from "./http/auth-controller.js";
 import { DelegatedApiClient } from "./http/delegated-api-client.js";
 import { CoreController } from "./core/core-controller.js";
+import { BankController } from "./bank-connections/bank-controller.js";
 import { PostgresAuthRepository } from "./persistence/postgres-auth-repository.js";
 import { SessionService } from "./session/session-service.js";
 import { DelegatedJwtSigner } from "./security/delegated-jwt-signer.js";
@@ -238,6 +239,7 @@ function databaseClient(connectionString: string): ReturnType<typeof createDatab
 export type RequestContainer = Readonly<{
   authController: AuthController;
   coreController: CoreController;
+  bankController: BankController;
   delegatedApiClient: DelegatedApiClient;
   delegatedJwtSigner: DelegatedJwtSigner;
 }>;
@@ -297,6 +299,8 @@ export function createRequestContainer(environment: Readonly<Record<string, stri
       delegatedJwtSigner,
       delegatedApiClient,
       authController,
+      // A6 공식 endpoint/공급자 검증 전에는 연결 시작을 활성화하지 않는다.
+      bankController: new BankController({ configuredOrigin: runtime.origin, csrfKey, now: () => new Date(), sessions, delegatedApiClient, authorizationEndpoint: null }),
       coreController: new CoreController({ configuredOrigin: runtime.origin, csrfKey, now: () => new Date(), sessions, delegatedApiClient }),
     };
   } catch {

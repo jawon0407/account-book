@@ -15,7 +15,7 @@ export type CoreDependencies = Readonly<{
 }>;
 
 /** @param request 브라우저 요청. @returns 중복/위조를 거부한 세션 선택자. DB 내용은 읽지 않는다. */
-function sessionSelector(request: Request): string {
+export function sessionSelector(request: Request): string {
   const values = (request.headers.get("cookie") ?? "").split(";").map((part) => part.trim()).filter((part) => part.split("=", 1)[0] === SESSION_COOKIE_NAME);
   try {
     if (values.length !== 1) throw new Error("INVALID_COOKIE");
@@ -26,7 +26,7 @@ function sessionSelector(request: Request): string {
 }
 
 /** @param error 경계/세션 오류. @returns 세부값을 숨긴 공개 응답. */
-function failure(error: unknown): Response {
+export function failure(error: unknown): Response {
   if (error instanceof CoreBoundaryError) return coreFailure(error.code, error.status);
   if (error instanceof AuthRequestRejectedError) return coreFailure("AUTH_CSRF_REJECTED", 403);
   if (error instanceof SessionOperationError) {
