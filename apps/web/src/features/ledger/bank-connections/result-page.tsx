@@ -6,6 +6,7 @@ import { Feedback, Loading } from "../feedback.js";
 import { createBankApi } from "./api.js";
 import { statusCopy, bankMessage } from "./status-copy.js";
 import styles from "../ledger.module.css";
+import bankStyles from "./bank.module.css";
 
 /** @param requestId 서버 페이지가 검증한 불투명 ID. URL은 권한이 아니며 BFF가 매번 본인을 확인한다. */
 export function BankResultPage({ requestId }: Readonly<{ requestId: string | null }>) {
@@ -25,10 +26,11 @@ function Result({ requestId }: Readonly<{ requestId: string }>) {
   function confirm() { if (sent.current || query.isFetching || query.isError || query.data?.status !== "awaiting_completion") return; sent.current = true; complete.mutate(); }
   if (query.isPending) return <section className={styles.panel}><Loading label="은행 연결 상태를 확인하는 중…" /></section>;
   const state = query.data?.status, copy = state ? statusCopy[state] : null;
-  return <section className={`${styles.panel} ${styles.profile} ${styles.form}`} aria-label="연결 상태" aria-busy={query.isFetching || complete.isPending}>
-    {query.isError ? <Feedback error message={bankMessage(query.error)} /> : copy && <><h2 aria-live="polite">{copy[0]}</h2><p>{copy[1]}</p></>}
+  const uncertain = sent.current && state === "awaiting_completion";
+  return <section className={`${styles.panel} ${styles.profile} ${styles.form} ${bankStyles.content}`} aria-label="연결 상태" aria-busy={query.isFetching || complete.isPending}>
+    {query.isError ? <Feedback error message={bankMessage(query.error)} /> : copy && <><h2 aria-live="polite">{uncertain ? "처리 결과를 확인해 주세요" : copy[0]}</h2><p>{uncertain ? "완료 요청은 이미 보냈어요. 상태 새로고침으로 결과를 확인하거나 새 연결을 시작해 주세요." : copy[1]}</p></>}
     {complete.isPending && <p role="status">연결을 확인하고 있어요. 화면을 닫지 말아 주세요…</p>}
-    {complete.isError && <Feedback error message={bankMessage(complete.error)} />}
+    {complete.isError && state !== "connected" && <Feedback error message={bankMessage(complete.error)} />}
     {query.isFetching && <p role="status">최신 상태를 확인하고 있어요…</p>}
     <div className={styles.actions}>
       <a className={styles.button} href="/app/bank-connections">은행 연결로</a>

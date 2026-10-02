@@ -6,6 +6,7 @@ import { Feedback } from "../feedback.js";
 import { createBankApi } from "./api.js";
 import { bankMessage } from "./status-copy.js";
 import styles from "../ledger.module.css";
+import bankStyles from "./bank.module.css";
 
 /** @param enabled 서버가 정한 준비 여부. A6 검증 전 기본 false; 브라우저 설정으로 활성화하지 않는다. */
 export function BankStartPage({ enabled = false }: Readonly<{ enabled?: boolean }>) {
@@ -17,7 +18,7 @@ export function BankStartPage({ enabled = false }: Readonly<{ enabled?: boolean 
   function connect() { if (!enabled || sent.current) return; sent.current = true; start.mutate(); }
   return <>
     <div className={styles.heading}><div><h1>은행 연결</h1><p>계좌 조회 동의를 통해 잔액과 입출금 내역을 확인하기 위한 연결이에요.</p></div></div>
-    <section className={`${styles.panel} ${styles.profile} ${styles.form}`} aria-label="은행 연결 안내">
+    <section className={`${styles.panel} ${styles.profile} ${styles.form} ${bankStyles.content}`} aria-label="은행 연결 안내">
       <h2>내 계좌를 안전하게 연결해요</h2>
       <p>장부에 직접 추가한 계좌와 은행 연결은 별개예요. 은행 비밀번호를 이 앱에 입력하지 않으며, 송금·출금 기능은 제공하지 않아요.</p>
       {!enabled && <Feedback message="은행 연결은 준비 중이에요. 공식 테스트 연동을 확인한 후 사용할 수 있어요." />}

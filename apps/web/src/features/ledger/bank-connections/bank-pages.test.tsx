@@ -37,8 +37,11 @@ it("offers only status refresh after an uncertain completion, never automatic re
   await waitFor(() => expect(screen.getByRole("alert")).toBeDefined());
   expect(screen.getByRole("alert").textContent).not.toContain("private token");
   expect(screen.queryByRole("button", { name: "연결 확인" })).toBeNull();
+  port.status.mockResolvedValue({ requestId: id, status: "connected" });
   fireEvent.click(screen.getByRole("button", { name: "상태 새로고침" }));
   await waitFor(() => expect(port.status).toHaveBeenCalledTimes(2)); expect(port.complete).toHaveBeenCalledOnce();
+  await screen.findByText("연결 인증을 완료했어요");
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 it.each([
   ["awaiting_callback", "은행 인증을 기다리고 있어요"], ["exchanging", "연결을 확인하고 있어요"],

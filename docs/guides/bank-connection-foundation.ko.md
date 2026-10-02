@@ -30,18 +30,18 @@ ID는 찾아가는 번호일 뿐, 내 자료인지 확인하는 검사는 별도
 브라우저용 공개 상태 계약, API 내부 연결 비밀값 생성·해시·만료 보조 함수와
 API 전용 토큰 암호화 봉투, A2.1 DB 테이블·권한, A2.2 요청 상태 함수, A2.3 공유 제한·정리,
 A3 저장소/서비스/HTTP endpoint와 테스트 공급자 port가 구현되어 있다. 은행 스키마의
-해당 Supabase 프로젝트 적용, 실제 은행 provider·BFF/UI는 아직 없다. 최신 검증은
-[A3 진행 기록](../status/2026-10-02-bank-api.ko.md)에서 확인한다.
+해당 Supabase 프로젝트 적용과 실제 은행 provider는 아직 없다. A4 BFF·PC 시작/결과 화면은
+기본 비활성으로 구현했다. 최신 검증은 [A4 진행 기록](../status/2026-10-02-bank-web.ko.md)에서 확인한다.
 
 ## 연결 비밀값과 만료
 
-API는 `createConnectionSecret()`으로 요청 state를 발급해야 한다. 후속 A4의
+API는 `createConnectionSecret()`으로 요청 state를 발급한다. A4의
 BFF는 API 모듈을 import하지 않고 별도로 연결 확인값(proof)을 생성해야 한다.
 두 값은 각각 독립적인 32바이트 난수다. BFF는 확인값 원문을 UI에 입력·표시하지
 않고 `HttpOnly`·`Secure`·`SameSite=Lax`·host-only(`Domain` 미지정) 쿠키에
 보관한다. API에는 원문 대신 해시만 보내야 한다. 한 값을 다른 용도로 재사용하면
 두 보안 목적이 같은 값에 의존하게 되어 유출·혼동 시 서로 대체되는 위험이 생긴다. 확인값은
-state 대신 쓸 수 없고 그 반대도 마찬가지다. 이 BFF 흐름은 아직 구현되지 않았다.
+state 대신 쓸 수 없고 그 반대도 마찬가지다. 이 BFF 흐름은 [A4](bank-web.ko.md)에서 구현했다.
 
 `hashConnectionSecret()`은 정규 base64url 입력만 받아 SHA-256 비교용 지문을 만든다.
 이는 암호화가 아니므로 원문을 복원할 수 없다. 따라서 원문 조회가 필요 없는 state와

@@ -1,6 +1,6 @@
 # 프로젝트 문서 지도 — 먼저 읽어 주세요
 
-은행 테스트 연결 최신(2026-10-02 A3): [NestJS API 진행 기록](status/2026-10-02-bank-api.ko.md), [초급 개발자용 흐름](guides/bank-api.ko.md). 시작·Callback·완료·상태 HTTP 경계와 가상 공급자 검증을 구현했다. 기본 런타임은 비활성이며 A4 BFF·PC 은행 화면 → A5 전체 통합 → A6 공식 KFTC 테스트가 남았다. 아래 날짜별 기록은 당시 범위를 보존한다.
+은행 테스트 연결 최신(2026-10-02 A4): [BFF·PC 진행 기록](status/2026-10-02-bank-web.ko.md), [초급 개발자용 흐름](guides/bank-web.ko.md). 세션·CSRF·확인 쿠키와 PC 시작/결과 화면을 구현했다. 공식 런타임은 비활성이며 A5 전체 가상 통합 → A6 공식 KFTC 테스트가 남았다. 앞선 A3는 [NestJS API 기록](status/2026-10-02-bank-api.ko.md)을 본다. 아래 날짜별 기록은 당시 범위를 보존한다.
 
 은행 테스트 연결 후속(2026-10-02): [A2.3 요청 제한·만료 정리](status/2026-10-02-bank-limits-cleanup.ko.md), [설계](superpowers/specs/2026-10-02-bank-limits-cleanup-design.md), [실행 계획](superpowers/plans/2026-10-02-bank-limits-cleanup.md). DB 함수 구현과 HTTP 활성화는 다르며 NestJS API·PC 연결 화면·공식 테스트는 후속이다. 사용자는 문의 메일 예약 완료를 알렸고 답변은 아직 확인하지 않았다.
 
@@ -18,7 +18,7 @@
 
 현재 로컬 인증 연결은 [2026-09-29 DB·서버 적용 기록](status/2026-09-29-local-supabase-auth-setup.ko.md)과 [초급 개발자용 로컬 인증 실행 가이드](guides/local-auth-development.ko.md)를 먼저 확인하세요. 개발 DB 역할·HTTPS·API는 연결했으며 `/app` 관리 화면도 구현했습니다. 운영 이메일·소셜 공급자 전체 여정은 별도 검증 항목입니다.
 
-앞선 통합 기준: 2026-09-29, main `b7ecd83` / 후속 `feature/bank-state-transitions`. 저장소 PUBLIC·main 보호를 적용했고 CI 보완 PR #14/#17, 은행 보안 기반 PR #13, 은행 DB 구조·권한(A2.1) PR #18은 정상 병합·main 검사까지 완료했습니다. A2.2는 2026-10-02 로컬 구현·DB271개·일반1,598개·lint·타입·독립 리뷰를 완료했고 아직 미커밋입니다. 이 문서는 **실제 구현**, **승인된 목표**, **검증하지 못한 운영 설정**을 구분합니다. 사용자는 1~2절부터, 초급 개발자는 3절의 순서대로 읽으면 됩니다.
+앞선 통합 기준: 2026-09-29, main `b7ecd83` / 후속 `feature/bank-state-transitions`. 저장소 PUBLIC·main 보호를 적용했고 CI 보완 PR #14/#17, 은행 보안 기반 PR #13, 은행 DB 구조·권한(A2.1) PR #18은 정상 병합·main 검사까지 완료했습니다. 이후 인증·거래·A2/A3 구현은 2026-10-02 `05b4006`으로 기능 브랜치에 커밋·푸시했습니다. A4의 최신 검증과 후속 전송 상태는 위 진행 기록을 봅니다. 이 문서는 **실제 구현**, **승인된 목표**, **검증하지 못한 운영 설정**을 구분합니다. 사용자는 1~2절부터, 초급 개발자는 3절의 순서대로 읽으면 됩니다.
 
 현재 우선순위는 완료된 PC 기본 관리·일반 거래 다음으로 은행 테스트 연결 → 조회·수집 → 별도 모바일입니다. 수동 시작 잔액·이체 화면 확장은 후순위입니다. 은행 후속은 [은행 DB 완료 기록](status/2026-09-28-bank-storage.ko.md), [저장 흐름](database/bank-connections.ko.md), [상태 처리 사전 점검](status/2026-09-29-bank-state-transitions-next.ko.md)을 읽습니다. [앞선 보호·CI 실행 결과](status/2026-09-28-public-protection-execution.ko.md), [전체 진행 지도](status/2026-09-24-project-map.ko.md)와 [Notion 기능별 현황](https://app.notion.com/p/817d15a21e174eac86a7d3608a21b457)에서 날짜별 구현·미완료를 확인합니다. 일반 작업은 반복 승인 없이 진행하되 규모·파일·검증 기록을 남깁니다.
 
@@ -28,7 +28,7 @@
 
 | 분야 | 이미 있는 코드 | 아직 없는 것 |
 | --- | --- | --- |
-| 웹 | 인증 화면, 금융 BFF 9경로/14동작, PC 계좌·분류·닉네임·거래 4화면과 ky/React Query | 메인 `/`, 시작 잔액·이체 입력, 대시보드·은행 연결 |
+| 웹 | 인증 화면, 금융 BFF 9경로/14동작 + 은행 BFF3경로, PC 계좌·분류·닉네임·거래 및 은행 시작/결과 화면 | 메인 `/`, 시작 잔액·이체 입력, 대시보드·공식 은행 활성화 |
 | 백엔드 | `/health`, `/v1/me`, 요청 결속 JWT·재사용 방어, 기본 API10동작+거래4동작, A3 은행 연결4경로(기본 비활성) | 시작 잔액·이체 쓰기, 공식 은행 adapter·조회/수집 활성화 |
 | 데이터베이스 | 인증6개+replay1개, 회원3개·원장5개 개발 Supabase 적용, 은행 저장3개+제한1개 SQL, 상태 함수6개·공유 제한·만료 정리 및 A3 저장소/HTTP 경계 연결 | 은행 스키마의 해당 프로젝트 적용·정리 주기 실행, 운영 검증 |
 | 공용 계약 | 프로필·계좌·분류·거래·이체 Zod 검증, UUID 정규화; 프로필·계좌·분류·일반 거래 저장 연결 | 시작 잔액·이체 저장 및 화면 연결 |
@@ -71,7 +71,7 @@ BFF는 웹 브라우저를 대신해 세션과 서버 간 요청을 처리하는
 3. 인증 디자인: [2026-08-25 접근성 우선 뉴모피즘](superpowers/specs/2026-08-25-accessible-neumorphism-auth-design.md).
 4. 금융 입력/응답: [2026-08-26 공개 계약 설계](superpowers/specs/2026-08-26-ledger-public-contracts-design.md) + 실제 `packages/contracts/src`.
 5. 저장소 보호: [무료·공개 기본 보호 설계](superpowers/specs/2026-09-24-public-repository-branch-protection-design.md) + [실제 적용·검증](status/2026-09-28-public-protection-execution.ko.md). 실금융 운영 보안 검증과는 구분합니다.
-6. 은행 연결: [A2.1 저장 구조·권한 설계](superpowers/specs/2026-09-28-bank-storage-design.md) + [A2.2 상태 처리 설계](superpowers/specs/2026-10-01-bank-state-transitions-design.md) + [A2.3 요청 제한·정리 설계](superpowers/specs/2026-10-02-bank-limits-cleanup-design.md) + [A3 HTTP 경계 설계](superpowers/specs/2026-10-02-bank-api-design.md). A3까지 로컬 구현했고 BFF/UI·공식 adapter·정리 주기 실행·운영 적용은 후속입니다.
+6. 은행 연결: [A2.1 저장 구조·권한 설계](superpowers/specs/2026-09-28-bank-storage-design.md) + [A2.2 상태 처리 설계](superpowers/specs/2026-10-01-bank-state-transitions-design.md) + [A2.3 요청 제한·정리 설계](superpowers/specs/2026-10-02-bank-limits-cleanup-design.md) + [A3 HTTP 경계 설계](superpowers/specs/2026-10-02-bank-api-design.md) + [A4 BFF·PC 설계](superpowers/specs/2026-10-02-bank-web-design.md). A4까지 로컬 구현했고 전체 가상 통합·공식 adapter·정리 주기 실행·운영 적용은 후속입니다.
 7. 회원·기본 원장: [실제 스키마 적용](status/2026-09-29-core-schema-application.ko.md) + [새 Nest API 설계](superpowers/specs/2026-09-29-core-api-design.md). PC 장부는 사용자 제공 Figma 사이트의 표·탭·청록색 기준을 새 참조로 기록했으며 기존 로그인 CSS는 유지합니다.
 8. PC 장부 관리: [2026-09-30 설계](superpowers/specs/2026-09-30-core-web-design.md)와 [파일별 실행 계획](superpowers/plans/2026-09-30-core-web.md). PC 웹은 실제 Playwright 검증을 필수로 진행합니다.
 
