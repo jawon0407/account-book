@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { BankStartPage } from "./start-page.js";
@@ -10,9 +10,9 @@ const port = vi.hoisted(() => ({ start: vi.fn(), complete: vi.fn(), status: vi.f
 vi.mock("../session.js", () => ({ useLedgerUser: () => "123e4567-e89b-42d3-a456-426614174001" }));
 vi.mock("./api.js", () => ({ createBankApi: () => port }));
 /** @param child 실제 화면. 요청 캐시는 각 테스트별로 격리한다. */
-function show(child: React.ReactNode) { return render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })}>{child}</QueryClientProvider>); }
+function show(child: React.ReactNode, client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })) { return render(<QueryClientProvider client={client}>{child}</QueryClientProvider>); }
 beforeEach(() => { vi.resetAllMocks(); port.status.mockResolvedValue({ requestId: id, status: "awaiting_completion" }); });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.unstubAllGlobals(); });
 
 it("clearly disables unconfigured bank linking without pretending manual accounts are bank connections", () => {
   show(<BankStartPage />);
@@ -42,6 +42,31 @@ it("offers only status refresh after an uncertain completion, never automatic re
   await waitFor(() => expect(port.status).toHaveBeenCalledTimes(2)); expect(port.complete).toHaveBeenCalledOnce();
   await screen.findByText("연결 인증을 완료했어요");
   expect(screen.queryByRole("alert")).toBeNull();
+});
+it("does not recreate private cache when completion arrives after the auth boundary closes", async () => {
+  let finish!: (value: { requestId: string; status: string }) => void;
+  port.complete.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
+  const view = show(<BankResultPage requestId={id} />, client);
+  fireEvent.click(await screen.findByRole("button", { name: "연결 확인" }));
+  await waitFor(() => expect(port.complete).toHaveBeenCalledOnce());
+  view.unmount(); await client.cancelQueries(); client.clear();
+  const cacheWrite = vi.spyOn(client, "setQueryData");
+  await act(async () => { finish({ requestId: id, status: "connected" }); });
+  expect(cacheWrite).not.toHaveBeenCalled();
+  expect(client.getQueryCache().getAll()).toHaveLength(0);
+});
+it("does not navigate to a late authorization URL after the start screen closes", async () => {
+  let finish!: (value: { requestId: string; authorizationUrl: string }) => void;
+  port.start.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+  const view = show(<BankStartPage enabled />);
+  fireEvent.click(screen.getByRole("button", { name: "은행 연결 시작" }));
+  await waitFor(() => expect(port.start).toHaveBeenCalledOnce());
+  view.unmount();
+  const navigate = vi.fn();
+  vi.stubGlobal("window", new Proxy(window, { get: (target, key) => key === "location" ? { assign: navigate } : Reflect.get(target, key) }));
+  await act(async () => { finish({ requestId: id, authorizationUrl: "https://bank.invalid/authorize" }); });
+  expect(navigate).not.toHaveBeenCalled();
 });
 it.each([
   ["awaiting_callback", "은행 인증을 기다리고 있어요"], ["exchanging", "연결을 확인하고 있어요"],

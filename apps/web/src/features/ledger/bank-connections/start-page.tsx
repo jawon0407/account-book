@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { useLedgerUser } from "../session.js";
 import { Feedback } from "../feedback.js";
@@ -12,8 +12,11 @@ import bankStyles from "./bank.module.css";
 export function BankStartPage({ enabled = false }: Readonly<{ enabled?: boolean }>) {
   const userId = useLedgerUser(), [api] = useState(() => createBankApi(userId));
   const sent = useRef(false);
+  const active = useRef(false);
+  // 인증 경계가 닫히면 이전 요청의 응답으로 은행 화면을 열지 않는다. StrictMode 재실행도 허용한다.
+  useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const start = useMutation({ mutationFn: () => api.start(), retry: false, gcTime: 0,
-    onSuccess: result => { window.location.assign(result.authorizationUrl); } });
+    onSuccess: result => { if (active.current) window.location.assign(result.authorizationUrl); } });
   /** 한 화면에서 한 번만 시작한다. 결과가 불확실하면 새로고침 후 새 의도로 시작한다. */
   function connect() { if (!enabled || sent.current) return; sent.current = true; start.mutate(); }
   return <>

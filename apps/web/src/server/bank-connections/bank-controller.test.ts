@@ -10,7 +10,7 @@ const id = "123e4567-e89b-42d3-a456-426614174001", sid = "123e4567-e89b-42d3-a45
 const now = new Date("2040-01-01T00:00:00Z"), key = Buffer.alloc(32, 71);
 const selector = Buffer.alloc(32, 72).toString("base64url"), proof = Buffer.alloc(32, 73).toString("base64url");
 const url = `${endpoint}?state=${Buffer.alloc(32, 74).toString("base64url")}`;
-const proofCookie = `__Host-ab_bank_proof=${id}.${proof}`;
+const proofCookie = `__Host-ab_bank_proof_${id}=${id}.${proof}`;
 
 /** @param reply 내부 API 결과. DB/네트워크만 대체하고 BFF 검증은 실제 실행한다. */
 function setup(reply = Response.json({ requestId: id, authorizationUrl: url }), enabled = true) {
@@ -81,13 +81,35 @@ describe("bank BFF", () => {
     expect(JSON.parse(new TextDecoder().decode(call[0].body))).toEqual({ requestId: id, proofDigest: createHash("sha256").update(Buffer.from(proof, "base64url")).digest("hex") });
     expect(f.delegatedApiClient.request).toHaveBeenCalledOnce();
   });
-  it.each(["", `${proofCookie}; ${proofCookie}`, `__Host-ab_bank_proof=${sid}.${proof}`, `__Host-ab_bank_proof=${id}.bad`])("rejects missing/duplicate/mismatched proof before API call", async cookie => {
+  it.each(["", `${proofCookie}; ${proofCookie}`, `__Host-ab_bank_proof_${id}=${sid}.${proof}`, `__Host-ab_bank_proof_${id}=${id}.bad`])("rejects missing/duplicate/mismatched proof before API call", async cookie => {
     const f = setup(); await failure(await f.controller.handle("complete", request("complete", { requestId: id }, { cookie: `__Host-ab_session=${selector}; ${cookie}` })), 409, "BANK_REQUEST_CONFLICT"); expect(f.delegatedApiClient.request).not.toHaveBeenCalled();
   });
   it("never retries an uncertain completion and clears the consumed proof", async () => {
     const f = setup(); f.delegatedApiClient.request.mockRejectedValue(new Error("upstream-secret"));
     const response = await f.controller.handle("complete", request("complete", { requestId: id }));
     await failure(response, 502, "BANK_UNAVAILABLE"); expect(response.headers.get("set-cookie")).toContain("Max-Age=0"); expect(f.delegatedApiClient.request).toHaveBeenCalledOnce();
+  });
+  it("preserves a newer tab's proof when an older completion response arrives late", async () => {
+    const jar = new Map<string, string>();
+    /** @param response 브라우저가 응답 도착 순서대로 반영하는 Set-Cookie만 모사한다. */
+    function receive(response: Response) {
+      const cookie = response.headers.get("set-cookie")!;
+      const [name, value] = cookie.split(";")[0]!.split("=");
+      if (cookie.includes("Max-Age=0")) jar.delete(name!); else jar.set(name!, value!);
+    }
+    const cookies = () => `__Host-ab_session=${selector}; ${[...jar].map(([name, value]) => `${name}=${value}`).join("; ")}`;
+    const first = setup(); receive(await first.controller.handle("start", request()));
+    let finish!: (response: Response) => void;
+    first.delegatedApiClient.request.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
+    const late = first.controller.handle("complete", request("complete", { requestId: id }, { cookie: cookies() }));
+    await vi.waitFor(() => expect(first.delegatedApiClient.request).toHaveBeenCalledTimes(2));
+    const second = setup(Response.json({ requestId: sid, authorizationUrl: url }));
+    receive(await second.controller.handle("start", request()));
+    finish(Response.json({ requestId: id, status: "connected" })); receive(await late);
+    expect(jar.size).toBe(1);
+    second.delegatedApiClient.request.mockResolvedValue(Response.json({ requestId: sid, status: "connected" }));
+    const result = await second.controller.handle("complete", request("complete", { requestId: sid }, { cookie: cookies() }));
+    expect(result.status).toBe(200);
   });
   it.each(["awaiting_callback", "awaiting_completion", "exchanging", "connected", "cancelled", "expired", "failed"])("returns only authenticated request state: %s", async status => {
     const f = setup(Response.json({ requestId: id, status }, { headers: { "set-cookie": "upstream-secret" } })); const response = await f.controller.handle("status", request("status"), id);

@@ -13,11 +13,11 @@
 
 1. POST `/api/bank-connections/kftc/start`는 빈 JSON만 받는다. 세션 쿠키 중복/형식, Origin/Fetch Metadata, CSRF, 현재 세션과 화면 사용자 일치·접근 토큰 잔여 60초를 검증한다.
 2. BFF가 독립 32바이트 proof를 만든다. API에는 SHA-256 해시와 `channel:web`만 보낸다. 사용자/세션은 서버에서 정한다.
-3. 시작 응답의 정확한 UUID·허용 HTTPS origin/path·단일 표준 state를 검증한다. 쿠키는 `__Host-ab_bank_proof=requestId.proof`, HttpOnly/Secure/SameSite=Lax/Path=/, Max-Age=300. Domain 없음. 원본 proof는 JSON·URL·JS 저장소에 없다.
-4. 쿠키 자체는 권한이 아니다. API DB의 requestId+userId+sessionId+proofDigest 결속과 서버 만료가 최종 검증이다. 쿠키를 변조해 만료를 늘려도 DB 조건을 통과하지 못한다. 새 시작은 한 개 쿠키를 대체하며 이전 탭은 안전하게 실패한다.
+3. 시작 응답의 정확한 UUID·허용 HTTPS origin/path·단일 표준 state를 검증한다. 쿠키는 `__Host-ab_bank_proof_{requestId}=requestId.proof`, HttpOnly/Secure/SameSite=Lax/Path=/, Max-Age=300. Domain 없음. 원본 proof는 JSON·URL·JS 저장소에 없다.
+4. 쿠키 자체는 권한이 아니다. API DB의 requestId+userId+sessionId+proofDigest 결속과 서버 만료가 최종 검증이다. 쿠키를 변조해 만료를 늘려도 DB 조건을 통과하지 못한다. 독립 리뷰에서 발견한 동시 탭 경쟁을 막기 위해 요청별 이름으로 격리하며 이전 완료 응답은 그 요청 쿠키만 삭제한다. 각 쿠키는 5분 후 만료하고 API의 기존 사용자별 5분/5회 시작 제한을 유지한다. 여러 계정의 쿠키가 남더라도 현재 사용자·세션 결속을 우회하지 못한다.
 5. 결과 화면 `/app/bank-connections/result?requestId=UUID`는 정확히 이 매개변수 하나만 허용한다. code/state/token을 UI에 반사하지 않는다. GET 상태 조회는 사용자·세션을 다시 검증한다.
 6. `awaiting_completion` 상태에서 사용자가 ‘연결 확인’을 누르면 POST complete가 `{requestId}`만 받는다. 쿠키의 ID와 일치하는 proof 해시만 API에 보낸다. 외부 Callback GET이나 React effect는 코드 교환을 실행하지 않는다.
-7. complete를 전송한 뒤에는 성공/실패/응답 유실 모두 해당 proof 쿠키를 지운다. UI는 자동 재전송하지 않고 상태 조회만 제안한다. 늦은 응답/새로고침/StrictMode에서도 API claim이 단일 교환을 보장한다.
+7. complete를 전송한 뒤에는 성공/실패 모두 해당 요청의 proof 삭제 헤더를 반환한다. 응답 자체가 유실되면 브라우저 쿠키가 만료까지 남을 수 있지만, UI는 자동 재전송하지 않고 상태 조회만 제안한다. 늦은 응답/새로고침/StrictMode에서도 API claim이 단일 교환을 보장한다. 화면 unmount 뒤 늦게 도착한 시작·완료 응답은 리다이렉트/캐시 갱신을 하지 않는다.
 8. BFF JSON/페이지는 private no-store·no-referrer. 상류 헤더/원문 오류를 복사하지 않고, 정해진 은행 오류·상태만 허용한다. 은행 토큰·code·session token은 브라우저에 없다.
 
 ## 시간·오류

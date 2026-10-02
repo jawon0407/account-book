@@ -40,22 +40,23 @@ PC 상태 조회 ← 공개 상태만 반환 ← API 암호화 저장
 - `handle(operation, request, requestId?)`: 작업은 start/complete/status 중 서버 라우트가 고른 값이다. Request는 쿠키·Origin·CSRF를 포함한다. 마지막 ID는 status 경로에만 사용한다.
 - `bankIdentity(deps, request)`: 세션 쿠키가 정확히 하나인지, 변경 요청에 CSRF가 맞는지 검사한다. 사용자 ID는 요청 body가 아니라 현재 세션에서 가져온다. 화면이 열린 뒤 계정이 바뀌면 헤더의 추가 일치 조건으로 거부한다.
 - `createProof()`/`proofDigest(proof)`: 32바이트 난수를 만들고 원본 바이트를 SHA-256으로 변환한다. 해시를 알고 원본을 복원할 수는 없다.
-- `readProof(request, requestId)`: 쿠키를 한 개만 허용하고 대상 ID가 다르거나 난수가 비정규 형식이면 중단한다.
+- `readProof(request, requestId)`: 해당 요청 이름의 쿠키를 정확히 한 개만 허용하고 값의 ID가 다르거나 난수가 비정규 형식이면 중단한다.
+- `clearProofCookie(requestId)`: 이 요청의 쿠키만 지운다. 다른 탭에서 새로 시작한 요청의 쿠키에는 영향을 주지 않는다.
 - `createBankApi(userId, http?)`: userId는 화면의 계정이 바뀌지 않았다는 추가 조건이며 로그인 권한 자체가 아니다. http는 ky 전송 경계다. start는 빈 JSON, complete는 requestId만 보내며 proof를 읽지 않는다.
 
 ## 확인 쿠키는 왜 필요한가
 
-공급자 `state`만으로는 ‘이 브라우저에서 시작한 내 연결’임을 충분히 확인하지 못한다. BFF는 별도의 `__Host-ab_bank_proof`를 HttpOnly·Secure·SameSite=Lax·Path=/·5분으로 저장한다. JavaScript는 읽을 수 없다. 원본은 API에 전달하지 않고 해시만 전달한다.
+공급자 `state`만으로는 ‘이 브라우저에서 시작한 내 연결’임을 충분히 확인하지 못한다. BFF는 요청별 `__Host-ab_bank_proof_{requestId}`를 HttpOnly·Secure·SameSite=Lax·Path=/·5분으로 저장한다. JavaScript는 읽을 수 없다. 원본은 API에 전달하지 않고 해시만 전달한다.
 
-쿠키에는 요청 ID와 난수가 있지만 쿠키 자체가 권한은 아니다. 최종 판정은 API DB의 요청 ID·사용자·세션·해시·서버 만료다. 쿠키를 변조하거나 만료 속성을 바꿔도 서버 만료를 늘릴 수 없다. 단일 쿠키이므로 여러 탭에서 새 연결을 시작하면 이전 흐름이 실패할 수 있다. 이는 중복 연결보다 안전한 실패를 택한 정책이다.
+쿠키에는 요청 ID와 난수가 있지만 쿠키 자체가 권한은 아니다. 최종 판정은 API DB의 요청 ID·사용자·세션·해시·서버 만료다. 쿠키를 변조하거나 만료 속성을 바꿔도 서버 만료를 늘릴 수 없다. 이전 탭의 완료 응답이 늦게 와도 새 탭 쿠키를 삭제하지 않도록 요청별 이름을 쓴다. 기존 API 시작 제한은 사용자별 5분/5회이며, 소비하지 않은 쿠키도 5분 후 만료한다. 여러 계정의 쿠키가 남아 있어도 현재 세션 결속을 다시 확인한다.
 
-완료 POST를 보낸 뒤에는 결과가 성공인지 알 수 없더라도 proof 쿠키를 지운다. 화면은 같은 코드를 자동 재전송하지 않는다. 상태 조회로 성공이 확인되면 이전 실패 안내를 숨긴다. 상태가 계속 불확실하면 새 연결을 시작한다. 서버 API의 원자적 claim도 한 번의 교환을 보장한다.
+완료 POST를 위임한 뒤 BFF 응답은 해당 proof의 삭제 헤더를 담는다. 응답 자체가 유실되면 쿠키가 만료까지 남을 수 있으므로 서버의 원자적 claim이 중복 교환도 방지한다. 화면은 같은 코드를 자동 재전송하지 않는다. 상태 조회로 성공이 확인되면 이전 실패 안내를 숨긴다. 상태가 계속 불확실하면 새 연결을 시작한다.
 
 ## 시간 제한과 저장 정책
 
 은행 API 외부 교환은 최대8초다. 이 고정 complete POST에만 BFF12초, 브라우저 은행 요청15초, Next handler20초를 둔다. 일반 위임 API의3초는 바꾸지 않았다. 요청을 재시도하는 것과 결과를 조회하는 것은 다르다.
 
-BFF JSON은 `private, no-store`와 `no-referrer`, UI는 동적 렌더링과 no-referrer다. Next 개발 서버는 페이지 Cache-Control을 자체 값으로 덮어쓸 수 있으므로 production 응답을 별도로 검증한다. 은행 데이터는 SSR HTML에 넣지 않고 인증된 BFF로 읽는다. React Query는 현재 계정별 메모리 캐시만 쓰고 localStorage/sessionStorage에는 저장하지 않는다.
+BFF JSON은 `private, no-store`와 `no-referrer`, UI는 동적 렌더링과 no-referrer다. Next 개발 서버는 페이지 Cache-Control을 자체 값으로 덮어쓸 수 있으므로 production 응답을 별도로 검증한다. 은행 데이터는 SSR HTML에 넣지 않고 인증된 BFF로 읽는다. React Query는 현재 계정별 메모리 캐시만 쓰고 localStorage/sessionStorage에는 저장하지 않는다. 화면이 닫히면 active 확인값을 false로 바꿔 늦은 완료 응답의 캐시 재생성과 늦은 시작 응답의 은행 화면 이동을 막는다.
 
 ## 검증을 해석하는 법
 

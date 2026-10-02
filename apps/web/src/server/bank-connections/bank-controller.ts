@@ -60,7 +60,7 @@ export class BankController {
           }
         }
       } catch { response = bankError("BANK_UNAVAILABLE", 502); }
-      if (consumed) response.headers.set("Set-Cookie", clearProofCookie());
+      if (consumed) response.headers.set("Set-Cookie", clearProofCookie(id!));
       return privateBankResponse(response);
     } catch (error) { return bankFailure(error); }
   }

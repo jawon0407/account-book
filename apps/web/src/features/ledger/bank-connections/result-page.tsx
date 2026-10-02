@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLedgerUser } from "../session.js";
 import { Feedback, Loading } from "../feedback.js";
@@ -18,10 +18,13 @@ export function BankResultPage({ requestId }: Readonly<{ requestId: string | nul
 function Result({ requestId }: Readonly<{ requestId: string }>) {
   const userId = useLedgerUser(), [api] = useState(() => createBankApi(userId));
   const client = useQueryClient(), sent = useRef(false);
+  const active = useRef(false);
+  // 로그아웃/계정 변경으로 화면이 닫힌 뒤에는 지워진 사용자 캐시를 다시 만들지 않는다.
+  useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
   const queryKey = ["bank-connection", userId, requestId];
   const query = useQuery({ queryKey, queryFn: ({ signal }) => api.status(requestId, signal), retry: false, gcTime: 0, staleTime: 0, refetchOnWindowFocus: false, refetchOnReconnect: false });
   const complete = useMutation({ mutationFn: () => api.complete(requestId), retry: false, gcTime: 0,
-    onSuccess: result => client.setQueryData(queryKey, result) });
+    onSuccess: result => { if (active.current) client.setQueryData(queryKey, result); } });
   /** GET/마운트 효과는 완료를 실행하지 않는다. 동기 ref로 빠른 이중 클릭도 차단한다. */
   function confirm() { if (sent.current || query.isFetching || query.isError || query.data?.status !== "awaiting_completion") return; sent.current = true; complete.mutate(); }
   if (query.isPending) return <section className={styles.panel}><Loading label="은행 연결 상태를 확인하는 중…" /></section>;
