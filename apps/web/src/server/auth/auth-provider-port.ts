@@ -6,8 +6,8 @@ import type { AuthProvider, CurrentUser, SignInInput, SignUpInput } from "@accou
 export type EmailConfirmationInput = Readonly<{ code: string; codeVerifier: string }>;
 /** The approved provider, trusted callback, and canonical S256 challenge for OAuth. */
 export type OAuthStartInput = Readonly<{ provider: AuthProvider; redirectUrl: URL; codeChallenge: string }>;
-/** An OAuth authorization code and its matching server-owned PKCE verifier. */
-export type OAuthExchangeInput = Readonly<{ code: string; codeVerifier: string }>;
+/** OAuth 코드·서버 PKCE 검증값. provider는 저장된 트랜잭션에서 오며 생략 시 이메일 없는 계정을 허용하지 않는다. */
+export type OAuthExchangeInput = Readonly<{ code: string; codeVerifier: string; provider?: AuthProvider }>;
 /** A password-recovery code and its matching server-owned PKCE verifier. */
 export type RecoveryExchangeInput = Readonly<{ code: string; codeVerifier: string }>;
 /** Server-held recovery credentials used to update one password. */
@@ -119,7 +119,7 @@ export interface AuthProviderPort {
    */
   /**
    * OAuth 인증 코드와 서버에 저장한 PKCE 비밀값을 제공자 토큰으로 교환합니다.
-   * @param input OAuth 코드와 대응하는 PKCE 검증값.
+   * @param input OAuth 코드·서버 PKCE 검증값·저장된 제공자. 이메일 없는 계정은 어댑터에서 OAuth 신원 증거를 검증해야 한다.
    * @returns 검증된 서버 전용 토큰 쌍.
    * @throws 트랜잭션·요청 제한·제공자 오류.
    */

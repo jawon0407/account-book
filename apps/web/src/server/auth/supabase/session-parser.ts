@@ -1,9 +1,11 @@
 import "server-only";
 
 import { CurrentUserSchema } from "@account-book/contracts";
+import { PROVIDER_CLOCK_SKEW_SECONDS, validProviderIssuedAt } from "../../security/provider-time.js";
 import type { AuthTokenPair } from "../auth-provider-port.js";
 import { fail, mappedProviderError } from "./error-mapper.js";
 import { object, token, uuid } from "./validation.js";
+import { hasEmailLessSocialIdentity, type SocialSessionPolicy } from "./social-identity.js";
 
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/u;
 
@@ -49,7 +51,7 @@ function canonicalSegment(value: unknown): string {
  * @returns 사용자 ID·제공자 세션 ID·발급 초·만료 초.
  * @throws 구조·JSON·클레임·시각 오류 시 제공자 가용성 오류.
  */
-function jwtClaims(accessToken: string): Readonly<{ userId: string; sessionId: string; issuedAt: number; expiresAt: number }> {
+function jwtClaims(accessToken: string): Readonly<{ userId: string; sessionId: string; issuedAt: number; expiresAt: number; source: Record<string, unknown> }> {
   const parts = accessToken.split(".");
   if (parts.length !== 3) return fail();
   try {
@@ -61,29 +63,32 @@ function jwtClaims(accessToken: string): Readonly<{ userId: string; sessionId: s
     const expiresAt = claims.exp;
     const nowSeconds = Math.floor(Date.now() / 1000);
     if (
-      typeof issuedAt !== "number" || !Number.isSafeInteger(issuedAt) || issuedAt <= 0 || issuedAt > nowSeconds ||
+      !validProviderIssuedAt(issuedAt, nowSeconds * 1000) ||
       typeof expiresAt !== "number" || !Number.isSafeInteger(expiresAt) || expiresAt <= issuedAt || expiresAt <= nowSeconds
     ) return fail();
-    return { userId: uuid(claims.sub), sessionId: uuid(claims.session_id), issuedAt, expiresAt };
+    return { userId: uuid(claims.sub), sessionId: uuid(claims.session_id), issuedAt, expiresAt, source: claims };
   } catch { return fail(); }
 }
 
 /**
  * 제공자 세션의 토큰과 이메일 인증 사용자, JWT 소유자와 만료 시각을 공통 검증합니다.
  * @param sessionValue 제공자 세션 후보.
+ * @param policy 이메일 없는 OAuth에만 적용하는 신뢰된 서버 정책. 생략 시 이메일 필수.
  * @returns 원본 세션 객체·내부 토큰 쌍·파싱한 클레임.
  * @throws 미인증 사용자 또는 응답 불일치 오류.
  */
-function commonTokenPair(sessionValue: unknown): Readonly<{ session: Record<string, unknown>; pair: AuthTokenPair; claims: ReturnType<typeof jwtClaims> }> {
+function commonTokenPair(sessionValue: unknown, policy?: SocialSessionPolicy): Readonly<{ session: Record<string, unknown>; pair: AuthTokenPair; claims: ReturnType<typeof jwtClaims> }> {
   const session = object(sessionValue);
   const accessToken = token(session.access_token);
   const refreshToken = token(session.refresh_token);
   const user = object(session.user);
   const confirmation = user.email_confirmed_at;
   const confirmedAt = typeof confirmation === "string" ? new Date(confirmation) : new Date("invalid");
-  const parsedUser = CurrentUserSchema.safeParse({ id: user.id, email: typeof user.email === "string" ? user.email : null, emailVerified: Number.isFinite(confirmedAt.getTime()) && confirmedAt.getTime() <= Date.now() });
-  if (!parsedUser.success || !parsedUser.data.emailVerified) return fail("AUTH_EMAIL_VERIFICATION_REQUIRED");
+  const email = user.email === "" || user.email === undefined || user.email === null ? null : user.email;
+  const parsedUser = CurrentUserSchema.safeParse({ id: user.id, email, emailVerified: email !== null && Number.isFinite(confirmedAt.getTime()) && confirmedAt.getTime() <= Date.now() + PROVIDER_CLOCK_SKEW_SECONDS * 1000 });
+  if (!parsedUser.success) return fail("AUTH_EMAIL_VERIFICATION_REQUIRED");
   const claims = jwtClaims(accessToken);
+  if (!parsedUser.data.emailVerified && !(email === null && hasEmailLessSocialIdentity(user, claims.source, policy))) return fail("AUTH_EMAIL_VERIFICATION_REQUIRED");
   const userId = uuid(user.id);
   if (claims.userId !== userId) return fail();
   const accessTokenExpiresAt = new Date(claims.expiresAt * 1000);
@@ -93,25 +98,27 @@ function commonTokenPair(sessionValue: unknown): Readonly<{ session: Record<stri
 }
 
 /**
- * SDK 세션의 expires_at과 JWT exp가 정확히 같은지 추가 검증합니다.
+ * SDK가 로컬 시각으로 계산할 수 있는 expires_at의 오차를 제한하고 실제 만료는 JWT exp를 사용합니다.
  * @param sessionValue SDK 세션 응답.
+ * @param policy 갱신에서만 이메일 없는 기존 OAuth 세션을 허용한다. 생략 시 이메일 필수.
  * @returns 검증된 내부 토큰 쌍.
  * @throws 공통 검증 또는 만료값 불일치 오류.
  */
-export function tokenPair(sessionValue: unknown): AuthTokenPair {
-  const { session, pair, claims } = commonTokenPair(sessionValue);
-  if (typeof session.expires_at !== "number" || !Number.isSafeInteger(session.expires_at) || claims.expiresAt !== session.expires_at) return fail();
+export function tokenPair(sessionValue: unknown, policy?: SocialSessionPolicy): AuthTokenPair {
+  const { session, pair, claims } = commonTokenPair(sessionValue, policy);
+  if (typeof session.expires_at !== "number" || !Number.isSafeInteger(session.expires_at) || Math.abs(claims.expiresAt - session.expires_at) > PROVIDER_CLOCK_SKEW_SECONDS) return fail();
   return pair;
 }
 
 /**
  * 직접 HTTP 세션의 bearer 타입·expires_in과 JWT 수명 일치 여부를 검증합니다.
  * @param sessionValue 직접 토큰 교환 JSON.
+ * @param policy OAuth 트랜잭션에서 선택된 공급자. 이메일 확인·복구에서는 생략한다.
  * @returns 검증된 내부 토큰 쌍.
  * @throws 응답 형식·수명 불일치 오류.
  */
-export function rawTokenPair(sessionValue: unknown): AuthTokenPair {
-  const { session, pair, claims } = commonTokenPair(sessionValue);
+export function rawTokenPair(sessionValue: unknown, policy?: SocialSessionPolicy): AuthTokenPair {
+  const { session, pair, claims } = commonTokenPair(sessionValue, policy);
   const expiresIn = session.expires_in;
   if (session.token_type !== "bearer" || typeof expiresIn !== "number" || !Number.isSafeInteger(expiresIn) || expiresIn <= 0 || claims.expiresAt - claims.issuedAt !== expiresIn) return fail();
   if (session.expires_at !== undefined && (typeof session.expires_at !== "number" || !Number.isSafeInteger(session.expires_at) || session.expires_at !== claims.expiresAt)) return fail();

@@ -39,6 +39,7 @@ export type OAuthTransactionRecord = Readonly<{
   stateHash: Uint8Array;
   interactionHash: Uint8Array;
   provider: AuthProvider;
+  intent: "sign_in" | "sign_up";
   encryptedPkceVerifier: TokenEnvelope;
   returnPath: "/app" | "/settings/security";
   createdAt: Date;

@@ -12,7 +12,7 @@ export class MeController {
   /**
    * 인증 가드가 검증한 사용자 ID로 최소한의 현재 사용자 응답을 만든다. DB나 제공자 조회는 하지 않는다.
    * @param request - JWT 검증과 재사용 차단이 끝나 principal이 붙은 Fastify 요청.
-   * @returns 사용자 ID와 고정값 email: null, emailVerified: true를 담은 응답.
+   * @returns 사용자 ID와 email: null, emailVerified: false. 이메일을 조회하지 않으므로 검증됐다고 주장하지 않는다.
    * @throws principal이 없으면 InvalidAccessTokenError. 임의의 JWT 프로필 값은 사용하지 않는다.
    */
   @All()
@@ -20,6 +20,6 @@ export class MeController {
   @Header("Cache-Control", "private, no-store")
   public me(@Req() request: FastifyRequest): CurrentUser {
     if (request.principal === undefined) throw new InvalidAccessTokenError();
-    return { id: request.principal.userId, email: null, emailVerified: true };
+    return { id: request.principal.userId, email: null, emailVerified: false };
   }
 }

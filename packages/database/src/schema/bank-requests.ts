@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm/sql";
-import { check, foreignKey, jsonb, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { check, foreignKey, index, jsonb, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { bankConnections } from "./bank-connections.js";
 import { appBank, bankBytea, bankScopeChecks, type StoredBankEnvelope } from "./bank-shared.js";
 
@@ -40,4 +40,5 @@ export const bankConnectionRequests = appBank.table("bank_connection_requests", 
   check("bank_requests_result", sql`(${table.status} = 'connected') = (${table.connectionId} is not null)`),
   foreignKey({ name: "bank_requests_connection_fk", columns: [table.connectionId, table.userId, table.provider, table.environment], foreignColumns: [bankConnections.id, bankConnections.userId, bankConnections.provider, bankConnections.environment] }),
   uniqueIndex("bank_requests_one_pending_session").on(table.userId, table.sessionId).where(sql`${table.status} in ('awaiting_callback','awaiting_completion','exchanging')`),
+  index("bank_requests_pending_deadline_idx").on(sql`least(${table.expiresAt},${table.codeExpiresAt})`).where(sql`${table.status} in ('awaiting_callback','awaiting_completion','exchanging')`),
 ]).enableRLS();

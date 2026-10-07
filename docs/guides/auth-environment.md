@@ -1,5 +1,7 @@
 # 인증 환경 변수 가이드
 
+2026-09-29 개발 연결과 재실행 방법은 [로컬 인증 가이드](local-auth-development.ko.md)를 참고한다. 개발 전용 실행기에서는 같은 PC의 `127.0.0.1:3001` BFF→API HTTP를 허용하되 웹→BFF·공급자·DB는 TLS를 유지한다. 아래 운영 HTTPS 기준을 완화하는 변경은 아니다. Supavisor의 API 사용자명 `app_api.<20자 프로젝트 ID>`는 정확한 `*.pooler.supabase.com` 호스트와 5432/6543 포트에서만 허용한다.
+
 모든 값은 server-only다. `.env`, source, fixture, client bundle, browser storage, CI log에 실제 secret을 넣지 않는다. Hosted 값은 배포 플랫폼 encrypted settings에 입력한다.
 
 ## Web/BFF variables
@@ -9,6 +11,7 @@
 | `NODE_ENV` | `production`이면 fake adapter를 항상 거부 |
 | `APP_ORIGIN` | canonical origin; production HTTPS, user-info/path/query/fragment 금지; non-production exact loopback만 HTTP |
 | `AUTH_ADAPTER_MODE` | 기본 `supabase`; `fake`는 non-production exact loopback만 |
+| `AUTH_ENABLED_PROVIDERS` | 서버 전용 JSON 배열. 기본 `[]`; `google`, `kakao`, `naver` 중 중복 없는 값만 허용. 예: `["google","kakao"]`. 잘못된 설정은 인증을 거부하며 외부 공급자를 자동 활성화하지 않음 |
 | `DATABASE_URL` | server-only `postgres:`/`postgresql:` URL |
 | `API_INTERNAL_URL` | credential/path/query/fragment(빈 `?`/`#` delimiter 포함) 없는 root-only HTTPS origin; non-production disposable E2E에서만 exact loopback(`localhost`, `127.0.0.1`, `[::1]`) HTTP 허용 |
 | `BFF_JWT_KEY_ID` | API의 accepted `kid`와 일치하는 safe key ID |
@@ -22,6 +25,8 @@
 | `AUTH_FAKE_PROVIDER_URL` | test-only exact `http://127.0.0.1:4510/token`; query/fragment/user-info 금지 |
 
 Key는 각각 다음 명령으로 생성한다.
+
+소셜 로그인 키 입력·활성화 순서는 [활성화 전 준비 가이드](social-auth-readiness.ko.md)를 따른다. UI는 `GET /api/auth/providers`로 공개 이름만 조회하며 목록의 제거는 새 로그인 차단이지 기존 세션 폐기가 아니다. 로컬 실행기는 Git 밖 `web.json`에서만 명시적 활성화를 받고 부모 쉘의 값을 상속하지 않는다. 기존 파일에 이 항목이 없어도 `[]`로 동작한다.
 
 ```powershell
 node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"

@@ -145,7 +145,7 @@ export class DelegatedApiClient {
   }
 
   /**
-   * 본문 바이트를 복사한 뒤 그 정확한 내용으로 JWT를 서명하고 새 Authorization·요청 ID 헤더로 전송합니다. 3초 제한을 적용합니다.
+   * 본문 바이트를 복사한 뒤 그 정확한 내용으로 JWT를 서명하고 전송합니다. 기본 3초, 은행 완료만 12초입니다.
    * @param input 미리 직렬화된 내부 요청·권한·사용자·세션.
    * @returns 내부 API의 원시 Response; 본문 검증은 호출자가 합니다.
    * @throws 검증 실패는 요청 오류, 서명·전송 실패는 가용성 오류.
@@ -165,7 +165,11 @@ export class DelegatedApiClient {
         method: request.method,
         headers,
         ...(request.method === "GET" ? {} : { body: request.body as BodyInit }),
-        signal: AbortSignal.timeout(3_000),
+        // 은행 API의 최대 8초 교환을 기다리되 임의 요청이 제한을 늘리지 못하게 고정 작업만 예외로 둔다.
+        signal: AbortSignal.timeout(request.method === "POST" && request.scope === "bank-connection:write" && request.target === "/v1/bank-connections/kftc/complete" ? 12_000 : 3_000),
+        // 위임 JWT를 리다이렉트 대상으로 보내거나 사용자별 응답을 Next 캐시에 남기지 않는다.
+        redirect: "error",
+        cache: "no-store",
       });
     } catch {
       return unavailable();

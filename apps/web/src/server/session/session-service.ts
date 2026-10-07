@@ -1,4 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { validProviderIssuedAt } from "../security/provider-time.js";
 import {
   createSessionSelector,
   hashSessionSelector,
@@ -159,7 +160,7 @@ function validTokenPair(value: SessionTokenPair, now: Date, invalidReason: Sessi
     typeof value.refreshToken !== "string" || value.refreshToken.length === 0,
     !validUuid(value.userId),
     !validUuid(value.supabaseSessionId),
-    !Number.isSafeInteger(value.issuedAtSeconds) || value.issuedAtSeconds <= 0 || value.issuedAtSeconds > Math.floor(now.getTime() / 1000),
+    !validProviderIssuedAt(value.issuedAtSeconds, now.getTime()),
     !validDate(value.accessTokenExpiresAt),
     validDate(value.accessTokenExpiresAt) && value.accessTokenExpiresAt.getTime() <= now.getTime(),
     validDate(value.accessTokenExpiresAt) && value.accessTokenExpiresAt.getTime() <= value.issuedAtSeconds * 1000,

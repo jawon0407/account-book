@@ -73,6 +73,14 @@ const runtimeEnvironment = {
 } as const;
 
 describe("authentication runtime selection", () => {
+  it.each(['["google","google"]', '["facebook"]', 'true', 'google', 'null'])("rejects unsafe provider configuration %s", (value) => {
+    expect(() => resolveAuthRuntime!({ ...runtimeEnvironment, AUTH_ENABLED_PROVIDERS: value })).toThrow("AUTH_CONFIGURATION_INVALID");
+  });
+
+  it("disables OAuth by default and preserves only the explicit provider selection", () => {
+    expect(resolveAuthRuntime!(runtimeEnvironment)).toMatchObject({ enabledProviders: [] });
+    expect(resolveAuthRuntime!({ ...runtimeEnvironment, AUTH_ENABLED_PROVIDERS: '["google","kakao"]' })).toMatchObject({ enabledProviders: ["google", "kakao"] });
+  });
   it("defaults to the Supabase adapter", () => {
     expect(resolveAuthRuntime).toBeTypeOf("function");
     expect(resolveAuthRuntime!({ NODE_ENV: "production", APP_ORIGIN: "https://app.example.test" })).toMatchObject({ mode: "supabase", origin: new URL("https://app.example.test") });

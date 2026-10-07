@@ -3,6 +3,7 @@ import { Catch, HttpException, type ArgumentsHost, type ExceptionFilter } from "
 import type { FastifyReply, FastifyRequest } from "fastify";
 import { AccessTokenVerificationUnavailableError, InvalidAccessTokenError } from "../auth/jwt-verifier.js";
 import { responseRequestId } from "./request-context.js";
+import { CoreError } from "../core/core-error.js";
 
 const FASTIFY_BODY_TOO_LARGE_MESSAGE = "Request body is too large";
 
@@ -45,6 +46,11 @@ export class ApiErrorFilter implements ExceptionFilter {
         .header("Cache-Control", "private, no-store")
         .status(413)
         .send();
+      return;
+    }
+    if (exception instanceof CoreError) {
+      reply.header("X-Request-Id", requestId).header("Cache-Control", "private, no-store")
+        .status(exception.status).send(buildApiError({ code: exception.code, requestId, retryable: exception.retryable, fieldErrors: [] }));
       return;
     }
     const authenticationFailure = exception instanceof InvalidAccessTokenError;

@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("server-only", () => ({}));
+// 이 검사는 메서드 거부 동작을 검증한다. 병렬 suite의 첫 모듈 변환/로딩 시간은 테스트 본문 제한에 섞지 않는다.
+const [signIn, csrf] = await Promise.all([import("./auth/sign-in/route.js"), import("./auth/csrf/route.js")]);
 
 const routes = [
   "auth/csrf/route.ts",
@@ -50,8 +52,6 @@ describe("Next authentication route wiring", () => {
   });
 
   it("runs explicit HEAD, OPTIONS, and wrong-method handlers instead of Next defaults", async () => {
-    const signIn = await import("./auth/sign-in/route.js");
-    const csrf = await import("./auth/csrf/route.js");
     for (const [handler, method] of [[signIn.HEAD, "HEAD"], [signIn.OPTIONS, "OPTIONS"], [signIn.GET, "GET"], [csrf.HEAD, "HEAD"], [csrf.POST, "POST"]] as const) {
       expect(handler).toBeTypeOf("function");
       const response = await handler!(new Request("https://app.example.test/api/auth/csrf", { method }));

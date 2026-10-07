@@ -60,6 +60,15 @@ function setup(baseUrl = new URL("https://api.example.test")) {
 }
 
 describe("DelegatedApiClient", () => {
+  it.each([
+    ["POST", "bank-connection:write", "/v1/bank-connections/kftc/complete", 12_000],
+    ["POST", "bank-connection:write", "/v1/bank-connections/kftc/start", 3_000],
+    ["POST", "transaction:write", "/v1/bank-connections/kftc/complete", 3_000],
+  ] as const)("budgets only exact bank completion: %s %s %s", async (method, scope, target, ms) => {
+    const { client } = setup(); const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValue(new AbortController().signal);
+    try { await client.request({ ...mutationRequest(), method, scope, target }); expect(timeout).toHaveBeenCalledWith(ms); }
+    finally { timeout.mockRestore(); }
+  });
   it("signs and sends the same exact bytes with only server-owned headers", async () => {
     const { client, fetcher, signer } = setup();
     const body = new TextEncoder().encode('{"amountKrw":"12000"}');
@@ -85,6 +94,8 @@ describe("DelegatedApiClient", () => {
           "x-request-id": requestId,
         },
         signal: timeoutSignal,
+        redirect: "error",
+        cache: "no-store",
       });
       expect(init.body).toBe(signedBody);
       expect(timeout).toHaveBeenCalledOnce();
@@ -172,6 +183,8 @@ describe("DelegatedApiClient", () => {
           "x-request-id": requestId,
         },
         signal: timeoutSignal,
+        redirect: "error",
+        cache: "no-store",
       });
       expect(Object.hasOwn(init, "body")).toBe(false);
       expect(new Headers(init.headers).has("content-type")).toBe(false);

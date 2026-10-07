@@ -12,6 +12,8 @@ export const DELEGATED_JSON_BODY_MAX_BYTES = 32_768;
 /** Restricts `scope` to the least-privilege capability the BFF may exercise, not a general user role. */
 export const DelegatedScopeSchema = z.enum([
   "me:read",
+  "profile:read",
+  "profile:write",
   "account:read",
   "account:write",
   "category:read",
@@ -19,6 +21,8 @@ export const DelegatedScopeSchema = z.enum([
   "transaction:read",
   "transaction:write",
   "dashboard:read",
+  "bank-connection:read",
+  "bank-connection:write",
 ]);
 export type DelegatedScope = z.infer<typeof DelegatedScopeSchema>;
 

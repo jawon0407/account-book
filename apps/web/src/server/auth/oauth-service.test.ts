@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { decryptToken, type TokenEnvelope, type TokenKeyring } from "../security/token-envelope.js";
-import { AuthProviderError } from "./auth-provider-port.js";
+import { AuthProviderError, type AuthTokenPair } from "./auth-provider-port.js";
 
 vi.mock("server-only", () => ({}));
 const module = await import("./oauth-service.js").catch(() => ({} as Record<string, unknown>));
@@ -19,7 +19,7 @@ const interaction = Buffer.alloc(32, 2).toString("base64url");
 const otherInteraction = Buffer.alloc(32, 3).toString("base64url");
 const verifier = "v".repeat(43);
 const keyring: TokenKeyring = { currentKeyId: "current", keys: new Map([["current", randomBytes(32)]]) };
-const tokens = {
+const tokens: AuthTokenPair = {
   accessToken: "provider-access-token",
   refreshToken: "provider-refresh-token",
   userId,
@@ -34,6 +34,7 @@ type RecordShape = {
   stateHash: Uint8Array;
   interactionHash: Uint8Array;
   provider: "google" | "kakao" | "naver";
+  intent: "sign_in" | "sign_up";
   encryptedPkceVerifier: TokenEnvelope;
   returnPath: "/app" | "/settings/security";
   createdAt: Date;
@@ -133,6 +134,40 @@ function digest(value: string): Uint8Array {
 }
 
 describe("OAuthService", () => {
+  it.each(["google", "kakao", "naver"])("requires login continuation after %s signup without issuing an app session", async (provider) => {
+    const subject = setup();
+    await subject.service.start(provider, { ...subject.startContext, intent: "sign_up" });
+    expect(subject.repository.record?.intent).toBe("sign_up");
+    const result = await subject.service.complete({ provider, state, code: "provider-code", intent: "sign_in" }, subject.completeContext);
+    expect(result).toEqual({ status: "sign_in_required" });
+    expect(subject.sessions.create).not.toHaveBeenCalled();
+    expect(subject.repository.record?.consumedAt).not.toBeNull();
+    await expect(subject.service.complete({ provider, state, code: "provider-code" }, subject.completeContext)).rejects.toMatchObject({ code: "AUTH_OAUTH_TRANSACTION_INVALID" });
+  });
+
+  it("defaults omitted intent to login and ignores callback signup intent", async () => {
+    const subject = setup();
+    await subject.service.start("google", subject.startContext);
+    expect(subject.repository.record?.intent).toBe("sign_in");
+    await expect(subject.service.complete({ provider: "google", state, code: "code", intent: "sign_up" }, subject.completeContext)).resolves.toMatchObject({ selector: "opaque-session-selector" });
+  });
+
+  it("still validates provider identity before allowing signup continuation", async () => {
+    const subject = setup();
+    await subject.service.start("google", { ...subject.startContext, intent: "sign_up" });
+    subject.provider.exchangeOAuthCode.mockResolvedValueOnce({ ...tokens, userId: transactionId });
+    await expect(subject.service.complete({ provider: "google", state, code: "code" }, subject.completeContext)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    expect(subject.sessions.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects malformed persisted intent before provider exchange", async () => {
+    const subject = setup();
+    await subject.service.start("google", subject.startContext);
+    Object.assign(subject.repository.record!, { intent: "admin" });
+    await expect(subject.service.complete({ provider: "google", state, code: "code" }, subject.completeContext)).rejects.toMatchObject({ code: "AUTH_OAUTH_TRANSACTION_INVALID" });
+    expect(subject.provider.exchangeOAuthCode).not.toHaveBeenCalled();
+  });
+
   it("persists only digests and an encrypted verifier before returning the authorize URL", async () => {
     const subject = setup();
     const result = await subject.service.start("google", subject.startContext) as Record<string, unknown>;
@@ -170,7 +205,7 @@ describe("OAuthService", () => {
 
     const result = await subject.service.complete({ provider: "naver", state, code: "provider-code" }, subject.completeContext);
     expect(subject.repository.events).toEqual(["claim", "exchange", "session"]);
-    expect(subject.provider.calls.exchange).toEqual([{ code: "provider-code", codeVerifier: verifier }]);
+    expect(subject.provider.calls.exchange).toEqual([{ code: "provider-code", codeVerifier: verifier, provider: "naver" }]);
     expect(result).toMatchObject({ selector: "opaque-session-selector", user: tokens.user, returnPath: "/settings/security" });
     const serialized = JSON.stringify(result);
     for (const secret of [state, interaction, verifier, "provider-code", tokens.accessToken, tokens.refreshToken]) expect(serialized).not.toContain(secret);
@@ -185,6 +220,38 @@ describe("OAuthService", () => {
 
     await expect(subject.service.complete({ provider: "google", state, code: "code" }, subject.completeContext)).resolves.toMatchObject({ selector: "opaque-session-selector" });
     expect(subject.sessions.create).toHaveBeenCalledWith(expect.objectContaining({ issuedAtSeconds: nextSecondTokens.issuedAtSeconds }), providerCompletedAt);
+  });
+
+  it.each([60, 61])("bounds provider issuance skew at %s seconds without rewriting provider timestamps", async (ahead) => {
+    const subject = setup(() => now);
+    const issuedAtSeconds = Math.floor(now.getTime() / 1000) + ahead;
+    subject.provider.exchangeOAuthCode.mockResolvedValueOnce({ ...tokens, issuedAtSeconds, accessTokenExpiresAt: new Date(now.getTime() + 120_000) });
+    await subject.service.start("google", subject.startContext);
+    const completed = subject.service.complete({ provider: "google", state, code: "code" }, subject.completeContext);
+    if (ahead === 60) {
+      await expect(completed).resolves.toMatchObject({ selector: "opaque-session-selector" });
+      expect(subject.sessions.create).toHaveBeenCalledWith(expect.objectContaining({ issuedAtSeconds, accessTokenExpiresAt: new Date(now.getTime() + 120_000) }), now);
+    } else {
+      await expect(completed).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+      expect(subject.sessions.create).not.toHaveBeenCalled();
+    }
+  });
+
+  it("creates a session for an adapter-verified social identity without inventing an email", async () => {
+    const subject = setup();
+    const socialTokens = { ...tokens, user: { id: userId, email: null, emailVerified: false } };
+    subject.provider.exchangeOAuthCode.mockResolvedValueOnce(socialTokens);
+    await subject.service.start("kakao", subject.startContext);
+    await expect(subject.service.complete({ provider: "kakao", state, code: "code" }, subject.completeContext)).resolves.toMatchObject({ user: socialTokens.user });
+    expect(subject.sessions.create).toHaveBeenCalledWith(expect.objectContaining({ userId, accessToken: socialTokens.accessToken, refreshToken: socialTokens.refreshToken }), expect.any(Date));
+  });
+
+  it("rejects a present but unverified email even in an OAuth exchange", async () => {
+    const subject = setup();
+    subject.provider.exchangeOAuthCode.mockResolvedValueOnce({ ...tokens, user: { ...tokens.user, emailVerified: false } });
+    await subject.service.start("google", subject.startContext);
+    await expect(subject.service.complete({ provider: "google", state, code: "code" }, subject.completeContext)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    expect(subject.sessions.create).not.toHaveBeenCalled();
   });
 
   it("fails closed when the post-provider clock is invalid", async () => {
@@ -230,6 +297,8 @@ describe("OAuthService", () => {
   });
 
   it.each([
+    { intent: "admin" },
+    { intent: null },
     { returnPath: "/admin" },
     { callbackBaseUrl: new URL("http://public.example.test/callback") },
     { callbackBaseUrl: new URL("https://user:pass@app.example.test/callback") },

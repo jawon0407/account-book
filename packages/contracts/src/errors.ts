@@ -1,12 +1,18 @@
 import { z } from "zod";
 
 export const ApiErrorCodeSchema = z.enum([
+  "BANK_INVALID_REQUEST", "BANK_REQUEST_NOT_FOUND", "BANK_REQUEST_CONFLICT", "BANK_RATE_LIMITED", "BANK_UNAVAILABLE",
+  "AUTH_ACCOUNT_EXISTS", "AUTH_ACCOUNT_NOT_FOUND",
+  "PROFILE_VALIDATION_FAILED", "PROFILE_VERSION_CONFLICT", "LEDGER_SERVICE_UNAVAILABLE",
   "AUTH_INVALID_CREDENTIALS", "AUTH_EMAIL_VERIFICATION_REQUIRED", "AUTH_SESSION_EXPIRED", "AUTH_SESSION_REFRESH_REQUIRED", "AUTH_CSRF_REJECTED", "AUTH_OAUTH_TRANSACTION_INVALID", "AUTH_RATE_LIMITED", "AUTH_PROVIDER_UNAVAILABLE",
   "LEDGER_VALIDATION_FAILED", "LEDGER_NOT_FOUND", "LEDGER_VERSION_CONFLICT", "LEDGER_IDEMPOTENCY_CONFLICT", "LEDGER_ACCOUNT_UNAVAILABLE", "LEDGER_CATEGORY_UNAVAILABLE", "LEDGER_TRANSFER_INVALID",
 ]);
 export type ApiErrorCode = z.infer<typeof ApiErrorCodeSchema>;
 
 export const PublicErrorMessages = {
+  BANK_INVALID_REQUEST: "The bank connection request is invalid.", BANK_REQUEST_NOT_FOUND: "The bank connection request was not found.", BANK_REQUEST_CONFLICT: "Start a new bank connection request.", BANK_RATE_LIMITED: "Too many bank connection requests.", BANK_UNAVAILABLE: "The bank connection service is unavailable.",
+  AUTH_ACCOUNT_EXISTS: "An account already exists.", AUTH_ACCOUNT_NOT_FOUND: "The account does not exist.",
+  PROFILE_VALIDATION_FAILED: "The profile request is invalid.", PROFILE_VERSION_CONFLICT: "The profile changed; reload and try again.", LEDGER_SERVICE_UNAVAILABLE: "The ledger service is unavailable.",
   AUTH_INVALID_CREDENTIALS: "The authentication input was rejected.", AUTH_EMAIL_VERIFICATION_REQUIRED: "Email verification is required.", AUTH_SESSION_EXPIRED: "The session has expired.", AUTH_SESSION_REFRESH_REQUIRED: "The session must be refreshed.", AUTH_CSRF_REJECTED: "The request could not be verified.", AUTH_OAUTH_TRANSACTION_INVALID: "The authentication transaction is invalid.", AUTH_RATE_LIMITED: "Too many authentication attempts.", AUTH_PROVIDER_UNAVAILABLE: "The authentication service is unavailable.",
   LEDGER_VALIDATION_FAILED: "The ledger request is invalid.", LEDGER_NOT_FOUND: "The requested ledger resource was not found.", LEDGER_VERSION_CONFLICT: "The ledger resource changed; reload and try again.", LEDGER_IDEMPOTENCY_CONFLICT: "This request was already processed differently.", LEDGER_ACCOUNT_UNAVAILABLE: "The requested account is unavailable.", LEDGER_CATEGORY_UNAVAILABLE: "The requested category is unavailable.", LEDGER_TRANSFER_INVALID: "The transfer request is invalid.",
 } as const satisfies Record<ApiErrorCode, string>;

@@ -18,6 +18,11 @@ function recoveryRow(overrides: Record<string, unknown> = {}): Record<string, un
 }
 
 describe("PostgresAuthRepository authentication transactions", () => {
+  it.each([undefined, null, "admin"])("rejects an OAuth row with missing or malformed intent %#", async (intent) => {
+    const { database, repository } = subject();
+    database.affectedRows = [{ id, provider: "google", intent, stateHash: digest, interactionHash: digest, encryptedPkceVerifier: envelope, returnPath: "/app", createdAt: now, expiresAt, consumedAt: now }];
+    await expect(repository.claimOAuthTransaction({ provider: "google", stateHash: digest, interactionHash: digest, now })).resolves.toBeNull();
+  });
   it.each([null, [], "invalid-row"])("rejects non-record results from all claim paths %#", async (row) => {
     const { database, repository } = subject();
     database.affectedRows = [row];
@@ -43,7 +48,7 @@ describe("PostgresAuthRepository authentication transactions", () => {
   it.each([null, now])("copies optional consumed timestamps on inserts and returned rows %#", async (consumedAt) => {
     const { database, repository } = subject();
     const email = { id, interactionHash: digest, encryptedPkceVerifier: envelope, createdAt: now, expiresAt, consumedAt };
-    const oauth = { ...email, provider: "google", stateHash: digest, returnPath: "/app" };
+    const oauth = { ...email, provider: "google", intent: "sign_up", stateHash: digest, returnPath: "/app" };
     await repository.createOAuthTransaction(oauth);
     await repository.createEmailConfirmationTransaction(email);
     await repository.createRecoveryTransaction(recoveryRow({ consumedAt }));
@@ -59,7 +64,7 @@ describe("PostgresAuthRepository authentication transactions", () => {
     const oauthResult = await repository.claimOAuthTransaction({ provider: "google", stateHash: digest, interactionHash: digest, now }) as Record<string, unknown>;
     database.affectedRows = [email];
     const emailResult = await repository.claimEmailConfirmationTransaction(digest, now) as Record<string, unknown>;
-    expect(oauthResult).toMatchObject({ consumedAt, interactionHash: Uint8Array.from(digest) });
+    expect(oauthResult).toMatchObject({ intent: "sign_up", consumedAt, interactionHash: Uint8Array.from(digest) });
     expect(emailResult).toMatchObject({ consumedAt, interactionHash: Uint8Array.from(digest) });
     expect(oauthResult.interactionHash).not.toBe(digest);
     expect(emailResult.createdAt).not.toBe(now);
@@ -139,6 +144,7 @@ describe("PostgresAuthRepository authentication transactions", () => {
       stateHash,
       interactionHash,
       provider: "google",
+      intent: "sign_in",
       encryptedPkceVerifier: envelope,
       returnPath: "/app",
       createdAt: now,
@@ -257,7 +263,7 @@ describe("PostgresAuthRepository authentication transactions", () => {
     expect(issuanceGate.sql).toContain("greatest");
     expect(issuanceGate.sql).toContain("clock_timestamp()");
     expect(issuanceGate.sql).toContain("+ 1");
-    expect(issuanceGate.params).toEqual([]);
+    expect(issuanceGate.params).toEqual([60]);
     expect(database.calls[3]).toMatchObject({ table: "auth_sessions", values: { revokedAt: now } });
     const consumeSql = query(database.calls[0]?.predicates).sql;
     for (const fragment of ['"id" =', '"user_id" =', '"password_update_claimed_at" =', '"consumed_at" is null', '"expires_at" >']) expect(consumeSql).toContain(fragment);

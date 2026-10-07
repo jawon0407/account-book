@@ -150,7 +150,7 @@ describe("delegated API authentication boundary", () => {
     const replay = await app.inject({ method: "GET", url: "/v1/me", headers });
 
     expect(first.statusCode).toBe(200);
-    expect(CurrentUserSchema.parse(first.json())).toEqual({ id: userId, email: null, emailVerified: true });
+    expect(CurrentUserSchema.parse(first.json())).toEqual({ id: userId, email: null, emailVerified: false });
     expect(first.headers["x-request-id"]).toBe(requestId);
     expect(replay.statusCode).toBe(401);
     expect(ApiErrorSchema.parse(replay.json()).code).toBe("AUTH_SESSION_EXPIRED");
