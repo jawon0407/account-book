@@ -1,6 +1,6 @@
 # 프로젝트 문서 지도 — 먼저 읽어 주세요
 
-최신 제품 방향(2026-10-07): [개인 알림 가계부·선택형 자동 분류 설계](superpowers/specs/2026-10-07-personal-notification-ledger-design.md), [클라우드 작업 인수인계](status/2026-10-07-personal-notification-ledger-handoff.ko.md). 실계좌 API 대신 개인 알림·수기 기록을 우선한다. 자동 분류 규칙은 선택이며 미설정 상태에서도 미분류 기록·입출금 합계·미분류 알림을 제공하는 목표다. 아래 은행 우선순위와 공동 장부 설명은 과거 기록이다. 모바일 수집·규칙·새 DB 구조는 구현 전이며 이번 변경은 문서만이다.
+최신 제품 방향(2026-10-13): 먼저 [개인 알림 가계부 통합 설계 — 흐름·상태·검증](superpowers/specs/2026-10-13-notification-ledger-data-flow-design.md)를 읽는다. [요구사항·선택형 분류](superpowers/specs/2026-10-07-personal-notification-ledger-design.md), [클라우드 인수인계](status/2026-10-07-personal-notification-ledger-handoff.ko.md), [Notion 엣지케이스](https://app.notion.com/p/3f5323168ba6816e9578c5151182018e)를 연결했다. 개인 알림·모바일 수기 기록을 우선하며 분류 규칙은 선택이다. 거주 시간대 고정, 실패 시 결과 확인·수기 보완, PC 기존 거래 편집·삭제·30일 복구, 환불/이체 정책을 반영했다. 모바일 수집·규칙·새 DB 구조는 구현 전이며 아래 은행 우선순위와 공동 장부 설명은 과거 기록이다.
 
 은행 테스트 연결 최신(2026-10-02 A4): [BFF·PC 진행 기록](status/2026-10-02-bank-web.ko.md), [초급 개발자용 흐름](guides/bank-web.ko.md). 세션·CSRF·확인 쿠키와 PC 시작/결과 화면을 구현했다. 공식 런타임은 비활성이며 A5 전체 가상 통합 → A6 공식 KFTC 테스트가 남았다. 앞선 A3는 [NestJS API 기록](status/2026-10-02-bank-api.ko.md)을 본다. 아래 날짜별 기록은 당시 범위를 보존한다.
 
@@ -22,7 +22,7 @@
 
 앞선 통합 기준: 2026-09-29, main `b7ecd83` / 후속 `feature/bank-state-transitions`. 저장소 PUBLIC·main 보호를 적용했고 CI 보완 PR #14/#17, 은행 보안 기반 PR #13, 은행 DB 구조·권한(A2.1) PR #18은 정상 병합·main 검사까지 완료했습니다. 이후 인증·거래·A2/A3 구현은 2026-10-02 `05b4006`으로 기능 브랜치에 커밋·푸시했습니다. A4의 최신 검증과 후속 전송 상태는 위 진행 기록을 봅니다. 이 문서는 **실제 구현**, **승인된 목표**, **검증하지 못한 운영 설정**을 구분합니다. 사용자는 1~2절부터, 초급 개발자는 3절의 순서대로 읽으면 됩니다.
 
-2026-10-02 당시 우선순위는 PC 기본 관리·일반 거래 다음으로 은행 테스트 연결 → 조회·수집 → 별도 모바일이었습니다. 현재는 위 2026-10-07 개인 알림 설계를 우선합니다. 은행 후속 자료는 [은행 DB 완료 기록](status/2026-09-28-bank-storage.ko.md), [저장 흐름](database/bank-connections.ko.md), [상태 처리 사전 점검](status/2026-09-29-bank-state-transitions-next.ko.md)에 보존합니다. [앞선 보호·CI 실행 결과](status/2026-09-28-public-protection-execution.ko.md), [전체 진행 지도](status/2026-09-24-project-map.ko.md)와 [Notion 기능별 현황](https://app.notion.com/p/817d15a21e174eac86a7d3608a21b457)에서 날짜별 구현·미완료를 확인합니다. 일반 작업은 반복 승인 없이 진행하되 규모·파일·검증 기록을 남깁니다.
+2026-10-02 당시 우선순위는 PC 기본 관리·일반 거래 다음으로 은행 테스트 연결 → 조회·수집 → 별도 모바일이었습니다. 현재는 위 2026-10-13 통합 설계를 우선합니다. 은행 후속 자료는 [은행 DB 완료 기록](status/2026-09-28-bank-storage.ko.md), [저장 흐름](database/bank-connections.ko.md), [상태 처리 사전 점검](status/2026-09-29-bank-state-transitions-next.ko.md)에 보존합니다. [앞선 보호·CI 실행 결과](status/2026-09-28-public-protection-execution.ko.md), [전체 진행 지도](status/2026-09-24-project-map.ko.md)와 [Notion 기능별 현황](https://app.notion.com/p/817d15a21e174eac86a7d3608a21b457)에서 날짜별 구현·미완료를 확인합니다. 일반 작업은 반복 승인 없이 진행하되 규모·파일·검증 기록을 남깁니다.
 
 외부 코드의 적용 경로·출처·원문은 [라이선스 고지](../THIRD_PARTY_NOTICES.md), 이번 보완의 범위·검증은 [고지 보완 계획](superpowers/plans/2026-09-28-third-party-license-notices.md)에서 확인합니다. 로컬 반영과 원격 공개·보호 적용은 별개입니다.
 
@@ -45,10 +45,12 @@ PC는 Next.js 웹, 모바일은 별도 React Native + Expo 앱입니다. **PWA�
 
 ```text
 PC 브라우저 → Next.js BFF → Node API → PostgreSQL
-별도 모바일 앱 ───────────→ Node API → 같은 PostgreSQL (구현 예정)
+별도 모바일 앱 → 모바일 인증 경계 → Node API → 같은 PostgreSQL (설계/구현 예정)
 ```
 
 BFF는 웹 브라우저를 대신해 세션과 서버 간 요청을 처리하는 서버입니다. 브라우저·앱에 DB 비밀번호를 넣지 않습니다. 현재 BFF의 DB 연결은 인증 저장소용이고 API는 JWT replay 및 본인 프로필·금융 원장을 최소 권한으로 사용합니다. 프로필·계좌·카테고리 화면은 이 중계를 호출하며, 웹은 사용자별 메모리 캐시만 사용합니다.
+
+모바일에 BFF 서버 서명키를 넣거나 기존 API 보호를 끄지 않습니다. 모바일 세션·철회·기기·기능 권한은 별도 상세 계약이 필요합니다. PC 신규 거래 제한과 알림 수집은 아직 코드에 반영된 것으로 읽지 마세요.
 
 ## 3. 분야별 문서와 추천 읽기 순서
 
@@ -67,6 +69,8 @@ BFF는 웹 브라우저를 대신해 세션과 서버 간 요청을 처리하는
 | 9. 증거 | [진행 기록](status/2026-08-24-development-progress.ko.md), [보안 체크리스트](security/verification-checklist.md) | 날짜·SHA별 테스트 결과와 미완료 출시 조건 |
 
 ## 4. 어떤 설계가 최신인가요?
+
+현재 개인 장부의 정책 우선 문서는 [2026-10-13 통합 설계](superpowers/specs/2026-10-13-notification-ledger-data-flow-design.md)입니다. 승인 정책, 현재 코드와의 차이, 남은 상세 계약을 구분합니다. 아래 문서는 기존 구현·분야별 이력을 설명하며 모든 내용을 새 목표와 동일시하지 않습니다.
 
 1. 제품 플랫폼: [2026-07-27 웹·네이티브 공유 장부 설계](superpowers/specs/2026-07-27-web-native-mobile-shared-ledger-design.md).
 2. 인증 저장 방식: [opaque session ADR](architecture/adr/0001-opaque-auth-sessions.md).
