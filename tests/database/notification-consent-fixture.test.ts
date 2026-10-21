@@ -6,15 +6,16 @@ it("preserves pre-existing local runtime role login configuration", async () => 
   if (process.env.TEST_DATABASE_URL !== "postgresql://postgres:postgres@127.0.0.1:5432/account_book_test" || process.env.TEST_DATABASE_DISPOSABLE !== "true") throw new Error("TEST_DATABASE_CONFIGURATION_INVALID");
   const control = new Client({ connectionString: process.env.TEST_DATABASE_URL });
   await control.connect(); let db: Awaited<ReturnType<typeof openNotificationConsentDatabase>> | undefined;
-  const original = (await control.query("select rolcanlogin from pg_roles where rolname='app_session_bff'")).rows[0];
   try {
-    // 실제 화면 테스트 환경처럼 이미 LOGIN 가능한 역할을 만든 경우를 재현한다.
-    if (original) await control.query("alter role app_session_bff login");
+    const query = "select rolname,rolcanlogin from pg_roles where rolname in ('app_session_bff','app_api') order by rolname";
+    const original = (await control.query(query)).rows;
+    // 기존 역할을 바꾸어 테스트 조건을 만들지 않는다. 실제 LOGIN/NOLOGIN 상태를 그대로 비교한다.
     db = await openNotificationConsentDatabase();
-    if (original) expect((await control.query("select rolcanlogin from pg_roles where rolname='app_session_bff'")).rows[0].rolcanlogin).toBe(true);
+    expect((await control.query(query)).rows).toEqual(expect.arrayContaining(original));
+    await db.close(); db = undefined;
+    expect((await control.query(query)).rows).toEqual(expect.arrayContaining(original));
   } finally {
-    await db?.close();
-    if (original) await control.query(original.rolcanlogin ? "alter role app_session_bff login" : "alter role app_session_bff nologin");
-    await control.end();
+    // fixture 정리 실패도 별도 제어 연결의 종료를 막지 못하게 한다.
+    try { await db?.close(); } finally { await control.end(); }
   }
 });

@@ -20,6 +20,17 @@
 
 PC 서버가 켜져 있고 USB 개발 연결이 유지돼 있으면 설치된 **Account Book Dev**를 열면 된다. 개발 서버 선택 화면이 나오면 `http://localhost:8081`을 선택한다. 은행 알림 접근은 단순 화면/수기 장부 확인에 필요하지 않다. PC 종료나 USB 연결 초기화 후에는 서버와 포트 연결을 다시 준비해야 한다. 외출 중 사용은 별도 독립 APK/외부 HTTPS 서버 단계다. [현재 동의 서버 단계와 실행 조건](../status/2026-10-21-server-notification-consent.ko.md)을 참고한다.
 
+PC 서버는 그대로 켜져 있고 USB만 다시 연결했다면 이 PC의 PowerShell에서 다음 명령으로 두 연결을 복구할 수 있다. 연결된 Android 기기가 정확히 한 대이고 디버깅 승인을 한 상황에만 실행한다. 앱을 다시 설치하거나 알림 접근을 허용하는 명령은 아니다.
+
+```powershell
+$adb = "$env:LOCALAPPDATA/account-book-android/sdk/platform-tools/adb.exe"
+& $adb devices
+& $adb reverse tcp:3000 tcp:3000
+& $adb reverse tcp:8081 tcp:8081
+```
+
+`unauthorized`라면 휴대폰에서 이 PC의 디버깅 승인을 확인한다. 기기가 0대이거나 2대 이상이면 이어서 실행하지 않는다. PC 서버가 꺼졌거나 개발 인증서가 만료됐다면 이 연결 명령만으로는 해결되지 않으며 테스트 환경을 먼저 다시 준비해야 한다.
+
 ### 연결 구조
 
 화면 코드 수신: `휴대폰의 개발 APK ↔ PC의 Metro(USB 8081)`
