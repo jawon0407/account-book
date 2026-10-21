@@ -10,11 +10,14 @@
   "include": [
     "src/api/native-client*.ts",
     "src/api/native-ledger-client*.ts",
+    "src/api/native-collector-client*.ts",
     "src/api/client-error.ts",
     "src/auth/session-manager*.ts",
     "src/auth/session-persistence.ts",
     "src/auth/session-restore.test.ts",
     "src/auth/session-ledger.test.ts",
+    "src/auth/session-collector.test.ts",
+    "src/collector/**/*.ts",
     "src/ledger/**/*.ts",
     "src/ui/ledger-presentation*.ts"
   ]

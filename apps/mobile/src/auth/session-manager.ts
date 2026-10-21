@@ -5,6 +5,7 @@ import {
   type CreateTransactionInput,
   type UpdateProfileInput,
   type Profile,
+  type CollectorChangeInput,
 } from "@account-book/contracts";
 import type { NativeClient } from "../api/native-client";
 import { ClientError } from "../api/client-error";
@@ -35,6 +36,7 @@ type Client = Pick<
   | "signOut"
   | "transactions"
   | "ledger"
+  | "collector"
 >;
 
 /** 인증 변경을 한 줄로 실행한다. 공개 상태에는 credential이나 거래 데이터가 없다. */
@@ -186,6 +188,18 @@ export class SessionManager {
   public transactions(cursor?: string) {
     return this.authenticatedRequest((token) =>
       this.client.transactions(token, cursor),
+    );
+  }
+  /** 현재 로그인 세션 기준 수집 기기 지정 상태. 토큰을 화면에 반환하지 않는다. */
+  public collectorState() {
+    return this.authenticatedRequest((token) =>
+      this.client.collector.read(token),
+    );
+  }
+  /** @param input 화면에서 확인한 지정/해제와 기대 버전. 세션 변경 후 응답은 폐기한다. */
+  public changeCollector(input: CollectorChangeInput) {
+    return this.authenticatedRequest((token) =>
+      this.client.collector.change(token, input),
     );
   }
   /** 현재 로그인 사용자의 프로필만 반환한다. HTTP schema와 별도로 사용자 ID를 대조한다. */

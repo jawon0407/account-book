@@ -7,6 +7,7 @@ import {
 } from "./session-manager";
 import { ClientError } from "../api/client-error";
 import { NativeLedgerClient } from "../api/native-ledger-client";
+import { NativeCollectorClient } from "../api/native-collector-client";
 
 const deviceId = "22222222-2222-4222-8222-222222222222";
 const userId = "11111111-1111-4111-8111-111111111111";
@@ -31,6 +32,9 @@ function fixture() {
     }),
   };
   const client = {
+    collector: new NativeCollectorClient(async () => {
+      throw new Error("Unused collector test transport");
+    }),
     ledger: new NativeLedgerClient(async () => {
       throw new Error("Unused ledger test transport");
     }),

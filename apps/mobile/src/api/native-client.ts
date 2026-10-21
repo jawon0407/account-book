@@ -11,12 +11,14 @@ import {
 } from "@account-book/contracts";
 import { ClientError } from "./client-error";
 import { NativeLedgerClient } from "./native-ledger-client";
+import { NativeCollectorClient } from "./native-collector-client";
 
 /** 빌드에 고정한 하나의 서버에만 요청한다. 토큰·origin을 UI에서 임의로 바꿀 수 없다. */
 export class NativeClient {
   public readonly origin: string;
   private readonly http: KyInstance;
   public readonly ledger: NativeLedgerClient;
+  public readonly collector: NativeCollectorClient;
   /** @param origin HTTPS origin만 허용. @param transport 테스트용 HTTP 경계, 실제 앱은 OS fetch 사용. */
   public constructor(
     origin: string,
@@ -47,6 +49,10 @@ export class NativeClient {
     });
     this.ledger = new NativeLedgerClient((path, method, schema, token, body) =>
       this.call(path, method, schema, token, body),
+    );
+    this.collector = new NativeCollectorClient(
+      (path, method, schema, token, body) =>
+        this.call(path, method, schema, token, body),
     );
   }
   /** @param input 이메일·비밀번호·설치 UUID. strict 계약으로 검증한 뒤 새 세션을 받는다. */
