@@ -4,6 +4,7 @@ import {
   CategorySchema, CategoryListResponseSchema, CreateCategoryInputSchema, UpdateCategoryInputSchema, ArchiveCategoryInputSchema,
   LedgerIdSchema,
   CollectorChangeInputSchema, CollectorStateSchema,
+  NotificationConsentChangeInputSchema, NotificationConsentStateSchema,
   TransactionSchema, TransactionListResponseSchema, CreateTransactionInputSchema, UpdateTransactionInputSchema, DeleteTransactionInputSchema, TransactionTombstoneSchema,
 } from "@account-book/contracts";
 import type { DelegatedScope } from "@account-book/contracts/internal-api";
@@ -14,7 +15,7 @@ import { transactionTarget } from "./transaction-target.js";
 type Operation = Readonly<{
   method: "GET" | "POST" | "PATCH" | "DELETE";
   scope: DelegatedScope;
-  path: "/v1/profile" | "/v1/accounts" | "/v1/categories" | "/v1/transactions" | "/v1/collector";
+  path: "/v1/profile" | "/v1/accounts" | "/v1/categories" | "/v1/transactions" | "/v1/collector" | "/v1/collector/consent";
   androidOnly?: true;
   item?: true;
   archive?: true;
@@ -26,6 +27,8 @@ type Operation = Readonly<{
 
 /** 코드가 선택하는 닫힌 작업 표. 브라우저는 내부 주소·scope·응답 계약을 지정할 수 없다. */
 const operations = {
+  consentGet: { method: "GET", scope: "collector:read", path: "/v1/collector/consent", androidOnly: true, output: NotificationConsentStateSchema, status: 200 },
+  consentChange: { method: "PATCH", scope: "collector:write", path: "/v1/collector/consent", androidOnly: true, input: NotificationConsentChangeInputSchema, output: NotificationConsentStateSchema, status: 200 },
   collectorGet: { method: "GET", scope: "collector:read", path: "/v1/collector", androidOnly: true, output: CollectorStateSchema, status: 200 },
   collectorChange: { method: "PATCH", scope: "collector:write", path: "/v1/collector", androidOnly: true, input: CollectorChangeInputSchema, output: CollectorStateSchema, status: 200 },
   transactionsUpdate: { method: "PATCH", scope: "transaction:write", path: "/v1/transactions", item: true, input: UpdateTransactionInputSchema, output: TransactionSchema, status: 200 },
@@ -54,7 +57,7 @@ export function operationFor(name: string): Operation {
 
 /** @param operation 선택된 고정 작업. @returns 해당 도메인의 입력 거부 오류. */
 export function invalidInput(operation: Operation): CoreBoundaryError {
-  if (operation.path === "/v1/collector") return new CoreBoundaryError("COLLECTOR_VALIDATION_FAILED", 400);
+  if (operation.path === "/v1/collector" || operation.path === "/v1/collector/consent") return new CoreBoundaryError("COLLECTOR_VALIDATION_FAILED", 400);
   return new CoreBoundaryError(operation.path === "/v1/profile" ? "PROFILE_VALIDATION_FAILED" : "LEDGER_VALIDATION_FAILED", 400);
 }
 

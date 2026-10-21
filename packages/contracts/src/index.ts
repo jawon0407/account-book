@@ -34,6 +34,8 @@ export { NativeDeviceIdSchema, NativeSessionTokenSchema, NativeSignInInputSchema
 export type { NativeSignInInput, NativeSession, NativeAuthResponse } from "./native-auth.js";
 export { CollectorChangeInputSchema, CollectorStateSchema } from "./collector.js";
 export type { CollectorChangeInput, CollectorState } from "./collector.js";
+export { NOTIFICATION_NOTICE_VERSION, NotificationConsentChangeInputSchema, NotificationConsentStateSchema } from "./notification-consent.js";
+export type { NotificationConsentChangeInput, NotificationConsentState } from "./notification-consent.js";
 export { LedgerTimeZoneSchema, TimedLedgerEvidenceSchema, LedgerTimeEvidenceSchema, ResidenceTimeHistorySchema, preserveDateOnlyLedgerTime, buildTimedLedgerTime, selectResidenceTimeZone } from "./ledger-time.js";
 export type { TimedLedgerEvidence, LedgerTimeEvidence, ResidenceTimeHistory, ResidenceTimeSelection } from "./ledger-time.js";
 export { UtcInstantSchema } from "./ledger-time.js";

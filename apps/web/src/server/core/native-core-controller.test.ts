@@ -42,6 +42,9 @@ async function fails(response: Response, status: number, code: string) {
 
 describe("native ledger boundary", () => {
   it.each([
+    ["consentGet", "/collector/consent", "GET", undefined, {}, { version: 0,state: "not_granted",noticeVersion: "notification-access-v1" },200],
+    ["consentChange", "/collector/consent", "PATCH", { action: "accept",expectedVersion: 0,noticeVersion: "notification-access-v1" }, {}, { version: 1,state: "granted",noticeVersion: "notification-access-v1" },200],
+    ["consentChange", "/collector/consent", "PATCH", { action: "withdraw",expectedVersion: 1 }, {}, { version: 2,state: "withdrawn",noticeVersion: "notification-access-v1" },200],
     ["collectorGet", "/collector", "GET", undefined, {}, { version: 0, state: "inactive" }, 200],
     ["collectorChange", "/collector", "PATCH", { action: "activate", expectedVersion: 0, replaceExisting: false }, {}, { version: 1, state: "active_here" }, 200],
     ["profileGet", "/profile", "GET", undefined, {}, profile, 200],
@@ -72,6 +75,24 @@ describe("native ledger boundary", () => {
     s.sessions.resolve.mockResolvedValueOnce({ ...session, clientChannel: "web", deviceId: null });
     await fails(await new CoreController(s.deps).handle("collectorGet", new Request(origin + "/api/collector", { headers: { cookie: `__Host-ab_session=${selector}` } })), 403, "LEDGER_CHANNEL_FORBIDDEN");
     expect(s.delegatedApiClient.request).not.toHaveBeenCalled();
+  });
+  it("denies consent queries, client identity, browser contexts and a miswired web route", async () => {
+    const s = setup(), path = "/api/native/collector/consent";
+    await fails(await s.controller.handle("consentGet",request(path+"?deviceId=x")),400,"COLLECTOR_VALIDATION_FAILED");
+    await fails(await s.controller.handle("consentChange",request(path,"PATCH",{ action: "withdraw",expectedVersion: 1,userId: id })),400,"COLLECTOR_VALIDATION_FAILED");
+    await fails(await s.controller.handle("consentChange",request(path,"PATCH",{ action: "accept",expectedVersion: 0,noticeVersion: "old" })),400,"COLLECTOR_VALIDATION_FAILED");
+    await fails(await s.controller.handle("consentGet",request(path,"GET",undefined,{ origin })),403,"AUTH_CSRF_REJECTED");
+    const session = await s.sessions.resolve(selector,now); s.sessions.resolve.mockResolvedValueOnce({ ...session,clientChannel: "web",deviceId: null });
+    await fails(await new CoreController(s.deps).handle("consentGet",new Request(origin+"/api/collector/consent",{ headers: { cookie: `__Host-ab_session=${selector}` } })),403,"LEDGER_CHANNEL_FORBIDDEN");
+    expect(s.delegatedApiClient.request).not.toHaveBeenCalled();
+  });
+  it("does not expose private consent output or automatically retry withdrawal", async () => {
+    const s = setup({ version: 1,state: "granted",noticeVersion: "notification-access-v1",deviceId: "private-secret" });
+    await fails(await s.controller.handle("consentGet",request("/api/native/collector/consent")),502,"LEDGER_SERVICE_UNAVAILABLE");
+    s.delegatedApiClient.request.mockResolvedValueOnce(Response.json(buildApiError({ code: "COLLECTOR_VERSION_CONFLICT",retryable: true }),{ status: 409 }));
+    const response = await s.controller.handle("consentChange",request("/api/native/collector/consent","PATCH",{ action: "withdraw",expectedVersion: 1 }));
+    expect(response.status).toBe(409); expect(await response.json()).toMatchObject({ retryable: false });
+    expect(s.delegatedApiClient.request).toHaveBeenCalledTimes(2);
   });
   it.each([{}, { action: "activate", expectedVersion: 0 }, { action: "deactivate", expectedVersion: 1, sessionId: id }])("rejects collector input %j before upstream", async body => {
     const s = setup(); await fails(await s.controller.handle("collectorChange", request("/api/native/collector", "PATCH", body)), 400, "COLLECTOR_VALIDATION_FAILED");

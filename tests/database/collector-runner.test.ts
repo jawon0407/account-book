@@ -2,9 +2,11 @@ import { randomBytes } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { UserDatabase, type DbClient } from "../../apps/api/src/core/user-database.js";
-import { CORE_URL, type CoreDatabase } from "./support/core-database.js";
+import { type CoreDatabase } from "./support/core-database.js";
 import { seedUser } from "./support/core-fixtures.js";
-import { changeCollector, openCollectorDatabase, seedCollectorSession, withCollectorClient } from "./support/collector-fixtures.js";
+import { changeCollector, seedCollectorSession } from "./support/collector-fixtures.js";
+
+import { CONSENT_URL as CORE_URL, changeConsent, openNotificationConsentDatabase as openCollectorDatabase, withConsentClient as withCollectorClient } from "./support/notification-consent-fixtures.js";
 
 describe("collector transaction runner with real RLS", () => {
   let fixture: CoreDatabase, pool: Pool, database: UserDatabase;
@@ -23,13 +25,18 @@ describe("collector transaction runner with real RLS", () => {
 
   it("creates only for the active generation, without limiting manual entry on another device", async () => {
     const user = await seedUser(fixture.admin), a = await seedCollectorSession(fixture.admin,user), b = await seedCollectorSession(fixture.admin,user);
-    await expect(database.runCollector(user,a,1,c => insert(c,user))).rejects.toMatchObject({ code: "AUTH_SESSION_EXPIRED" });
+    await expect(database.runCollector(user,a,1,1,c => insert(c,user))).rejects.toMatchObject({ code: "AUTH_SESSION_EXPIRED" });
     await withCollectorClient(user,c => changeCollector(c,a,0));
-    expect(await database.runCollector(user,a,1,c => insert(c,user))).toMatch(/^[0-9a-f-]{36}$/u);
+    await expect(database.runCollector(user,a,1,1,c => insert(c,user))).rejects.toMatchObject({ code: "AUTH_SESSION_EXPIRED" });
+    await withCollectorClient(user,c => changeConsent(c,a,0));
+    await withCollectorClient(user,c => changeConsent(c,b,0));
+    expect(await database.runCollector(user,a,1,1,c => insert(c,user))).toMatch(/^[0-9a-f-]{36}$/u);
     await withCollectorClient(user,c => changeCollector(c,b,1,"activate",true));
-    await expect(database.runCollector(user,a,1,c => insert(c,user))).rejects.toMatchObject({ code: "AUTH_SESSION_EXPIRED" });
-    await expect(database.runCollector(user,b,1,c => insert(c,user))).rejects.toMatchObject({ code: "AUTH_SESSION_EXPIRED" });
-    await database.runCollector(user,b,2,c => insert(c,user));
+    await expect(database.runCollector(user,a,1,1,c => insert(c,user))).rejects.toMatchObject({ code: "AUTH_SESSION_EXPIRED" });
+    await expect(database.runCollector(user,b,1,1,c => insert(c,user))).rejects.toMatchObject({ code: "AUTH_SESSION_EXPIRED" });
+    await database.runCollector(user,b,2,1,c => insert(c,user));
+    await withCollectorClient(user,c => changeConsent(c,b,1,"withdraw"));
+    await expect(database.runCollector(user,b,2,1,c => insert(c,user))).rejects.toMatchObject({ code: "AUTH_SESSION_EXPIRED" });
     await database.run(user,c => insert(c,user));
     expect((await fixture.admin.query("select count(*)::int as n from finance.transaction_history where user_id=$1",[user])).rows[0].n).toBe(3);
   });
@@ -37,8 +44,9 @@ describe("collector transaction runner with real RLS", () => {
   it("rolls back partial writes and isolates other users even with a valid session id", async () => {
     const user = await seedUser(fixture.admin), other = await seedUser(fixture.admin), sid = await seedCollectorSession(fixture.admin,user);
     await withCollectorClient(user,c => changeCollector(c,sid,0));
-    await expect(database.runCollector(other,sid,1,c => insert(c,other))).rejects.toMatchObject({ code: "AUTH_SESSION_EXPIRED" });
-    await expect(database.runCollector(user,sid,1,async c => { await insert(c,user); throw new Error("private"); })).rejects.toMatchObject({ code: "LEDGER_SERVICE_UNAVAILABLE" });
+    await withCollectorClient(user,c => changeConsent(c,sid,0));
+    await expect(database.runCollector(other,sid,1,1,c => insert(c,other))).rejects.toMatchObject({ code: "AUTH_SESSION_EXPIRED" });
+    await expect(database.runCollector(user,sid,1,1,async c => { await insert(c,user); throw new Error("private"); })).rejects.toMatchObject({ code: "LEDGER_SERVICE_UNAVAILABLE" });
     expect((await fixture.admin.query("select count(*)::int as n from finance.transaction_history where user_id in ($1,$2)",[user,other])).rows[0].n).toBe(0);
   });
 });

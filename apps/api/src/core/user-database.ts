@@ -10,16 +10,18 @@ export class UserDatabase {
   public constructor(private readonly pool: Pick<Pool, "connect">) {}
 
   /**
-   * 활성 수집 세션과 버전을 잠근 뒤 같은 transaction에서만 자동 기록을 허용한다.
+   * 활성 수집 세션·기기 지정 버전·서버 동의 버전을 잠근 같은 transaction에서만 자동 기록을 허용한다.
    * @param userId 검증된 JWT sub. @param sessionId 검증된 JWT sid(요청 본문의 기기 ID가 아님).
-   * @param version 활성화/교체 응답의 양수 버전. @param operation 같은 연결로 실행할 수집 저장 작업.
+   * @param version 활성화/교체 응답의 양수 버전. @param consentVersion 현재 서버 동의의 양수 버전.
+   * @param operation 같은 연결로 실행할 수집 저장 작업.
    * @returns 권한 검사와 저장 commit까지 성공한 결과. 수기 입력은 이 메서드가 아닌 run을 사용한다.
    */
-  public async runCollector<T>(userId: string, sessionId: string, version: number, operation: (client: DbClient) => Promise<T>): Promise<T> {
-    if (!USER_ID.test(sessionId) || !Number.isInteger(version) || version < 1 || version > 2147483647)
+  public async runCollector<T>(userId: string, sessionId: string, version: number, consentVersion: number, operation: (client: DbClient) => Promise<T>): Promise<T> {
+    if (!USER_ID.test(sessionId) || !Number.isInteger(version) || version < 1 || version > 2147483647
+      || !Number.isInteger(consentVersion) || consentVersion < 1 || consentVersion > 2147483647)
       throw new CoreError("AUTH_SESSION_EXPIRED", 401);
     return this.run(userId, async client => {
-      const result = await client.query<{ allowed: boolean }>("select app_private.lock_active_collector($1,$2) as allowed", [sessionId,version]);
+      const result = await client.query<{ allowed: boolean }>("select app_private.lock_notification_collector($1,$2,$3) as allowed", [sessionId,version,consentVersion]);
       if (result.rows[0]?.allowed !== true) throw new CoreError("AUTH_SESSION_EXPIRED", 401);
       return operation(client);
     });

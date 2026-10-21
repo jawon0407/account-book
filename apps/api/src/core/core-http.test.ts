@@ -17,6 +17,7 @@ import { CategoriesRepository } from "../categories/categories.repository.js";
 import { TransactionsRepository } from "../transactions/transactions.repository.js";
 import { CoreError } from "./core-error.js";
 import { CollectorRepository } from "../collector/collector.repository.js";
+import { NotificationConsentRepository } from "../collector/notification-consent.repository.js";
 
 const userId = "11111111-1111-4111-8111-111111111111", resource = "22222222-2222-4222-8222-222222222222";
 const profile = { id: userId, nickname: null, avatarObjectKey: null, role: "member", signupProvider: "email", version: 1, createdAt: "2026-09-29T00:00:00Z", updatedAt: "2026-09-29T00:00:00Z" };
@@ -25,6 +26,8 @@ const category = { id: resource, name: "식비", kind: "expense", sortOrder: 0, 
 
 describe("core API signed HTTP boundary", () => {
   let app: NestFastifyApplication, privateKey: CryptoKey;
+  const consentRepo = { get: vi.fn(async () => ({ version: 0, state: "not_granted", noticeVersion: "notification-access-v1" })),
+    change: vi.fn(async () => ({ version: 2,state: "withdrawn",noticeVersion: "notification-access-v1" })) };
   const collectorRepo = { get: vi.fn(async () => ({ version: 0, state: "inactive" })), change: vi.fn(async () => ({ version: 1, state: "active_here" })) };
   const profileRepo = { get: vi.fn(async () => profile), update: vi.fn(async () => ({ ...profile, nickname: "닉네임", version: 2 })) };
   const accountRepo = { list: vi.fn(async () => ({ items: [account] })), create: vi.fn(async () => account), update: vi.fn(async () => account), archive: vi.fn(async () => account) };
@@ -41,11 +44,27 @@ describe("core API signed HTTP boundary", () => {
       .overrideProvider(ProfilesRepository).useValue(profileRepo).overrideProvider(AccountsRepository).useValue(accountRepo)
       .overrideProvider(CategoriesRepository).useValue(categoryRepo)
       .overrideProvider(TransactionsRepository).useValue(transactionRepo)
+      .overrideProvider(NotificationConsentRepository).useValue(consentRepo)
       .overrideProvider(CollectorRepository).useValue(collectorRepo).compile();
     app = module.createNestApplication<NestFastifyApplication>(createApiFastifyAdapter(), { logger: false });
     registerRequestBodyParsers(app); await configureApiApplication(app); await app.init(); await app.getHttpAdapter().getInstance().ready();
   });
   afterAll(async () => { await app?.close(); });
+
+  it("exposes Android-only consent with strict inputs and method scopes", async () => {
+    const path = "/v1/collector/consent";
+    expect((await send("GET",path,"collector:read",undefined,"android")).statusCode).toBe(200);
+    expect((await send("GET",path,"collector:read")).statusCode).toBe(403);
+    expect((await send("GET",path,"transaction:read",undefined,"android")).statusCode).toBe(401);
+    expect((await send("PATCH",path,"collector:read",{ action: "withdraw",expectedVersion: 1 },"android")).statusCode).toBe(401);
+    for (const input of [{},{ action: "accept",expectedVersion: 0,noticeVersion: "old" },{ action: "withdraw",expectedVersion: 1,deviceId: resource }]) {
+      const result = await send("PATCH",path,"collector:write",input,"android");
+      expect(result.statusCode).toBe(400); expect(result.json()).toMatchObject({ code: "COLLECTOR_VALIDATION_FAILED" });
+    }
+    expect((await send("GET",path+"?userId=x","collector:read",undefined,"android")).statusCode).toBe(400);
+    const result = await send("PATCH",path,"collector:write",{ action: "withdraw",expectedVersion: 1 },"android");
+    expect(result.statusCode).toBe(200); expect(result.headers["cache-control"]).toContain("no-store");
+  });
 
   /** @param method HTTP 메서드. @param target 실제 요청 URL. @param scope 요청 전용 권한. @param body 서명할 JSON. @returns 새 one-use JWT 헤더. */
   async function headers(method: "GET" | "POST" | "PATCH" | "DELETE", target: string, scope: DelegatedScope, body = "", channel = "web") {

@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({ handle: vi.fn(async () => new Response(null, {
 vi.mock("../container.js", () => ({ createRequestContainer: () => ({ nativeCoreController: { handle: mocks.handle } }) }));
 
 const routes = [
+  ["collector/consent", { GET: "consentGet", PATCH: "consentChange" }],
   ["collector", { GET: "collectorGet", PATCH: "collectorChange" }],
   ["profile", { GET: "profileGet", PATCH: "profileUpdate" }],
   ["accounts", { GET: "accountsList", POST: "accountsCreate" }],
@@ -16,6 +17,7 @@ const routes = [
   ["transactions/[id]", { PATCH: "transactionsUpdate", DELETE: "transactionsDelete" }],
 ] as const;
 const modules = {
+  "collector/consent": () => import("../../app/api/native/collector/consent/route.js"),
   collector: () => import("../../app/api/native/collector/route.js"),
   profile: () => import("../../app/api/native/profile/route.js"),
   accounts: () => import("../../app/api/native/accounts/route.js"),
