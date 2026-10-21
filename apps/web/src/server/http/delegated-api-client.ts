@@ -1,10 +1,11 @@
-import type { DelegatedScope } from "@account-book/contracts/internal-api";
+import type { DelegatedClientChannel, DelegatedScope } from "@account-book/contracts/internal-api";
 import type { DelegatedSignInput } from "../security/delegated-jwt-signer.js";
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const METHODS = new Set(["GET", "POST", "PATCH", "DELETE"]);
 
 export type DelegatedApiRequest = Readonly<{
+  clientChannel: DelegatedClientChannel;
   body: Uint8Array;
   contentType: null | "application/json";
   method: "GET" | "POST" | "PATCH" | "DELETE";

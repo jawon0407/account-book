@@ -8,7 +8,7 @@ beforeAll(async () => { db = await openCoreDatabase(); });
 afterAll(async () => { await db?.close(); });
 
 describe("core SQL and Drizzle declaration parity", () => {
-  it.each(["profiles", "userRoles", "roleChangeEvents", "ledgerAccounts", "ledgerCategories", "ledgerTransfers", "ledgerTransactions", "ledgerIdempotencyRequests"])("matches live columns and constraints for %s", async name => {
+  it.each(["profiles", "userRoles", "roleChangeEvents", "ledgerTimeHistory", "ledgerAccounts", "ledgerCategories", "ledgerTransfers", "ledgerTransactions", "ledgerIdempotencyRequests"])("matches live columns and constraints for %s", async name => {
     const table = (databaseExports as unknown as Record<string, PgTable>)[name];
     expect(table, `missing declaration ${name}`).toBeDefined();
     const config = getTableConfig(table!);

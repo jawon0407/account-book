@@ -128,6 +128,7 @@ describe("delegated API authentication boundary", () => {
    */
   async function token(target = "/v1/me", rid = requestId): Promise<string> {
     return new SignJWT({
+      chn: "web",
       aud: "urn:account-book:api", exp: now + 30, iat: now, iss: "urn:account-book:bff",
       jti: randomBytes(16).toString("base64url"), nbf: now,
       rbh: binding(target), rid, scp: "me:read", sid: sessionId, sub: userId,

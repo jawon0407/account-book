@@ -19,8 +19,11 @@ import { AuthController } from "./http/auth-controller.js";
 import { DelegatedApiClient } from "./http/delegated-api-client.js";
 import { CoreController } from "./core/core-controller.js";
 import { BankController } from "./bank-connections/bank-controller.js";
+import { bankE2eEndpoint } from "./bank-connections/e2e-runtime.js";
 import { PostgresAuthRepository } from "./persistence/postgres-auth-repository.js";
 import { SessionService } from "./session/session-service.js";
+import { NativeAuthController } from "./native-auth/native-controller.js";
+import { NativeRateLimiter } from "./native-auth/native-rate-limiter.js";
 import { DelegatedJwtSigner } from "./security/delegated-jwt-signer.js";
 import type { TokenKeyring } from "./security/token-envelope.js";
 
@@ -238,7 +241,9 @@ function databaseClient(connectionString: string): ReturnType<typeof createDatab
  */
 export type RequestContainer = Readonly<{
   authController: AuthController;
+  nativeAuthController: NativeAuthController;
   coreController: CoreController;
+  nativeCoreController: CoreController;
   bankController: BankController;
   delegatedApiClient: DelegatedApiClient;
   delegatedJwtSigner: DelegatedJwtSigner;
@@ -272,6 +277,8 @@ export function createRequestContainer(environment: Readonly<Record<string, stri
           anonKey: required(environment, "SUPABASE_ANON_KEY"),
         });
     const sessions = new SessionService(repository, tokenKeyring, async (refreshToken) => provider.refresh(refreshToken));
+    const androidSessions = new SessionService(repository, tokenKeyring, refreshToken => provider.refresh(refreshToken), undefined, undefined, "android");
+    const nativeLimiter = new NativeRateLimiter((text, values) => databaseClient(databaseUrl).$client.query(text, values), csrfKey);
     const email = new EmailAuthService(provider, sessions, repository, tokenKeyring);
     const oauth = new OAuthService(repository, provider, sessions, tokenKeyring);
     const recovery = new PasswordRecoveryService(repository, provider, tokenKeyring);
@@ -299,9 +306,15 @@ export function createRequestContainer(environment: Readonly<Record<string, stri
       delegatedJwtSigner,
       delegatedApiClient,
       authController,
+      nativeAuthController: new NativeAuthController({
+        origin: runtime.origin, now: () => new Date(), provider,
+        sessions: androidSessions,
+        limiter: nativeLimiter,
+      }),
       // A6 공식 endpoint/공급자 검증 전에는 연결 시작을 활성화하지 않는다.
-      bankController: new BankController({ configuredOrigin: runtime.origin, csrfKey, now: () => new Date(), sessions, delegatedApiClient, authorizationEndpoint: null }),
+      bankController: new BankController({ configuredOrigin: runtime.origin, csrfKey, now: () => new Date(), sessions, delegatedApiClient, authorizationEndpoint: bankE2eEndpoint(environment)?.href ?? null }),
       coreController: new CoreController({ configuredOrigin: runtime.origin, csrfKey, now: () => new Date(), sessions, delegatedApiClient }),
+      nativeCoreController: new CoreController({ configuredOrigin: runtime.origin, csrfKey, now: () => new Date(), sessions: androidSessions, delegatedApiClient }, { channel: "android", limiter: nativeLimiter }),
     };
   } catch {
     return invalidConfiguration();

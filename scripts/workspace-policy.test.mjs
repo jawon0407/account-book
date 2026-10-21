@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { test } from "node:test";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,28 +37,39 @@ const expectedDevDependencies = {
 };
 
 const expectedScripts = {
-  "test:workspace": "pnpm build:packages && pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api test",
+  "test:workspace":
+    "pnpm build:packages && pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api --filter @account-book/mobile test",
   "test:e2e-preflight": "pnpm --filter @account-book/e2e test:preflight",
   test: "pnpm test:legacy && pnpm test:workspace && pnpm test:e2e-preflight",
   "test:db": "pnpm --filter @account-book/database-tests test",
   lint: "eslint . --max-warnings=0",
-  "build:packages": "pnpm --filter @account-book/contracts build && pnpm --filter @account-book/database build",
-  "typecheck:workspace": "pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api --filter @account-book/database-tests --filter @account-book/e2e typecheck",
+  "build:packages":
+    "pnpm --filter @account-book/contracts build && pnpm --filter @account-book/database build",
+  "typecheck:workspace":
+    "pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api --filter @account-book/mobile --filter @account-book/database-tests --filter @account-book/e2e typecheck",
   typecheck: "pnpm build:packages && pnpm typecheck:workspace",
-  build: "pnpm build:packages && pnpm --filter @account-book/api build && pnpm --filter @account-book/web build",
+  build:
+    "pnpm build:packages && pnpm --filter @account-book/api build && pnpm --filter @account-book/web build && pnpm --filter @account-book/mobile build",
   verify: "pnpm lint && pnpm typecheck && pnpm test && pnpm build",
 };
 
 const approvedPackageLocalSkipLibCheck = [
+  "apps/mobile/tsconfig.json",
   "apps/web/tsconfig.json",
   "packages/database/tsconfig.json",
   "tests/database/tsconfig.json",
 ];
 
 const expectedWorkspaceOverrides = {
-  "next@16.3.6>sharp": "-",
-  "next@16.3.6>postcss": "8.5.23",
-  "next@16.3.6>baseline-browser-mapping": "2.11.0",
+  "query-string@7.1.3>decode-uri-component": "0.5.0",
+  "browserslist@4.29.3": "4.28.7",
+  "xcode@3.0.1>uuid": "11.1.1",
+  "next@16.3.8>sharp": "-",
+  "next@16.3.8>postcss": "8.5.23",
+  "next@16.3.8>baseline-browser-mapping": "2.11.0",
+  "source-map-js@1.2.1": "1.2.2",
+  "undici@7.29.0": "7.29.1",
+  "brace-expansion@5.0.9": "5.0.12",
   "nanoid@3.3.16": "3.3.18",
   "find-my-way@9.6.0": "9.7.0",
   "@nestjs/platform-fastify@11.2.5>fastify": "5.12.5",
@@ -80,7 +97,9 @@ function tsconfigFiles(directory) {
  * @returns 저장소 하위 tsconfig 파일 경로 목록.
  */
 function workspaceTsconfigFiles() {
-  return ["apps", "packages", "tests"].flatMap((directory) => tsconfigFiles(join(rootDir, directory)));
+  return ["apps", "packages", "tests"].flatMap((directory) =>
+    tsconfigFiles(join(rootDir, directory)),
+  );
 }
 
 /**
@@ -89,8 +108,14 @@ function workspaceTsconfigFiles() {
  * @returns {Record<string, string>} 선택자와 강제값의 맵. 블록 누락이나 예상 밖 문법은 테스트 실패.
  */
 function workspaceScalarOverrides(workspace) {
-  const overrideBlock = workspace.match(/^overrides:\r?\n((?: {2}[^\r\n]+\r?\n?)*)/mu)?.[1];
-  assert.notEqual(overrideBlock, undefined, "pnpm workspace must define an overrides map");
+  const overrideBlock = workspace.match(
+    /^overrides:\r?\n((?: {2}[^\r\n]+\r?\n?)*)/mu,
+  )?.[1];
+  assert.notEqual(
+    overrideBlock,
+    undefined,
+    "pnpm workspace must define an overrides map",
+  );
 
   return Object.fromEntries(
     overrideBlock
@@ -98,7 +123,11 @@ function workspaceScalarOverrides(workspace) {
       .split(/\r?\n/)
       .map((line) => {
         const scalar = line.match(/^ {2}"([^"]+)": "([^"]+)"$/u);
-        assert.notEqual(scalar, null, `workspace override must be a quoted scalar entry: ${line}`);
+        assert.notEqual(
+          scalar,
+          null,
+          `workspace override must be a quoted scalar entry: ${line}`,
+        );
         return [scalar[1], scalar[2]];
       }),
   );
@@ -112,14 +141,23 @@ function workspaceScalarOverrides(workspace) {
 function assertPatchedProductionResolutions(lockfile) {
   const packagesStart = lockfile.indexOf("packages:");
   const snapshotsStart = lockfile.search(/\r?\nsnapshots:/u);
-  assert.notEqual(packagesStart, -1, "lockfile must contain a packages section");
-  assert.notEqual(snapshotsStart, -1, "lockfile must contain a snapshots section");
+  assert.notEqual(
+    packagesStart,
+    -1,
+    "lockfile must contain a packages section",
+  );
+  assert.notEqual(
+    snapshotsStart,
+    -1,
+    "lockfile must contain a snapshots section",
+  );
 
   const resolutionSections = [
     lockfile.slice(packagesStart, snapshotsStart),
     lockfile.slice(snapshotsStart),
   ];
   const patchedEntries = [
+    /^ {2}source-map-js@1\.2\.2:(?: \{\})?\r?$/mu,
     /^ {2}postcss@8\.5\.23:\r?$/mu,
     /^ {2}nanoid@3\.3\.18:(?: \{\})?\r?$/mu,
     /^ {2}find-my-way@9\.7\.0:\r?$/mu,
@@ -128,6 +166,7 @@ function assertPatchedProductionResolutions(lockfile) {
     /^ {2}fast-uri@4\.1\.5:(?: \{\})?\r?$/mu,
   ];
   const vulnerableEntries = [
+    /^ {2}source-map-js@1\.2\.1:(?: \{\})?\r?$/mu,
     /^ {2}postcss@8\.5\.22:\r?$/mu,
     /^ {2}nanoid@3\.3\.16:(?: \{\})?\r?$/mu,
     /^ {2}find-my-way@9\.6\.0:\r?$/mu,
@@ -143,10 +182,18 @@ function assertPatchedProductionResolutions(lockfile) {
 
   for (const section of resolutionSections) {
     for (const patchedEntry of patchedEntries) {
-      assert.match(section, patchedEntry, "patched production dependency resolution must exist");
+      assert.match(
+        section,
+        patchedEntry,
+        "patched production dependency resolution must exist",
+      );
     }
     for (const vulnerableEntry of vulnerableEntries) {
-      assert.doesNotMatch(section, vulnerableEntry, "vulnerable production dependency resolution must be absent");
+      assert.doesNotMatch(
+        section,
+        vulnerableEntry,
+        "vulnerable production dependency resolution must be absent",
+      );
     }
   }
 }
@@ -162,12 +209,17 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
 
   assert.deepEqual(pkg.devDependencies, expectedDevDependencies);
   assert.equal(apiPackage.dependencies.fastify, "5.12.5");
-  assert.equal(webPackage.dependencies.next, "16.3.6");
-  for (const name of ["@nestjs/common", "@nestjs/core", "@nestjs/platform-fastify"]) assert.equal(apiPackage.dependencies[name], "11.2.5");
+  assert.equal(webPackage.dependencies.next, "16.3.8");
+  for (const name of [
+    "@nestjs/common",
+    "@nestjs/core",
+    "@nestjs/platform-fastify",
+  ])
+    assert.equal(apiPackage.dependencies[name], "11.2.5");
   assert.equal(apiPackage.devDependencies["@nestjs/testing"], "11.2.5");
   assert.equal(
     e2ePackage.scripts["test:preflight"],
-    "tsx --test production-fake-startup.test.ts playwright-environment.test.ts playwright-config.test.ts auth-response-policy.test.ts ui-facade-boundary.test.ts support/safe-ui-error.test.ts support/transport-tripwire.test.ts support/safe-ui-test.test.ts",
+    "tsx --test production-fake-startup.test.ts playwright-environment.test.ts playwright-config.test.ts auth-response-policy.test.ts ui-facade-boundary.test.ts support/safe-ui-error.test.ts support/transport-tripwire.test.ts support/safe-ui-test.test.ts device/lifecycle.test.ts",
   );
   assert.equal(
     e2ePackage.scripts.test,
@@ -181,7 +233,11 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
     assert.equal(pkg.scripts[name], command);
   }
   assert.equal(tsconfig.compilerOptions.target, "ES2023");
-  assert.deepEqual(tsconfig.compilerOptions.lib, ["ES2023", "DOM", "DOM.Iterable"]);
+  assert.deepEqual(tsconfig.compilerOptions.lib, [
+    "ES2023",
+    "DOM",
+    "DOM.Iterable",
+  ]);
   assert.equal(tsconfig.compilerOptions.module, "NodeNext");
   assert.equal(tsconfig.compilerOptions.moduleResolution, "NodeNext");
   for (const option of [
@@ -197,12 +253,21 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
   }
   assert.equal(tsconfig.compilerOptions.skipLibCheck, false);
   const workspaceTsconfigs = workspaceTsconfigFiles();
-  for (const path of workspaceTsconfigs.filter((path) => path.endsWith("tsconfig.json"))) {
+  for (const path of workspaceTsconfigs.filter((path) =>
+    path.endsWith("tsconfig.json"),
+  )) {
     const packageConfig = JSON.parse(readFileSync(path, "utf8"));
-    assert.equal(packageConfig.extends, relative(dirname(path), tsconfigPath).replaceAll("\\", "/"));
+    assert.equal(
+      packageConfig.extends,
+      relative(dirname(path), tsconfigPath).replaceAll("\\", "/"),
+    );
   }
   const packageLocalSkipLibCheck = workspaceTsconfigs
-    .filter((path) => JSON.parse(readFileSync(path, "utf8")).compilerOptions?.skipLibCheck === true)
+    .filter(
+      (path) =>
+        JSON.parse(readFileSync(path, "utf8")).compilerOptions?.skipLibCheck ===
+        true,
+    )
     .map((path) => path.slice(rootDir.length + 1).replaceAll("\\", "/"))
     .sort();
   assert.deepEqual(packageLocalSkipLibCheck, approvedPackageLocalSkipLibCheck);
@@ -220,11 +285,18 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
       }),
   );
   assert.deepEqual(allowBuilds, { esbuild: true });
-  // Next 16.3.6 declares sharp only as an optional image optimizer.
+  // Next 16.3.8 declares sharp only as an optional image optimizer.
   // The app has no next/image usage, so keep that unused native dependency absent.
   // Its production PostCSS dependency and Fastify stack are pinned to patched releases.
-  assert.deepEqual(workspaceScalarOverrides(workspace), expectedWorkspaceOverrides);
-  for (const policy of ["engine-strict=true", "save-exact=true", "strict-peer-dependencies=true"]) {
+  assert.deepEqual(
+    workspaceScalarOverrides(workspace),
+    expectedWorkspaceOverrides,
+  );
+  for (const policy of [
+    "engine-strict=true",
+    "save-exact=true",
+    "strict-peer-dependencies=true",
+  ]) {
     assert.match(npmrc, new RegExp(`^${policy}$`, "m"));
   }
   assert.equal(existsSync(join(rootDir, "eslint.config.mjs")), true);
@@ -232,34 +304,74 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
   const eslintConfig = readFileSync(eslintConfigPath, "utf8");
   assert.match(eslintConfig, /import tseslint from "typescript-eslint"/);
   assert.match(eslintConfig, /\.\{ts,tsx\}/);
-  for (const ignoredPath of ["**/dist/**", ".agents/**", ".codex/**", ".superpowers/**", ".worktrees/**"]) {
+  for (const ignoredPath of [
+    "**/dist/**",
+    ".agents/**",
+    ".codex/**",
+    ".superpowers/**",
+    ".worktrees/**",
+  ]) {
     assert.equal(eslintConfig.includes(`"${ignoredPath}"`), true);
   }
   assert.match(eslintConfig, /tseslint\.configs\.recommended\.map/);
   assert.doesNotMatch(eslintConfig, /\.\.\.tseslint\.configs\.recommended,\s/);
-  assert.equal(existsSync(join(rootDir, "packages", "config", "package.json")), false);
-  assert.match(readFileSync(configReadmePath, "utf8"), /non-package placeholder/i);
+  assert.equal(
+    existsSync(join(rootDir, "packages", "config", "package.json")),
+    false,
+  );
+  assert.match(
+    readFileSync(configReadmePath, "utf8"),
+    /non-package placeholder/i,
+  );
 });
 
 test("Next security update excludes audited vulnerable resolutions", () => {
   // 생성된 잠금파일을 검사해 승인 버전 누락·취약 버전 또는 불필요한 이미지 의존성 재유입을 막는다.
   // 콜백 매개변수는 없으며 파일 읽기 외에 설치나 네트워크 부작용은 없다.
   const lockfile = readFileSync(lockfilePath, "utf8");
-  assert.equal(/^ {2}next@16\.3\.6:/mu.test(lockfile), true, "patched Next resolution must exist");
-  assert.equal(/^ {2}next@16\.3\.[0-5]:/mu.test(lockfile), false, "vulnerable ImageResponse Next must be absent");
-  assert.equal(/^ {2}next@16\.2\.11:/mu.test(lockfile), false, "audited vulnerable Next must be absent");
-  assert.equal(/^ {2}baseline-browser-mapping@2\.10\.43:/mu.test(lockfile), false, "audited vulnerable browser mapping must be absent");
-  assert.equal(/^ {2}sharp@/mu.test(lockfile), false, "unused native image optimizer must remain absent");
+  assert.equal(
+    /^ {2}next@16\.3\.8:/mu.test(lockfile),
+    true,
+    "patched Next resolution must exist",
+  );
+  assert.equal(
+    /^ {2}next@16\.3\.[0-7]:/mu.test(lockfile),
+    false,
+    "audited vulnerable Next must be absent",
+  );
+  assert.equal(
+    /^ {2}next@16\.2\.11:/mu.test(lockfile),
+    false,
+    "audited vulnerable Next must be absent",
+  );
+  assert.equal(
+    /^ {2}baseline-browser-mapping@2\.10\.43:/mu.test(lockfile),
+    false,
+    "audited vulnerable browser mapping must be absent",
+  );
+  assert.equal(
+    /^ {2}sharp@/mu.test(lockfile),
+    false,
+    "unused native image optimizer must remain absent",
+  );
 });
 
 test("workspace policy detects unapproved local TypeScript config overrides", () => {
   const helperName = `tsconfig.${process.pid}-${randomUUID()}.json`;
   const helperPath = join(rootDir, "packages", "contracts", helperName);
   const helperRelativePath = `packages/contracts/${helperName}`;
-  writeFileSync(helperPath, '{"compilerOptions":{"skipLibCheck":true}}\n', "utf8");
+  writeFileSync(
+    helperPath,
+    '{"compilerOptions":{"skipLibCheck":true}}\n',
+    "utf8",
+  );
   try {
     const packageLocalSkipLibCheck = workspaceTsconfigFiles()
-      .filter((path) => JSON.parse(readFileSync(path, "utf8")).compilerOptions?.skipLibCheck === true)
+      .filter(
+        (path) =>
+          JSON.parse(readFileSync(path, "utf8")).compilerOptions
+            ?.skipLibCheck === true,
+      )
       .map((path) => path.slice(rootDir.length + 1).replaceAll("\\", "/"))
       .sort();
     assert.equal(packageLocalSkipLibCheck.includes(helperRelativePath), true);
@@ -268,24 +380,73 @@ test("workspace policy detects unapproved local TypeScript config overrides", ()
   }
 });
 
+test("development tools exclude audited vulnerable dependency resolutions", () => {
+  // 테스트·린트 도구도 패치된 버전만 설치되도록 두 lockfile 섹션을 함께 검사한다.
+  // 매개변수 없이 파일만 읽으며, 패키지 설치나 외부 네트워크 요청은 하지 않는다.
+  const lockfile = readFileSync(lockfilePath, "utf8");
+  const packagesStart = lockfile.search(/^packages:\r?$/mu);
+  assert.notEqual(packagesStart, -1, "lockfile must contain packages");
+  // overrides의 원래 버전 선택자는 설치 결과가 아니므로 packages 이후만 검사한다.
+  const sections = lockfile.slice(packagesStart).split(/^snapshots:\r?$/mu);
+  assert.equal(
+    sections.length,
+    2,
+    "lockfile must contain packages and snapshots",
+  );
+  for (const section of sections) {
+    assert.equal(
+      /^ {2}undici@7\.29\.1:(?: \{\})?\r?$/mu.test(section),
+      true,
+      "patched undici must exist",
+    );
+    assert.equal(
+      /^ {2}brace-expansion@5\.0\.12:\r?$/mu.test(section),
+      true,
+      "patched brace-expansion must exist",
+    );
+    assert.equal(
+      /^ {2}undici@7\.29\.0:/mu.test(section),
+      false,
+      "audited vulnerable undici must be absent",
+    );
+    assert.equal(
+      /^ {2}brace-expansion@5\.0\.(?:9|10|11):/mu.test(section),
+      false,
+      "audited vulnerable brace-expansion must be absent",
+    );
+  }
+});
+
 test("lockfile resolves only patched production dependency versions", () => {
   const lockfile = readFileSync(lockfilePath, "utf8");
 
   assertPatchedProductionResolutions(lockfile);
   assert.throws(
-    () => assertPatchedProductionResolutions(lockfile.replaceAll("postcss@8.5.23", "postcss@8.5.22")),
+    () =>
+      assertPatchedProductionResolutions(
+        lockfile.replaceAll("postcss@8.5.23", "postcss@8.5.22"),
+      ),
     /patched production dependency resolution/u,
   );
   assert.throws(
-    () => assertPatchedProductionResolutions(lockfile.replaceAll("nanoid@3.3.18", "nanoid@3.3.16")),
+    () =>
+      assertPatchedProductionResolutions(
+        lockfile.replaceAll("nanoid@3.3.18", "nanoid@3.3.16"),
+      ),
     /patched production dependency resolution/u,
   );
   assert.throws(
-    () => assertPatchedProductionResolutions(lockfile.replaceAll("find-my-way@9.7.0", "find-my-way@9.6.0")),
+    () =>
+      assertPatchedProductionResolutions(
+        lockfile.replaceAll("find-my-way@9.7.0", "find-my-way@9.6.0"),
+      ),
     /patched production dependency resolution/u,
   );
   assert.throws(
-    () => assertPatchedProductionResolutions(lockfile.replaceAll("fastify@5.12.5", "fastify@5.10.0")),
+    () =>
+      assertPatchedProductionResolutions(
+        lockfile.replaceAll("fastify@5.12.5", "fastify@5.10.0"),
+      ),
     /patched production dependency resolution/u,
   );
   assert.throws(
@@ -303,11 +464,17 @@ test("lockfile resolves only patched production dependency versions", () => {
     /vulnerable production dependency resolution/u,
   );
   assert.throws(
-    () => assertPatchedProductionResolutions(lockfile.replaceAll("fast-uri@3.1.8", "fast-uri@3.1.5")),
+    () =>
+      assertPatchedProductionResolutions(
+        lockfile.replaceAll("fast-uri@3.1.8", "fast-uri@3.1.5"),
+      ),
     /patched production dependency resolution/u,
   );
   assert.throws(
-    () => assertPatchedProductionResolutions(lockfile.replaceAll("fast-uri@4.1.5", "fast-uri@4.1.2")),
+    () =>
+      assertPatchedProductionResolutions(
+        lockfile.replaceAll("fast-uri@4.1.5", "fast-uri@4.1.2"),
+      ),
     /patched production dependency resolution/u,
   );
   assert.throws(
@@ -327,7 +494,13 @@ test("lockfile resolves only patched production dependency versions", () => {
   // mailto 필드명 인코딩 취약 버전이 새 패치와 함께 재유입돼도 거부한다.
   for (const version of ["4.1.3", "4.1.4"]) {
     assert.throws(
-      () => assertPatchedProductionResolutions(lockfile.replace("\nsnapshots:", `\nsnapshots:\n  fast-uri@${version}:`)),
+      () =>
+        assertPatchedProductionResolutions(
+          lockfile.replace(
+            "\nsnapshots:",
+            `\nsnapshots:\n  fast-uri@${version}:`,
+          ),
+        ),
       /vulnerable production dependency resolution/u,
     );
   }

@@ -6,6 +6,12 @@ import type { CoreController } from "./core-controller.js";
 
 export type CoreRouteContext = Readonly<{ params?: Promise<Readonly<Record<string, string>>> }>;
 type ContainerFactory = () => Readonly<{ coreController: Pick<CoreController, "handle"> }>;
+type NativeContainerFactory = () => Readonly<{ nativeCoreController: Pick<CoreController, "handle"> }>;
+
+/** @param operation 고정 장부 작업. @param request Android 요청. @param context 비동기 경로 변수. @param factory 요청 전용 native 컨트롤러. */
+export function handleNativeCoreRoute(operation: CoreOperation, request: Request, context: CoreRouteContext = {}, factory: NativeContainerFactory = createRequestContainer): Promise<Response> {
+  return handleCoreRoute(operation, request, context, () => ({ coreController: factory().nativeCoreController }));
+}
 
 /**
  * 라우트가 지정한 작업만 요청별 컨트롤러에 연결한다. 생성/params 오류 원문은 공개하지 않는다.

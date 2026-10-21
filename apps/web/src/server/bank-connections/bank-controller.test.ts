@@ -14,7 +14,7 @@ const proofCookie = `__Host-ab_bank_proof_${id}=${id}.${proof}`;
 
 /** @param reply 내부 API 결과. DB/네트워크만 대체하고 BFF 검증은 실제 실행한다. */
 function setup(reply = Response.json({ requestId: id, authorizationUrl: url }), enabled = true) {
-  const sessions = { resolve: vi.fn(async () => ({ userId: id, sessionId: sid, accessToken: "private-access", refreshToken: "private-refresh", supabaseSessionId: id, rotationVersion: 0, accessTokenExpiresAt: new Date(now.getTime() + 120_000) })) };
+  const sessions = { resolve: vi.fn(async () => ({ userId: id, sessionId: sid, accessToken: "private-access", refreshToken: "private-refresh", supabaseSessionId: id, rotationVersion: 0, clientChannel: "web" as const, deviceId: null, accessTokenExpiresAt: new Date(now.getTime() + 120_000) })) };
   const delegatedApiClient = { request: vi.fn(async () => reply) };
   const controller = new BankController({ configuredOrigin: new URL(origin), csrfKey: key, now: () => now, sessions, delegatedApiClient, authorizationEndpoint: enabled ? endpoint : null });
   return { controller, sessions, delegatedApiClient };

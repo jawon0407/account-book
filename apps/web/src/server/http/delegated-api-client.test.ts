@@ -14,6 +14,7 @@ const requestId = "123e4567-e89b-42d3-a456-426614174004";
  */
 function mutationRequest(body = new TextEncoder().encode('{"amountKrw":"12000"}')): DelegatedApiRequest {
   return {
+    clientChannel: "web",
     body,
     contentType: "application/json",
     method: "POST",
@@ -161,6 +162,7 @@ describe("DelegatedApiClient", () => {
     const timeout = vi.spyOn(AbortSignal, "timeout").mockReturnValueOnce(timeoutSignal);
     try {
       await client.request({
+        clientChannel: "web",
         body,
         contentType: null,
         method: "GET",

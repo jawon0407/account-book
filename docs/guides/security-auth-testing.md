@@ -1,5 +1,11 @@
 # 인증 보안 테스트 가이드
 
+## 최신 인증·원장 감사 보완: 2026-10-16
+
+Android 우선 개발을 위한 공통 인증 경계를 보완했다. 거절된 로그아웃 요청은 쿠키를 변경하지 않으며, 선택된 인증/보안 파일의 분기 커버리지는 기준을 낮추지 않고 839/839(100%)가 됐다. 프로젝트 전체 커버리지와는 다르다. Next·source-map-js와 개발 도구 undici·brace-expansion을 패치했다.
+
+실행 범위, 중간 실패, 실제 PC Playwright 검증, PR/배포와의 차이 및 남은 Android 작업은 [2026-10-16 검증 기록](../status/2026-10-16-android-foundation-audit.ko.md)에 모았다. 아래 기록은 각 날짜 당시의 결과로 보존하며 최신 상태와 섞지 않는다.
+
 ## 테스트 도구 보안 패치: 2026-09-14
 
 기준 `f7ba1e5`, 브랜치 `hotfix/vitest-security-20260914`. [실행 계획](../superpowers/plans/2026-09-14-vitest-security-patch.md)에 따라 Vitest와 coverage-v8의 `4.1.10`을 `4.1.11`로 함께 올린다. [공식 공지](https://github.com/vitest-dev/vitest/security/advisories/GHSA-82fw-gwwq-j7x9)의 개발 서버 파일 접근 취약점이 대상이며, 운영 금융 데이터 유출을 재현했다는 의미가 아니다.

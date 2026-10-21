@@ -8,9 +8,26 @@ import { TransactionDeleteForm } from "./transaction-delete-form.js";
 const id = "11111111-1111-4111-8111-111111111111", timestamp = "2026-10-01T00:00:00Z";
 const accounts = [{ id, name: "통장", kind: "bank" as const, version: 1, currentBalanceKrw: 0, archivedAt: null, createdAt: timestamp, updatedAt: timestamp }];
 const categories = [{ id, name: "식비", kind: "expense" as const, sortOrder: 0, version: 1, archivedAt: null, createdAt: timestamp, updatedAt: timestamp }];
-const row: Transaction = { id, accountId: id, categoryId: id, transferId: null, kind: "expense", amountKrw: 100, memo: "원본", occurredOn: "2026-10-01", version: 3, deletedAt: null, createdAt: timestamp, updatedAt: timestamp };
+const row: Transaction = { id, accountId: id, categoryId: id, counterpartyName: null, transferId: null, kind: "expense", amountKrw: 100, memo: "원본", occurredOn: "2026-10-01", version: 3, deletedAt: null, createdAt: timestamp, updatedAt: timestamp };
 const noop = () => undefined;
 afterEach(cleanup);
+it("clears references and edits counterparty without choosing a category automatically", async () => {
+  const save = vi.fn(async () => undefined);
+  const income = { ...categories[0]!, id: "22222222-2222-4222-8222-222222222222", kind: "income" as const, name: "급여" };
+  render(<TransactionEditForm row={row} accounts={accounts} categories={[...categories, income]} onSave={save} onSaved={noop} onClose={noop} />);
+  fireEvent.change(screen.getByLabelText("계좌"), { target: { value: "" } });
+  fireEvent.change(screen.getByLabelText("거래 종류"), { target: { value: "income" } });
+  expect((screen.getByLabelText("카테고리") as HTMLSelectElement).value).toBe("");
+  fireEvent.change(screen.getByLabelText("거래 상대명 (선택)"), { target: { value: " 합성 상대 " } });
+  fireEvent.submit(screen.getByRole("form"));
+  await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ expectedVersion: 3, accountId: null, categoryId: null, counterpartyName: "합성 상대", type: "income" })));
+});
+it("allows saving an unassigned entry without any account or category options", async () => {
+  const save = vi.fn(async () => undefined);
+  render(<TransactionEditForm row={{ ...row, accountId: null, categoryId: null }} accounts={[]} categories={[]} onSave={save} onSaved={noop} onClose={noop} />);
+  fireEvent.submit(screen.getByRole("form"));
+  await waitFor(() => expect(save).toHaveBeenCalledWith(expect.objectContaining({ accountId: null, categoryId: null, counterpartyName: null })));
+});
 it("edits using the original version and explicit null for cleared memo", async () => {
   const save = vi.fn(async () => undefined), saved = vi.fn();
   render(<TransactionEditForm row={row} accounts={accounts} categories={categories} onSave={save} onSaved={saved} onClose={noop} />);

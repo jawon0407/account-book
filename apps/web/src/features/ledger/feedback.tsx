@@ -11,6 +11,9 @@ export function errorMessage(error: unknown): string {
     case "AUTH_CSRF_REJECTED": return "요청을 확인할 수 없어요. 화면을 새로고침한 뒤 다시 시도해 주세요.";
     case "AUTH_RATE_LIMITED": return "요청이 많아요. 잠시 후 다시 시도해 주세요.";
     case "LEDGER_VALIDATION_FAILED": case "PROFILE_VALIDATION_FAILED": return "입력 내용을 확인해 주세요.";
+    case "LEDGER_TIME_SETUP_REQUIRED": return "거래 시각을 기록하기 전에 거주 시간대를 설정해 주세요.";
+    case "LEDGER_TIME_REVIEW_REQUIRED": return "거래 날짜와 시각이 장부 기준에 맞는지 확인해 주세요.";
+    case "LEDGER_TIME_CHANGE_REQUIRED": return "기록된 시각이 있어 날짜만 바꿀 수 없어요. 시각을 유지하거나 날짜만 지정하는 옵션을 선택해 주세요.";
     default: return "서버 응답을 확인하지 못했어요. 입력을 유지한 채 다시 시도해 주세요.";
   }
 }

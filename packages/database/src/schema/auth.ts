@@ -4,6 +4,7 @@ import {
   check,
   customType,
   integer,
+  index,
   jsonb,
   pgSchema,
   primaryKey,
@@ -51,6 +52,8 @@ export const authSessions = appPrivate.table(
     revokedAt: timestamp("revoked_at", { withTimezone: true }),
     revocationPendingAt: timestamp("revocation_pending_at", { withTimezone: true }),
     rotationVersion: integer("rotation_version").notNull().default(0),
+    clientChannel: text("client_channel", { enum: ["web", "android"] }).notNull().default("web"),
+    deviceId: uuid("device_id"),
   },
   /**
    * @param table - 암호화된 토큰과 만료·철회 상태를 담은 세션 열.
@@ -60,6 +63,7 @@ export const authSessions = appPrivate.table(
     check("auth_sessions_selector_hash_length", sql`octet_length(${table.selectorHash}) = 32`),
     check("auth_sessions_rotation_version_nonnegative", sql`${table.rotationVersion} >= 0`),
     check("auth_sessions_absolute_expiry", sql`${table.absoluteExpiresAt} > ${table.createdAt}`),
+    check("auth_sessions_client_context", sql`(${table.clientChannel} = 'web' and ${table.deviceId} is null) or (${table.clientChannel} = 'android' and ${table.deviceId} is not null)`),
     uniqueIndex("auth_sessions_provider_session_unique")
       .on(table.supabaseSessionId)
       .where(sql`${table.revokedAt} is null`),
@@ -150,7 +154,7 @@ export const authRateLimits = appPrivate.table(
   "auth_rate_limits",
   {
     fingerprint: bytea("fingerprint").notNull(),
-    kind: text("kind", { enum: ["sign_in", "sign_up", "password_reset", "oauth_start"] }).notNull(),
+    kind: text("kind", { enum: ["sign_in", "sign_up", "password_reset", "oauth_start", "native_auth"] }).notNull(),
     windowStartedAt: timestamp("window_started_at", { withTimezone: true }).notNull(),
     windowSeconds: integer("window_seconds").notNull(),
     count: integer("count").notNull(),
@@ -163,8 +167,9 @@ export const authRateLimits = appPrivate.table(
   (table) => [
     primaryKey({ columns: [table.fingerprint, table.kind, table.windowStartedAt] }),
     check("auth_rate_limits_fingerprint_length", sql`octet_length(${table.fingerprint}) = 32`),
-    check("auth_rate_limits_kind", sql`${table.kind} in ('sign_in', 'sign_up', 'password_reset', 'oauth_start')`),
+    check("auth_rate_limits_kind", sql`${table.kind} in ('sign_in', 'sign_up', 'password_reset', 'oauth_start', 'native_auth')`),
     check("auth_rate_limits_window_seconds_positive", sql`${table.windowSeconds} > 0`),
     check("auth_rate_limits_count_nonnegative", sql`${table.count} >= 0`),
+    index("auth_rate_limits_native_cleanup_idx").on(table.windowStartedAt).where(sql`${table.kind} = 'native_auth'`),
   ],
 );

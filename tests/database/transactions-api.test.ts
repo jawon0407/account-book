@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "node:crypto";
+import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { Pool } from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { UserDatabase } from "../../apps/api/src/core/user-database.js";
@@ -26,6 +26,31 @@ describe("transaction repository with real RLS", () => {
   async function seed(value: Awaited<ReturnType<typeof setup>>, amount = 100) {
     return (await fixture.admin.query("insert into finance.transaction_history(user_id,account_id,category_id,kind,amount_krw,occurred_on) values($1,$2,$3,'expense',$4,'2026-10-01') returning id", [value.user, value.accountId, value.categoryId, amount])).rows[0].id as string;
   }
+  it("creates unassigned entries, assigns and clears references without losing omitted values", async () => {
+    const a = await setup(), b = await setup();
+    const first = await repository.create(a.user, { accountId: null, categoryId: null, type: "expense", amountKrw: 100, occurredOn: "2026-10-16", idempotencyKey: randomUUID(), counterpartyName: " 합성 상점 " });
+    expect(first).toMatchObject({ accountId: null, categoryId: null, counterpartyName: "합성 상점" });
+    expect((await repository.list(a.user, {})).items).toHaveLength(1);
+    expect((await repository.list(a.user, { accountId: a.accountId })).items).toEqual([]);
+    await expect(repository.update(a.user, first.id, { expectedVersion: 1, accountId: b.accountId })).rejects.toMatchObject({ status: 404 });
+    await expect(repository.update(a.user, first.id, { expectedVersion: 1, categoryId: b.categoryId })).rejects.toMatchObject({ status: 404 });
+    expect(await repository.update(a.user, first.id, { expectedVersion: 1, accountId: a.accountId, categoryId: a.categoryId })).toMatchObject({ id: first.id, version: 2, counterpartyName: "합성 상점" });
+    expect(await repository.update(a.user, first.id, { expectedVersion: 2, counterpartyName: "다른 합성 상대" })).toMatchObject({ accountId: a.accountId, categoryId: a.categoryId, version: 3 });
+    expect(await repository.update(a.user, first.id, { expectedVersion: 3, accountId: null, categoryId: null, counterpartyName: null, type: "income" })).toMatchObject({ id: first.id, version: 4, accountId: null, categoryId: null, counterpartyName: null, kind: "income" });
+    await expect(repository.update(a.user, first.id, { expectedVersion: 3, memo: "경쟁" })).rejects.toMatchObject({ status: 409 });
+    expect((await repository.list(b.user, {})).items).toEqual([]);
+  });
+  it("replays legacy snapshots and preserves the pre-counterparty fingerprint", async () => {
+    const a = await setup(), id = await seed(a), key = randomUUID();
+    const value = { accountId: a.accountId, categoryId: a.categoryId, type: "expense" as const, amountKrw: 100, occurredOn: "2026-10-01", memo: null };
+    const snapshot = (await repository.list(a.user, {})).items.find(row => row.id === id)!;
+    const legacy = Object.fromEntries(Object.entries(snapshot).filter(([name]) => name !== "counterpartyName"));
+    const hash = createHash("sha256").update(JSON.stringify(value)).digest();
+    await fixture.admin.query("insert into finance.request_deduplication(user_id,operation,idempotency_key,request_fingerprint,response_snapshot) values($1,'create_transaction',$2,$3,$4)", [a.user,key,hash,JSON.stringify(legacy)]);
+    expect(await repository.create(a.user, { ...value, memo: undefined, idempotencyKey: key })).toMatchObject({ id, counterpartyName: null });
+    expect(await repository.create(a.user, { ...value, memo: undefined, idempotencyKey: key, counterpartyName: null })).toMatchObject({ id, counterpartyName: null });
+    await expect(repository.create(a.user, { ...value, memo: undefined, idempotencyKey: key, counterpartyName: "새 상대" })).rejects.toMatchObject({ code: "LEDGER_IDEMPOTENCY_CONFLICT" });
+  });
   it("paginates same-day UUID ties without duplicates and binds cursor to user/filters", async () => {
     const a = await setup(), b = await setup(), ids = [];
     for (let n = 0; n < 5; n++) ids.push(await seed(a));
@@ -120,7 +145,7 @@ describe("transaction repository with real RLS", () => {
     const a = await setup(), id = await seed(a), other = await seedAccount(fixture.admin, a.user), category = await seedCategory(fixture.admin, a.user);
     await fixture.admin.query("update finance.accounts set archived_at=now() where user_id=$1", [a.user]);
     await fixture.admin.query("update finance.transaction_categories set archived_at=now() where user_id=$1", [a.user]);
-    expect((await repository.update(a.user, id, { expectedVersion: 1, memo: "옛 기록", accountId: a.accountId, categoryId: a.categoryId })).version).toBe(2);
+    expect((await repository.update(a.user, id, { expectedVersion: 1, memo: "옛 기록", counterpartyName: "과거 상대", accountId: a.accountId, categoryId: a.categoryId })).version).toBe(2);
     await expect(repository.update(a.user, id, { expectedVersion: 2, accountId: other })).rejects.toMatchObject({ code: "LEDGER_ACCOUNT_UNAVAILABLE" });
     await expect(repository.update(a.user, id, { expectedVersion: 2, categoryId: category })).rejects.toMatchObject({ code: "LEDGER_CATEGORY_UNAVAILABLE" });
     expect((await repository.remove(a.user, id, { expectedVersion: 2 })).version).toBe(3);

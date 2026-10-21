@@ -32,7 +32,7 @@ export async function bankIdentity(deps: CoreDependencies, request: Request) {
   const remaining = session.accessTokenExpiresAt.getTime() - now.getTime();
   if (!Number.isFinite(remaining)) throw new Error("INVALID_SESSION");
   if (remaining <= 60_000) throw new CoreBoundaryError("AUTH_SESSION_REFRESH_REQUIRED", 401);
-  return { userId: session.userId, sessionId: session.sessionId };
+  return { userId: session.userId, sessionId: session.sessionId, clientChannel: session.clientChannel };
 }
 
 /** @param value 상류 인가 URL. @param endpoint 서버가 주입한 허용 HTTPS 경로. @returns 정확한 origin/path·state만 통과. */

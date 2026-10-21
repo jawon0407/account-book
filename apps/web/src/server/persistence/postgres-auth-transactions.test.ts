@@ -23,6 +23,16 @@ describe("PostgresAuthRepository authentication transactions", () => {
     database.affectedRows = [{ id, provider: "google", intent, stateHash: digest, interactionHash: digest, encryptedPkceVerifier: envelope, returnPath: "/app", createdAt: now, expiresAt, consumedAt: now }];
     await expect(repository.claimOAuthTransaction({ provider: "google", stateHash: digest, interactionHash: digest, now })).resolves.toBeNull();
   });
+  it.each([
+    { id: "not-a-uuid" }, { stateHash: Buffer.alloc(1) }, { interactionHash: null },
+    { provider: "unknown" }, { encryptedPkceVerifier: "invalid" }, { returnPath: "https://foreign.example.test" },
+    { createdAt: "invalid" }, { expiresAt: "invalid" }, { consumedAt: "invalid" },
+  ])("rejects malformed OAuth row fields even with a valid intent %#", async (override) => {
+    const { database, repository } = subject();
+    database.affectedRows = [{ id, provider: "google", intent: "sign_in", stateHash: digest, interactionHash: digest, encryptedPkceVerifier: envelope, returnPath: "/app", createdAt: now, expiresAt, consumedAt: now, ...override }];
+    await expect(repository.claimOAuthTransaction({ provider: "google", stateHash: digest, interactionHash: digest, now })).resolves.toBeNull();
+  });
+
   it.each([null, [], "invalid-row"])("rejects non-record results from all claim paths %#", async (row) => {
     const { database, repository } = subject();
     database.affectedRows = [row];

@@ -135,7 +135,7 @@ function setup(overrides: Record<string, unknown> = {}) {
      * 컨트롤러 응답에 비밀값이 섞이지 않는지 시험하도록 서버 전용 가짜 토큰을 포함한 세션을 반환합니다.
      * @returns 가짜 접근·갱신 토큰과 정상 내부 세션 메타데이터.
      */
-    resolve: vi.fn(async () => ({ accessToken: "server-access-jwt", refreshToken: "server-refresh-token", sessionId: "123e4567-e89b-12d3-a456-426614174002", userId: user.id, supabaseSessionId: "123e4567-e89b-12d3-a456-426614174003", accessTokenExpiresAt: new Date(now.getTime() + 120_000), rotationVersion: 0 })),
+    resolve: vi.fn(async () => ({ clientChannel: "web" as const, accessToken: "server-access-jwt", refreshToken: "server-refresh-token", sessionId: "123e4567-e89b-12d3-a456-426614174002", userId: user.id, supabaseSessionId: "123e4567-e89b-12d3-a456-426614174003", accessTokenExpiresAt: new Date(now.getTime() + 120_000), rotationVersion: 0 })),
     /**
      * 실제 제공자 갱신 없이 성공 상태를 반환합니다.
      * @returns status가 refreshed인 결과.
@@ -504,6 +504,37 @@ describe("AuthController", () => {
     expect(JSON.stringify(await ok.json())).not.toMatch(/access|refresh|selector/iu);
   });
 
+  it.each([
+    ["foreign origin", { Origin: "https://foreign.example.test" }],
+    ["invalid CSRF token", { "X-CSRF-Token": "invalid" }],
+    ["missing session cookie", { Cookie: "" }],
+    ["form submission", { "Content-Type": "application/x-www-form-urlencoded" }],
+  ] as const)("rejects logout with %s without mutating browser or server session", async (_label, headers) => {
+    const subject = setup();
+    const response = await subject.controller.signOut!(request("/api/auth/sign-out", {
+      method: "POST", body: "{}", headers: { Cookie: `__Host-ab_session=${selector}`, ...headers },
+    }, ""));
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ code: "AUTH_CSRF_REJECTED" });
+    expect(response.headers.get("Set-Cookie")).toBeNull();
+    expect(subject.sessions.resolve).not.toHaveBeenCalled();
+    expect(subject.sessions.revokeCurrent).not.toHaveBeenCalled();
+    expect(subject.provider.signOut).not.toHaveBeenCalled();
+    expect(subject.sessions.markRevocationPending).not.toHaveBeenCalled();
+  });
+
+  it("clears the cookie when session resolution fails after a valid logout request", async () => {
+    const subject = setup();
+    subject.sessions.resolve.mockRejectedValueOnce(new Error("session unavailable"));
+    const response = await subject.controller.signOut!(request("/api/auth/sign-out", {
+      method: "POST", body: "{}", headers: { Cookie: `__Host-ab_session=${selector}` },
+    }, ""));
+    expect(response.status).toBe(503);
+    expect(response.headers.get("Set-Cookie")).toMatch(/__Host-ab_session=;.*Max-Age=0/u);
+    expect(subject.sessions.revokeCurrent).not.toHaveBeenCalled();
+    expect(subject.provider.signOut).not.toHaveBeenCalled();
+  });
+
   it("revokes locally before provider logout and keeps the cookie deleted on provider failure", async () => {
     const subject = setup();
     subject.provider.signOut.mockImplementationOnce(async () => { subject.events.push("provider-sign-out"); throw new Error("provider detail"); });
@@ -533,6 +564,7 @@ describe("AuthController", () => {
     expect(subject.delegatedApiClient.request).toHaveBeenCalledOnce();
     const input = subject.delegatedApiClient.request.mock.calls[0]![0];
     expect(input).toMatchObject({
+      clientChannel: "web",
       contentType: null,
       method: "GET",
       scope: "me:read",
@@ -542,6 +574,7 @@ describe("AuthController", () => {
     });
     expect(Object.keys(input).sort()).toEqual([
       "body",
+      "clientChannel",
       "contentType",
       "method",
       "scope",

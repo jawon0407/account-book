@@ -30,3 +30,12 @@ export { BankConnectionRequestIdSchema, BankConnectionStatusSchema, BankConnecti
 export type { BankConnectionRequestStatus } from "./bank-connections.js";
 export { ProfileSchema, UpdateProfileInputSchema } from "./profiles.js";
 export type { Profile, UpdateProfileInput } from "./profiles.js";
+export { NativeDeviceIdSchema, NativeSessionTokenSchema, NativeSignInInputSchema, NativeSessionSchema, NativeAuthResponseSchema } from "./native-auth.js";
+export type { NativeSignInInput, NativeSession, NativeAuthResponse } from "./native-auth.js";
+export { CollectorChangeInputSchema, CollectorStateSchema } from "./collector.js";
+export type { CollectorChangeInput, CollectorState } from "./collector.js";
+export { LedgerTimeZoneSchema, TimedLedgerEvidenceSchema, LedgerTimeEvidenceSchema, ResidenceTimeHistorySchema, preserveDateOnlyLedgerTime, buildTimedLedgerTime, selectResidenceTimeZone } from "./ledger-time.js";
+export type { TimedLedgerEvidence, LedgerTimeEvidence, ResidenceTimeHistory, ResidenceTimeSelection } from "./ledger-time.js";
+export { UtcInstantSchema } from "./ledger-time.js";
+export { ManualLedgerTimeInputSchema, TransactionTimeSnapshotSchema } from "./transaction-time.js";
+export type { ManualLedgerTimeInput, TransactionTimeSnapshot } from "./transaction-time.js";

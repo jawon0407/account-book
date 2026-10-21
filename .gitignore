@@ -30,3 +30,15 @@ Thumbs.db
 # Logs
 *.log
 .gstack/
+
+# Native generated projects, Expo cache and signing material
+apps/mobile/.expo/
+apps/mobile/android/
+apps/mobile/ios/
+*.jks
+*.keystore
+*.p12
+*.mobileprovision
+
+# Supabase CLI local metadata
+supabase/.temp/

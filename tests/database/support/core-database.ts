@@ -11,15 +11,20 @@ export const CORE_MIGRATIONS = [
   "202609290003_ledger_storage.sql", "202609290004_ledger_integrity.sql",
   "202609290005_ledger_access.sql",
   "202609300001_readable_schema_names.sql",
+  "20261015165313_ledger_unassigned_counterparty.sql",
+  "20261016074408_ledger_time_storage.sql",
+  "20261016082800_ledger_time_cursor_index.sql",
 ];
 
 /**
  * 고정된 loopback 폐기용 DB에서만 독립 DB를 만든다. 기존 DB는 절대 덮어쓰지 않는다.
  * @param environment 테스트 URL/폐기 동의. hosted URI는 접속 전에 거부한다.
  * @param applyRename false면 업그레이드 검사용 기존 이름 상태를 만든다.
+ * @param applyUnassigned false면 미지정 원장 이관 전의 이름 변경 완료 상태를 만든다.
+ * @param applyTime false면 거래 시각 이관 직전 상태를 만든다. 이전 이관 제외 시 후속 이관도 제외한다.
  * @returns 관리자 연결과 이번 호출이 생성한 DB만 정리하는 close 함수.
  */
-export async function openCoreDatabase(environment: NodeJS.ProcessEnv = process.env, applyRename = true): Promise<CoreDatabase> {
+export async function openCoreDatabase(environment: NodeJS.ProcessEnv = process.env, applyRename = true, applyUnassigned = true, applyTime = true): Promise<CoreDatabase> {
   if (environment.TEST_DATABASE_URL !== CONTROL || environment.TEST_DATABASE_DISPOSABLE !== "true") {
     throw new Error("CORE_TEST_DATABASE_CONFIGURATION_INVALID");
   }
@@ -58,7 +63,9 @@ export async function openCoreDatabase(environment: NodeJS.ProcessEnv = process.
       created_at timestamptz not null default now());
       insert into auth.users(id,raw_app_meta_data) values('${EXISTING_USER}','{"provider":"email"}');`);
     for (const name of CORE_MIGRATIONS) {
-      if (!applyRename && name === "202609300001_readable_schema_names.sql") continue;
+      if (!applyRename && name >= "202609300001_readable_schema_names.sql") continue;
+      if (!applyUnassigned && name >= "20261015165313_ledger_unassigned_counterparty.sql") continue;
+      if (!applyTime && name >= "20261016074408_ledger_time_storage.sql") continue;
       const sql = await readFile(new URL(`../../../supabase/migrations/${name}`, import.meta.url), "utf8")
         .catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return ""; throw error; });
       if (sql) await admin.query(sql);

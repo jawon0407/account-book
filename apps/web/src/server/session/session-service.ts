@@ -1,5 +1,6 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { validProviderIssuedAt } from "../security/provider-time.js";
+import { validSessionContext, type SessionChannel } from "../security/session-context.js";
 import {
   createSessionSelector,
   hashSessionSelector,
@@ -63,6 +64,8 @@ type ResolvedSession = Readonly<{
   supabaseSessionId: string;
   accessTokenExpiresAt: Date;
   rotationVersion: number;
+  clientChannel: SessionChannel;
+  deviceId: string | null;
 }>;
 
 /**
@@ -194,6 +197,7 @@ function validRecord(record: AuthSessionRecord, now: Date): AuthSessionRecord {
     dates.every(validDate),
     [record.revokedAt, record.revocationPendingAt].every((date) => date === null || validDate(date)),
     Number.isSafeInteger(record.rotationVersion) && record.rotationVersion >= 0,
+    validSessionContext(record.clientChannel, record.deviceId),
     record.revokedAt === null,
   ].every(Boolean);
   if (!valid) return fail("expired");
@@ -217,6 +221,7 @@ export class SessionService {
    * @param refreshToken 복호화한 갱신 토큰으로 새 토큰을 받는 함수.
    * @param createId 앱 세션 UUID 생성 함수.
    * @param clock 제공자 갱신이 끝난 뒤 시각을 읽는 함수.
+   * @param clientChannel 서버 구성에서 고정한 채널. 기본 웹; 요청 헤더로 선택하지 않는다.
    */
   public constructor(
     private readonly repository: AuthRepository,
@@ -224,6 +229,7 @@ export class SessionService {
     private readonly refreshToken: SessionTokenRefresher,
     private readonly createId: () => string = randomUUID,
     private readonly clock: () => Date = () => new Date(),
+    private readonly clientChannel: SessionChannel = "web",
   ) {}
 
   /** Creates a 30-day opaque session and returns only the browser selector plus safe metadata. */
@@ -231,12 +237,13 @@ export class SessionService {
    * 제공자 토큰을 검증하고 접근·갱신 토큰을 각각 암호화해 30일 앱 세션을 저장합니다. 브라우저 식별자는 해시로만 저장합니다.
    * @param tokens 서버 전용 제공자 토큰 쌍.
    * @param now 생성 기준 시각.
+   * @param deviceId Android 설치별 UUID. Android에는 필수이고 웹에는 전달하지 않는다.
    * @returns 브라우저 식별자·앱 세션 및 사용자 ID·만료 시각.
    * @throws 검증·암호화·DB 실패 시 세션 가용성 오류.
    */
-  public async create(tokens: SessionTokenPair, now: Date): Promise<Readonly<{ selector: string; sessionId: string; userId: string; accessTokenExpiresAt: Date; absoluteExpiresAt: Date }>> {
+  public async create(tokens: SessionTokenPair, now: Date, deviceId?: string): Promise<Readonly<{ selector: string; sessionId: string; userId: string; accessTokenExpiresAt: Date; absoluteExpiresAt: Date }>> {
     try {
-      if (!validTime(now)) return fail();
+      if (!validTime(now) || !validSessionContext(this.clientChannel, deviceId ?? null)) return fail();
       const pair = validTokenPair(tokens, now);
       const id = this.createId();
       if (!validUuid(id)) return fail();
@@ -256,6 +263,8 @@ export class SessionService {
         revokedAt: null,
         revocationPendingAt: null,
         rotationVersion: 0,
+        clientChannel: this.clientChannel,
+        deviceId: deviceId ?? null,
       };
       if (!await this.repository.createSession(record, pair.issuedAtSeconds)) return fail();
       return { selector, sessionId: id, userId: pair.userId, accessTokenExpiresAt: new Date(pair.accessTokenExpiresAt), absoluteExpiresAt };
@@ -285,10 +294,11 @@ export class SessionService {
    * 기존 세션의 갱신 토큰으로 제공자를 한 번 호출한 뒤 새 토큰을 암호화합니다. 기대 버전 비교를 사용해 경합 중 오래된 응답이 덮어쓰지 못하게 합니다.
    * @param selector 현재 세션 식별자.
    * @param now 기존 세션 조회 기준 시각.
-   * @returns 저장 승자는 refreshed, 비교 조건이 바뀌면 superseded.
+   * @returns 웹은 refreshed/superseded. Android 저장 승자는 새 selector를 함께 반환하며 이전 값은 즉시 무효가 됩니다.
+   * Android 동시 갱신 패자는 expired로 실패합니다. 앱은 갱신을 직렬화하고 응답 유실 시 재로그인해야 합니다.
    * @throws 만료·요청 제한·제공자 및 저장소 가용성 오류.
    */
-  public async refresh(selector: string, now: Date): Promise<Readonly<{ status: "refreshed" | "superseded" }>> {
+  public async refresh(selector: string, now: Date): Promise<Readonly<{ status: "refreshed" | "superseded" }> | Readonly<{ status: "refreshed"; selector: string }>> {
     try {
       const session = await this.load(selector, now);
       let providerPair: SessionTokenPair;
@@ -302,6 +312,7 @@ export class SessionService {
       const refreshedAt = new Date(refreshedAtValue);
       const replacement = validTokenPair(providerPair, refreshedAt, "expired");
       if (replacement.userId !== session.userId) return fail("expired");
+      const nextSelector = this.clientChannel === "android" ? createSessionSelector() : undefined;
       const rotation: RotateSessionInput = {
         sessionId: session.sessionId,
         expectedRotationVersion: session.rotationVersion,
@@ -311,8 +322,16 @@ export class SessionService {
         supabaseSessionId: replacement.supabaseSessionId,
         accessTokenExpiresAt: new Date(replacement.accessTokenExpiresAt),
         now: refreshedAt,
+        ...(nextSelector === undefined ? {} : {
+          selectorRotation: { expectedHash: hashSessionSelector(selector), replacementHash: hashSessionSelector(nextSelector), deviceId: session.deviceId! },
+        }),
       };
-      return (await this.repository.rotate(rotation)) ? { status: "refreshed" } : { status: "superseded" };
+      const stored = await this.repository.rotate(rotation);
+      if (nextSelector !== undefined) {
+        if (!stored) return fail("expired");
+        return { status: "refreshed", selector: nextSelector };
+      }
+      return stored ? { status: "refreshed" } : { status: "superseded" };
     } catch (error) {
       return propagateFailure(error);
     }
@@ -329,7 +348,7 @@ export class SessionService {
   public async revokeCurrent(selector: string, now: Date): Promise<boolean> {
     try {
       if (!validTime(now)) return fail();
-      return await this.repository.revokeBySelectorHash(hashSessionSelector(selector), new Date(now));
+      return await this.repository.revokeBySelectorHash(hashSessionSelector(selector), new Date(now), this.clientChannel);
     } catch {
       return fail();
     }
@@ -392,6 +411,7 @@ export class SessionService {
     }
     if (record === null || !(record.selectorHash instanceof Uint8Array) || !sameDigest(selectorHash, record.selectorHash)) return fail("expired");
     const active = validRecord(record, now);
+    if (active.clientChannel !== this.clientChannel) return fail("expired");
     try {
       return {
         accessToken: decryptToken(active.encryptedAccessToken, { recordId: active.id, tokenKind: "access" }, this.keyring),
@@ -401,6 +421,8 @@ export class SessionService {
         supabaseSessionId: active.supabaseSessionId,
         accessTokenExpiresAt: new Date(active.accessTokenExpiresAt),
         rotationVersion: active.rotationVersion,
+        clientChannel: active.clientChannel,
+        deviceId: active.deviceId,
       };
     } catch {
       return fail("expired");

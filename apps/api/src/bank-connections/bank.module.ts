@@ -17,7 +17,8 @@ import { BANK_SERVICE } from "./bank.tokens.js";
     { provide: BankRepository, inject: [BankDatabase],
       /** @param db 최소 권한 실행기. @returns 매개변수 SQL 저장소. */
       useFactory: (db: BankDatabase) => new BankRepository(db) },
-    { provide: BANK_SERVICE, useValue: null },
+    // factory로 구성해 테스트 전용 공급자 주입을 허용하되 일반 실행의 기본값은 여전히 null이다.
+    { provide: BANK_SERVICE, useFactory: () => null },
   ],
 })
 export class BankModule {}

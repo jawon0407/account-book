@@ -64,6 +64,8 @@
 .form .error, .form .notice { margin: 0; }
 .form fieldset { display: flex; flex-direction: column; gap: 8px; border: 0; padding: 0; margin: 0; min-width: 0; }
 .form label { margin-top: 8px; font-weight: 600; }
+.form .checkboxLabel { display: flex; align-items: center; gap: 10px; min-height: 44px; margin-top: 0; }
+.form .checkboxLabel input { flex: 0 0 20px; width: 20px; height: 20px; min-height: 20px; margin: 0; padding: 0; accent-color: var(--book-accent); }
 .form :is(input, select, textarea), .toolbar select, .filters :is(input, select) { min-height: 44px; border: 1px solid #9bafb9; border-radius: 8px; padding: 8px 12px; background: white; color: #162b35; font: inherit; max-width: 100%; }
 .form :is(input, select, textarea):disabled { background: #f1f4f5; color: #536873; }
 .form textarea { resize: vertical; }

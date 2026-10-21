@@ -1,5 +1,6 @@
 import type { TokenEnvelope } from "../security/token-envelope.js";
 import type { AuthProvider } from "@account-book/contracts";
+import type { SessionChannel } from "../security/session-context.js";
 
 /** A server-only persisted opaque session. Token values are always encrypted envelopes. */
 export type AuthSessionRecord = Readonly<{
@@ -16,6 +17,8 @@ export type AuthSessionRecord = Readonly<{
   revokedAt: Date | null;
   revocationPendingAt: Date | null;
   rotationVersion: number;
+  clientChannel: SessionChannel;
+  deviceId: string | null;
 }>;
 
 /** Complete encrypted input for creating an opaque session row. */
@@ -31,6 +34,12 @@ export type RotateSessionInput = Readonly<{
   supabaseSessionId: string;
   accessTokenExpiresAt: Date;
   now: Date;
+  /** Android 전용: 이전 해시·설치 ID가 일치할 때 새 해시와 제공자 암호문을 함께 저장한다. 생략하면 웹만 갱신한다. */
+  selectorRotation?: Readonly<{
+    expectedHash: Uint8Array;
+    replacementHash: Uint8Array;
+    deviceId: string;
+  }>;
 }>;
 
 /** Persisted OAuth transaction containing only digests and an encrypted PKCE verifier. */
@@ -116,8 +125,8 @@ export interface AuthRepository {
    */
   findActiveBySelectorHash(hash: Uint8Array, now: Date): Promise<AuthSessionRecord | null>;
   /**
-   * 기대 버전과 제공자 세션 ID가 여전히 일치하는 활성 세션만 두 암호화 토큰으로 교체합니다. 버전과 마지막 사용 시각도 갱신합니다.
-   * @param input 비교 조건·교체할 암호문·만료 및 현재 시각.
+   * 기대 버전과 제공자 세션 ID가 일치하는 활성 세션을 갱신합니다. Android는 설치·이전 해시까지 비교하고 새 해시를 같은 UPDATE로 저장합니다.
+   * @param input 비교 조건·암호문·시각 및 Android 전용 식별자 교체 조건. 교체 조건이 없으면 웹만 갱신합니다.
    * @returns 정확히 한 행을 갱신하면 true, 검증 실패나 경합 시 false.
    * @throws DB 갱신 오류.
    */
@@ -126,10 +135,11 @@ export interface AuthRepository {
    * 식별자 해시가 일치하는 미폐기 세션에 폐기 시각을 기록합니다. 제공자 로그아웃 요청은 하지 않습니다.
    * @param hash 폐기할 브라우저 식별자 해시.
    * @param now 기록할 폐기 시각.
+   * @param channel 서버가 고정한 채널. 기본 웹; 다른 채널은 변경하지 않는다.
    * @returns 정확히 한 행을 폐기하면 true.
    * @throws DB 갱신 오류.
    */
-  revokeBySelectorHash(hash: Uint8Array, now: Date): Promise<boolean>;
+  revokeBySelectorHash(hash: Uint8Array, now: Date, channel?: SessionChannel): Promise<boolean>;
   /**
    * 한 사용자에게 속한 미폐기 로컬 세션 전부에 폐기 시각을 기록합니다.
    * @param userId 대상 사용자 UUID.

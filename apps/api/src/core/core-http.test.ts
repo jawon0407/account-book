@@ -16,6 +16,7 @@ import { AccountsRepository } from "../accounts/accounts.repository.js";
 import { CategoriesRepository } from "../categories/categories.repository.js";
 import { TransactionsRepository } from "../transactions/transactions.repository.js";
 import { CoreError } from "./core-error.js";
+import { CollectorRepository } from "../collector/collector.repository.js";
 
 const userId = "11111111-1111-4111-8111-111111111111", resource = "22222222-2222-4222-8222-222222222222";
 const profile = { id: userId, nickname: null, avatarObjectKey: null, role: "member", signupProvider: "email", version: 1, createdAt: "2026-09-29T00:00:00Z", updatedAt: "2026-09-29T00:00:00Z" };
@@ -24,6 +25,7 @@ const category = { id: resource, name: "식비", kind: "expense", sortOrder: 0, 
 
 describe("core API signed HTTP boundary", () => {
   let app: NestFastifyApplication, privateKey: CryptoKey;
+  const collectorRepo = { get: vi.fn(async () => ({ version: 0, state: "inactive" })), change: vi.fn(async () => ({ version: 1, state: "active_here" })) };
   const profileRepo = { get: vi.fn(async () => profile), update: vi.fn(async () => ({ ...profile, nickname: "닉네임", version: 2 })) };
   const accountRepo = { list: vi.fn(async () => ({ items: [account] })), create: vi.fn(async () => account), update: vi.fn(async () => account), archive: vi.fn(async () => account) };
   const categoryRepo = { list: vi.fn(async () => ({ items: [category] })), create: vi.fn(async () => category), update: vi.fn(async () => category), archive: vi.fn(async () => category) };
@@ -38,26 +40,52 @@ describe("core API signed HTTP boundary", () => {
       .overrideProvider(REPLAY_STORE).useValue(replay).overrideProvider(ACCESS_TOKEN_VERIFIER).useValue(verifier)
       .overrideProvider(ProfilesRepository).useValue(profileRepo).overrideProvider(AccountsRepository).useValue(accountRepo)
       .overrideProvider(CategoriesRepository).useValue(categoryRepo)
-      .overrideProvider(TransactionsRepository).useValue(transactionRepo).compile();
+      .overrideProvider(TransactionsRepository).useValue(transactionRepo)
+      .overrideProvider(CollectorRepository).useValue(collectorRepo).compile();
     app = module.createNestApplication<NestFastifyApplication>(createApiFastifyAdapter(), { logger: false });
     registerRequestBodyParsers(app); await configureApiApplication(app); await app.init(); await app.getHttpAdapter().getInstance().ready();
   });
   afterAll(async () => { await app?.close(); });
 
   /** @param method HTTP 메서드. @param target 실제 요청 URL. @param scope 요청 전용 권한. @param body 서명할 JSON. @returns 새 one-use JWT 헤더. */
-  async function headers(method: "GET" | "POST" | "PATCH" | "DELETE", target: string, scope: DelegatedScope, body = "") {
+  async function headers(method: "GET" | "POST" | "PATCH" | "DELETE", target: string, scope: DelegatedScope, body = "", channel = "web") {
     const requestId = randomUUID(), now = Math.floor(Date.now() / 1000);
     const contentType = method === "GET" ? null : "application/json";
     const rbh = createHash("sha256").update(canonicalDelegatedRequest({ method, target, contentType, bodySha256: createHash("sha256").update(body).digest("base64url"), requestId })).digest("base64url");
-    const token = await new SignJWT({ aud: "urn:account-book:api", iss: "urn:account-book:bff", iat: now, nbf: now, exp: now + 30, jti: randomBytes(16).toString("base64url"), rid: requestId, rbh, scp: scope, sub: userId, sid: randomUUID() })
+    const token = await new SignJWT({ chn: channel, aud: "urn:account-book:api", iss: "urn:account-book:bff", iat: now, nbf: now, exp: now + 30, jti: randomBytes(16).toString("base64url"), rid: requestId, rbh, scp: scope, sub: userId, sid: randomUUID() })
       .setProtectedHeader({ alg: "ES256", typ: "at+jwt", kid: "test" }).sign(privateKey);
     return { authorization: `Bearer ${token}`, "x-request-id": requestId, ...(contentType ? { "content-type": contentType } : {}) };
   }
   /** @param method 메서드. @param url 경로. @param scope 권한. @param input JSON 입력. @returns 실제 Nest/Fastify 응답. */
-  async function send(method: "GET" | "POST" | "PATCH" | "DELETE", url: string, scope: DelegatedScope, input?: unknown) {
+  async function send(method: "GET" | "POST" | "PATCH" | "DELETE", url: string, scope: DelegatedScope, input?: unknown, channel = "web") {
     const body = input === undefined ? "" : JSON.stringify(input);
-    return app.inject({ method, url, headers: await headers(method, url, scope, body), ...(input !== undefined ? { payload: body } : {}) });
+    return app.inject({ method, url, headers: await headers(method, url, scope, body, channel), ...(input !== undefined ? { payload: body } : {}) });
   }
+  it("binds collector requests to signed Android principal and dedicated scopes", async () => {
+    expect((await send("GET", "/v1/collector", "collector:read", undefined, "android")).json()).toEqual({ version: 0, state: "inactive" });
+    expect(collectorRepo.get).toHaveBeenCalledWith(userId, expect.stringMatching(/^[0-9a-f-]{36}$/u));
+    const input = { action: "activate", expectedVersion: 0, replaceExisting: false };
+    const response = await send("PATCH", "/v1/collector", "collector:write", input, "android");
+    expect(response.statusCode).toBe(200); expect(response.headers["cache-control"]).toBe("private, no-store");
+    expect(collectorRepo.change).toHaveBeenCalledWith(userId, expect.any(String), input);
+    expect((await send("GET", "/v1/collector", "collector:write", undefined, "android")).statusCode).toBe(401);
+    expect((await send("PATCH", "/v1/collector", "collector:read", input, "android")).statusCode).toBe(401);
+    expect((await app.inject({ method: "GET", url: "/v1/collector" })).statusCode).toBe(401);
+  });
+  it("rejects web collector controls and protected/ambiguous inputs before repository access", async () => {
+    collectorRepo.get.mockClear(); collectorRepo.change.mockClear();
+    for (const method of ["GET", "PATCH"] as const) {
+      const input = method === "PATCH" ? { action: "deactivate", expectedVersion: 1 } : undefined;
+      const response = await send(method, "/v1/collector", method === "GET" ? "collector:read" : "collector:write", input);
+      expect(response.statusCode).toBe(403); expect(response.json().code).toBe("LEDGER_CHANNEL_FORBIDDEN");
+    }
+    for (const input of [{}, { action: "activate", expectedVersion: 0 }, { action: "deactivate", expectedVersion: 0, sessionId: resource }]) {
+      const response = await send("PATCH", "/v1/collector", "collector:write", input, "android");
+      expect(response.statusCode).toBe(400); expect(response.json().code).toBe("COLLECTOR_VALIDATION_FAILED");
+    }
+    expect((await send("GET", "/v1/collector?userId=x", "collector:read", undefined, "android")).statusCode).toBe(400);
+    expect(collectorRepo.get).not.toHaveBeenCalled(); expect(collectorRepo.change).not.toHaveBeenCalled();
+  });
   it.each([
     ["GET", "/v1/profile", "profile:read", undefined, 200],
     ["PATCH", "/v1/profile", "profile:write", { nickname: "닉네임", expectedVersion: 1 }, 200],
@@ -82,6 +110,22 @@ describe("core API signed HTTP boundary", () => {
     const response = await send("POST", "/v1/accounts", "account:write", { kind: "cash", name: "x", idempotencyKey: randomUUID(), userId: resource });
     expect(response.statusCode).toBe(400);
   });
+  it("accepts a versioned residence setting but never a client-owned clock", async () => {
+    const value = { ledgerTimeZone: "Asia/Seoul", expectedVersion: 1 };
+    expect((await send("PATCH", "/v1/profile", "profile:write", value, "android")).statusCode).toBe(200);
+    expect(profileRepo.update).toHaveBeenCalledWith(userId, value);
+    for (const extra of [{ effectiveFrom: "2026-10-01T00:00:00.000Z" }, { revision: 99 }, { ledgerTimeZone: null }])
+      expect((await send("PATCH", "/v1/profile", "profile:write", { ...value, ...extra })).statusCode).toBe(400);
+  });
+  it("allows manual UTC evidence on Android without accepting automated provenance", async () => {
+    const time = { occurredAt: "2026-10-01T06:00:00.000Z", precision: "minute", sourceTimeZone: "Asia/Seoul" };
+    const value = { type: "expense", amountKrw: 100, occurredOn: "2026-10-01", idempotencyKey: randomUUID(), time };
+    expect((await send("POST", "/v1/transactions", "transaction:write", value, "android")).statusCode).toBe(201);
+    expect(transactionRepo.create).toHaveBeenCalledWith(userId, { ...value, accountId: null, categoryId: null });
+    for (const extra of [{ source: "notification" }, { ledgerTimeZone: "UTC" }])
+      expect((await send("POST", "/v1/transactions", "transaction:write", { ...value, time: { ...time, ...extra } }, "android")).statusCode).toBe(400);
+    expect((await send("POST", "/v1/transactions", "transaction:write", value)).statusCode).toBe(403);
+  });
   it("wires transaction list with exact scope and normalized query", async () => {
     const response = await send("GET", "/v1/transactions?limit=2&type=expense", "transaction:read");
     expect(response.statusCode).toBe(200);
@@ -96,11 +140,21 @@ describe("core API signed HTTP boundary", () => {
   });
   it("accepts only ordinary income/expense creation under transaction:write", async () => {
     const value = { accountId: resource, categoryId: resource, type: "expense", amountKrw: 100, occurredOn: "2026-10-01", idempotencyKey: randomUUID() };
-    expect((await send("POST", "/v1/transactions", "transaction:write", value)).statusCode).toBe(201);
+    expect((await send("POST", "/v1/transactions", "transaction:write", value, "android")).statusCode).toBe(201);
     expect(transactionRepo.create).toHaveBeenCalledWith(userId, value);
     expect((await send("POST", "/v1/transactions", "transaction:read", value)).statusCode).toBe(401);
     for (const change of [{ amountKrw: 0 }, { amountKrw: 1.5 }, { amountKrw: "100" }, { memo: " " }, { memo: "x".repeat(501) }, { occurredOn: "2026-02-30" }, { userId }, { type: "transfer_in" }])
-      expect((await send("POST", "/v1/transactions", "transaction:write", { ...value, ...change })).statusCode).toBe(400);
+      expect((await send("POST", "/v1/transactions", "transaction:write", { ...value, ...change }, "android")).statusCode).toBe(400);
+  });
+  it("denies web transaction creation even with a spoofed Android header without touching the repository", async () => {
+    transactionRepo.create.mockClear();
+    const body = JSON.stringify({ accountId: resource, categoryId: resource, type: "expense", amountKrw: 100, occurredOn: "2026-10-01", idempotencyKey: randomUUID() });
+    const response = await app.inject({ method: "POST", url: "/v1/transactions", payload: body,
+      headers: { ...await headers("POST", "/v1/transactions", "transaction:write", body), "x-client-channel": "android" } });
+    expect(response.statusCode).toBe(403);
+    expect(response.json().code).toBe("LEDGER_CHANNEL_FORBIDDEN");
+    expect(response.headers["cache-control"]).toBe("private, no-store");
+    expect(transactionRepo.create).not.toHaveBeenCalled();
   });
   it.each(["PATCH", "DELETE"] as const)("guards %s transaction mutation scope, identity and input", async method => {
     const value = { expectedVersion: 1, ...(method === "PATCH" ? { memo: null } : {}) };

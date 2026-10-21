@@ -12,6 +12,14 @@ function setup(responses: unknown[]) {
   return { calls, api: createTransactionsApi(http, id) };
 }
 describe("transaction browser transport", () => {
+  it("accepts omitted create references and sends explicit null when clearing", async () => {
+    const output = { ...row, accountId: null, categoryId: null, counterpartyName: null };
+    const { api, calls } = setup([{ csrfToken: "test" }, output, { csrfToken: "test" }, output]);
+    await api.create({ type: "expense", amountKrw: 100, occurredOn: "2026-10-16", idempotencyKey: id });
+    expect(await calls[1]!.json()).toMatchObject({ accountId: null, categoryId: null });
+    await api.update(id, { expectedVersion: 1, accountId: null, categoryId: null, counterpartyName: null });
+    expect(await calls[3]!.json()).toEqual({ expectedVersion: 1, accountId: null, categoryId: null, counterpartyName: null });
+  });
   it("binds update/delete to UUID, expectedVersion, CSRF and the current account", async () => {
     const tombstone = { id, version: 2, deletedAt: row.createdAt };
     const { api, calls } = setup([{ csrfToken: "test" }, row, { csrfToken: "test" }, tombstone]);

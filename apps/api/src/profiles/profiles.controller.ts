@@ -19,7 +19,7 @@ export class ProfilesController {
   public get(@Req() request: FastifyRequest): Promise<Profile> {
     noQuery(request, true); return this.repository.get(owner(request));
   }
-  /** @param request nickname/expectedVersion 본문. @returns 수정 후 프로필. */
+  /** @param request nickname/ledgerTimeZone/expectedVersion 본문. @returns 수정 후 프로필. 효력 시각은 서버가 정한다. */
   @Patch()
   @RequireDelegatedScope("profile:write")
   @Header("Cache-Control", "private, no-store")

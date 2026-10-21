@@ -13,7 +13,7 @@ const envelope = { version: 1 as const, keyId: "test", iv: Buffer.alloc(12).toSt
 
 beforeAll(async () => {
   database = await openCoreDatabase();
-  for (const migration of ["202607200002_server_pkce_transactions.sql", "202607200003_user_security_state.sql"]) {
+  for (const migration of ["202607200002_server_pkce_transactions.sql", "202607200003_user_security_state.sql", "20261016040532_native_session_channel.sql"]) {
     await database.admin.query(await readFile(new URL(`../../supabase/migrations/${migration}`, import.meta.url), "utf8"));
   }
   repository = new PostgresAuthRepository(drizzle(database.admin));
@@ -22,7 +22,7 @@ afterAll(async () => { await database?.close(); });
 
 /** @param userId 테스트 사용자. @param now BFF 기준 시각. @returns 비밀값 없는 정상 암호문 세션 fixture. */
 function session(userId: string, now: Date): AuthSessionRecord {
-  return { id: randomUUID(), selectorHash: randomBytes(32), userId, supabaseSessionId: randomUUID(), encryptedAccessToken: envelope, encryptedRefreshToken: envelope, accessTokenExpiresAt: new Date(now.getTime() + 3600_000), createdAt: now, lastSeenAt: now, absoluteExpiresAt: new Date(now.getTime() + 86_400_000), revokedAt: null, revocationPendingAt: null, rotationVersion: 0 };
+  return { id: randomUUID(), selectorHash: randomBytes(32), userId, supabaseSessionId: randomUUID(), encryptedAccessToken: envelope, encryptedRefreshToken: envelope, accessTokenExpiresAt: new Date(now.getTime() + 3600_000), createdAt: now, lastSeenAt: now, absoluteExpiresAt: new Date(now.getTime() + 86_400_000), revokedAt: null, revocationPendingAt: null, rotationVersion: 0, clientChannel: "web", deviceId: null };
 }
 
 describe("password recovery issuance barrier with separate clocks", () => {

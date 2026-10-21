@@ -8,9 +8,9 @@ beforeAll(async () => { db = await openCoreDatabase(); });
 afterAll(async () => { await db?.close(); });
 
 describe("identity schema on real disposable PostgreSQL", () => {
-  it("creates the three private identity tables", async () => {
+  it("creates private identity tables including the explicit residence history", async () => {
     const r = await db.admin.query("select tablename from pg_tables where schemaname='user' order by tablename");
-    expect(r.rows.map(row => row.tablename)).toEqual(["role_history", "roles", "users"]);
+    expect(r.rows.map(row => row.tablename)).toEqual(["ledger_time_history", "role_history", "roles", "users"]);
   });
   it("backfills the existing user without changing its Auth ID", async () => {
     const r = await db.admin.query("select p.signup_provider,p.deleted_at,r.role from \"user\".users p join \"user\".roles r using(user_id) where p.user_id=$1", [EXISTING_USER]);
@@ -94,7 +94,7 @@ describe("identity schema on real disposable PostgreSQL", () => {
   });
   it("forces RLS on all new identity tables and keeps runtime non-owner", async () => {
     const r = await db.admin.query("select c.relrowsecurity,c.relforcerowsecurity,pg_get_userbyid(c.relowner) as owner from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='user' and c.relkind='r'");
-    expect(r.rows).toHaveLength(3);
+    expect(r.rows).toHaveLength(4);
     expect(r.rows.every(row => row.relrowsecurity && row.relforcerowsecurity && row.owner !== "app_api")).toBe(true);
   });
 });

@@ -45,6 +45,13 @@ describe("SupabaseAuthAdapter explicit server PKCE boundary", () => {
     expect(setup.fetcher).not.toHaveBeenCalled();
   });
 
+  it.each(["github", "", null, 42])("rejects malformed OAuth exchange provider before transport %#", async (provider) => {
+    const setup = adapter();
+    await expectSafeError(() => setup.adapter.exchangeOAuthCode({ code: "code", codeVerifier: verifier, provider: provider as never }), "AUTH_OAUTH_TRANSACTION_INVALID");
+    expect(setup.fetcher).not.toHaveBeenCalled();
+    expect(setup.factory).not.toHaveBeenCalled();
+  });
+
   it("posts signup, token exchange, and recovery requests with exact server-set inputs", async () => {
     const setup = adapter([jsonResponse({ user: { id: userId } }), jsonResponse(rawSession), jsonResponse(rawSession), jsonResponse({}), jsonResponse(rawSession)]);
     const confirmationUrl = new URL("https://app.example.test/auth/confirm");
@@ -107,6 +114,36 @@ describe("SupabaseAuthAdapter explicit server PKCE boundary", () => {
         expect.any(Function),
       ]);
     }
+  });
+
+  it("keeps the PC provider session alive when Android logs out through the real SDK", async () => {
+    // This transport models two active provider sessions; the production SDK must send local scope.
+    const activeSessions = new Set(["pc-session", "android-session"]);
+    const requestedScopes: Array<string | null> = [];
+    const fetcher = vi.fn<typeof fetch>(async (input, init) => {
+      const outgoing = new Request(input, init);
+      const url = new URL(outgoing.url);
+      expect(outgoing.headers.get("authorization")).toBe(`Bearer ${accessToken}`);
+      if (url.pathname === "/auth/v1/user" && outgoing.method === "GET") {
+        return jsonResponse(rawSession.user);
+      }
+      expect(url.pathname).toBe("/auth/v1/logout");
+      expect(outgoing.method).toBe("POST");
+      const scope = url.searchParams.get("scope");
+      requestedScopes.push(scope);
+      if (scope === "local") activeSessions.delete("android-session");
+      else activeSessions.clear();
+      return jsonResponse({});
+    });
+    const subject = new SupabaseAuthAdapter(
+      { url: "https://project.supabase.co", anonKey: "anon-key" }, undefined, fetcher,
+    );
+
+    await subject.signOut(accessToken, "android-refresh-token");
+
+    expect(requestedScopes).toEqual(["local"]);
+    expect(activeSessions).toEqual(new Set(["pc-session"]));
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
   it("rejects unsafe configuration, redirects, challenges, verifiers, and providers before side effects", async () => {

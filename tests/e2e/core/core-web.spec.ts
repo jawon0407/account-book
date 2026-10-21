@@ -1,6 +1,7 @@
 import { test, expect, type Page } from "@playwright/test";
 import { AxeBuilder } from "@axe-core/playwright";
-import { buildApiError } from "../../../packages/contracts/src/index.js";
+import { randomUUID } from "node:crypto";
+import { nativeLedger } from "./native-ledger-helper.js";
 
 /** @param page 격리된 브라우저. 합성 IdP 사용자로 실제 로그인 경로를 통과한다. */
 async function login(page: Page) {
@@ -141,7 +142,7 @@ test("identity revalidation hides old forms and rejects a mismatched account ass
   await expect(page.getByRole("button", { name: "추가하기" })).toHaveCount(0);
 });
 
-test("PC transactions survive response loss, filter/paginate, update balance and reject archived parents", async ({ page }) => {
+test("Android creates idempotent transactions while PC filters, paginates and edits only", async ({ page, request }) => {
   await login(page);
   await page.getByRole("button", { name: "계좌 추가", exact: true }).first().click();
   await page.getByLabel("계좌 이름").fill("거래 테스트 통장");
@@ -157,41 +158,35 @@ test("PC transactions survive response loss, filter/paginate, update balance and
   }
   await page.goto("/app/transactions");
   await expect(page.getByRole("heading", { name: "거래 내역", exact: true })).toBeVisible();
-  // 최초 요청은 실제 저장 후 응답만 유실. 두 번째 전송은 429 대역, 세 번째는 같은 키로 실제 서버 재시도다.
-  const attempts: unknown[] = [];
-  await page.route("**/api/transactions", async route => {
-    if (route.request().method() !== "POST") return route.continue();
-    attempts.push(route.request().postDataJSON());
-    if (attempts.length === 1) {
-      // 대역 전송의 Fetch Metadata를 복원하고 실제 저장 성공을 확인한 후 응답만 유실시킨다.
-      expect(new URL(route.request().url()).origin).toBe(new URL(page.url()).origin);
-      const response = await route.fetch({ headers: { ...await route.request().allHeaders(), "sec-fetch-site": "same-origin" } });
-      expect(response.status()).toBe(201);
-      return route.abort("failed");
-    }
-    if (attempts.length === 2) return route.fulfill({ status: 429, json: buildApiError({ code: "AUTH_RATE_LIMITED", retryable: true }) });
-    return route.continue();
-  });
-  await page.getByRole("button", { name: "거래 추가", exact: true }).click();
-  await page.getByLabel("금액 (원)").fill("1200");
-  await page.getByLabel("메모 (선택)").fill("응답 유실 재시도");
-  await page.getByRole("button", { name: "저장하기" }).click();
-  await expect(page.getByRole("button", { name: "같은 내용으로 재시도" })).toBeVisible();
-  await expect(page.getByLabel("금액 (원)")).toBeDisabled();
-  await page.getByRole("button", { name: "같은 내용으로 재시도" }).click();
-  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("요청이 많아요");
-  await expect(page.getByLabel("금액 (원)")).toBeDisabled();
-  await page.getByRole("button", { name: "같은 내용으로 재시도" }).click();
-  await expect(page.getByRole("row").filter({ hasText: "응답 유실 재시도" })).toHaveCount(1);
-  expect(attempts).toHaveLength(3); expect(attempts[1]).toEqual(attempts[0]); expect(attempts[2]).toEqual(attempts[0]);
-  for (const [type, amount, memo] of [["income", "10000", "월급 기록"], ["expense", "800", "간식 기록"]]) {
-    await page.getByRole("button", { name: "거래 추가", exact: true }).click();
-    await page.getByLabel("거래 종류", { exact: true }).selectOption(type!);
-    await page.getByLabel("금액 (원)").fill(amount!); await page.getByLabel("메모 (선택)").fill(memo!);
-    await page.getByRole("button", { name: "저장하기" }).click();
-    await expect(page.getByRole("row").filter({ hasText: memo! })).toBeVisible();
+  await expect(page.getByRole("button", { name: "거래 추가", exact: true })).toHaveCount(0);
+  await expect(page.getByText(/새 거래는 Android 앱에서 기록/)).toBeVisible();
+  const native = await nativeLedger(request);
+  const accounts = (await (await native.get("accounts")).json()).items as { id: string; name: string }[];
+  const categories = (await (await native.get("categories")).json()).items as { id: string; name: string }[];
+  const accountId = accounts.find(row => row.name === "거래 테스트 통장")!.id;
+  const expenseId = categories.find(row => row.name === "거래 식비")!.id;
+  const incomeId = categories.find(row => row.name === "거래 급여")!.id;
+  const value = { accountId, categoryId: expenseId, type: "expense", amountKrw: 1200, occurredOn: "2026-10-01", memo: "응답 유실 재시도", idempotencyKey: randomUUID() };
+  // 응답을 UI에 사용하지 않은 첫 저장 뒤, 명시적으로 동일 의도를 재전송해 원장 중복 방지를 검증한다.
+  const first = await native.post("transactions", value); expect(first.status()).toBe(201);
+  const repeated = await native.post("transactions", value); expect(repeated.status()).toBe(201);
+  expect(await repeated.json()).toEqual(await first.json());
+  for (const [type, amountKrw, memo, categoryId] of [["income", 10000, "월급 기록", incomeId], ["expense", 800, "간식 기록", expenseId]] as const) {
+    expect((await native.post("transactions", { accountId, categoryId, type, amountKrw, memo, occurredOn: "2026-10-01", idempotencyKey: randomUUID() })).status()).toBe(201);
   }
+  const blocked = await page.evaluate(async value => {
+    const { csrfToken } = await (await fetch("/api/auth/csrf")).json();
+    const response = await fetch("/api/transactions", { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken, "X-Client-Channel": "android" }, body: JSON.stringify({ ...value, idempotencyKey: crypto.randomUUID() }) });
+    return { status: response.status, code: (await response.json()).code };
+  }, value);
+  expect(blocked).toEqual({ status: 403, code: "LEDGER_CHANNEL_FORBIDDEN" });
+  const other = await nativeLedger(request, "second@example.test");
+  expect((await (await other.get("transactions")).json()).items).toEqual([]);
+  const foreign = await other.post("transactions", { ...value, idempotencyKey: randomUUID() });
+  expect(foreign.status()).toBe(404);
+  expect((await foreign.json()).code).toBe("LEDGER_NOT_FOUND");
   await page.reload();
+  await expect(page.getByRole("row").filter({ hasText: "응답 유실 재시도" })).toHaveCount(1);
   await expect(page.getByRole("row").filter({ hasText: "월급 기록" })).toBeVisible();
   await page.getByLabel("종류 필터").selectOption("income");
   await page.getByRole("button", { name: "조회하기" }).click();
@@ -212,8 +207,6 @@ test("PC transactions survive response loss, filter/paginate, update balance and
   await page.getByRole("link", { name: "계좌", exact: true }).click();
   await expect(page.getByRole("row").filter({ hasText: "거래 테스트 통장" }).getByText("8,000원", { exact: true })).toBeVisible();
   await page.getByRole("link", { name: "거래 내역", exact: true }).click();
-  await page.getByRole("button", { name: "거래 추가", exact: true }).click();
-  await page.getByLabel("금액 (원)").fill("500");
   const archived = await page.evaluate(async () => {
     const { items } = await (await fetch("/api/categories")).json();
     const item = items.find((row: { name: string }) => row.name === "거래 식비");
@@ -221,10 +214,9 @@ test("PC transactions survive response loss, filter/paginate, update balance and
     return (await fetch(`/api/categories/${item.id}/archive`, { method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken }, body: JSON.stringify({ expectedVersion: item.version }) })).status;
   });
   expect(archived).toBe(200);
-  await page.getByRole("button", { name: "저장하기" }).click();
-  await expect(page.getByRole("dialog").getByRole("alert")).toContainText("사용할 수 없어요");
-  await expect(page.getByLabel("금액 (원)")).toHaveValue("500");
-  await page.keyboard.press("Escape");
+  const rejected = await native.post("transactions", { ...value, amountKrw: 500, idempotencyKey: randomUUID() });
+  expect(rejected.status()).toBe(409);
+  expect((await rejected.json()).code).toBe("LEDGER_CATEGORY_UNAVAILABLE");
   await page.getByRole("button", { name: "로그아웃", exact: true }).click();
   await expect(page.getByRole("heading", { name: "로그아웃했어요" })).toBeVisible();
   await expect(page.getByText("월급 기록")).toHaveCount(0);
@@ -234,7 +226,7 @@ test("PC transactions survive response loss, filter/paginate, update balance and
 test("transaction data and draft disappear while identity is revalidated", async ({ page }) => {
   await login(page); await page.goto("/app/transactions");
   await expect(page.getByRole("row").filter({ hasText: "월급 기록" })).toBeVisible();
-  await page.getByRole("button", { name: "거래 추가", exact: true }).click();
+  await page.getByRole("row").filter({ hasText: "월급 기록" }).getByRole("button", { name: "수정", exact: true }).click();
   await page.getByLabel("메모 (선택)").fill("이전 계정의 미저장 거래");
   let release!: () => void;
   const held = new Promise<void>(resolve => { release = resolve; });

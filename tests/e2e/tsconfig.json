@@ -4,5 +4,5 @@
     "noEmit": true,
     "types": ["node", "@playwright/test"]
   },
-  "include": ["*.ts", "ui/**/*.ts", "ui/**/*.tsx", "support/**/*.ts", "core/**/*.ts"]
+  "include": ["*.ts", "ui/**/*.ts", "ui/**/*.tsx", "support/**/*.ts", "core/**/*.ts", "bank/**/*.ts", "device/**/*.ts"]
 }

@@ -145,7 +145,7 @@ export interface AuthProviderPort {
    * @throws {@link AuthProviderError} with a fixed auth failure code.
    */
   /**
-   * 제공자 세션의 접근·갱신 토큰을 사용하여 외부 로그아웃을 수행합니다.
+   * 접근·갱신 토큰에 해당하는 제공자 세션만 로그아웃합니다. 다른 기기 세션은 유지합니다.
    * @param accessToken 복호화한 제공자 접근 토큰.
    * @param refreshToken 복호화한 제공자 갱신 토큰.
    * @returns 제공자 폐기가 완료되면 값 없이 종료합니다.

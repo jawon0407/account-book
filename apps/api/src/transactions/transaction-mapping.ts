@@ -5,7 +5,10 @@ import { isoTimestamp, safeInteger } from "../core/serialization.js";
 export function transaction(row: Record<string, unknown>): Transaction {
   return TransactionSchema.parse({ id: row.id, accountId: row.account_id, kind: row.kind,
     categoryId: row.category_id, transferId: row.transfer_id, amountKrw: safeInteger(row.amount_krw),
-    occurredOn: row.occurred_on, memo: row.memo, version: safeInteger(row.version),
+    occurredOn: row.occurred_on, memo: row.memo, counterpartyName: row.counterparty_name ?? null, version: safeInteger(row.version),
+    ...(row.time_precision === undefined ? {} : { time: { occurredOn: row.occurred_on,
+      occurredAt: row.occurred_at === null ? null : isoTimestamp(row.occurred_at), precision: row.time_precision,
+      source: row.time_source, sourceTimeZone: row.source_time_zone, ledgerTimeZone: row.ledger_time_zone } }),
     deletedAt: row.deleted_at === null ? null : isoTimestamp(row.deleted_at),
     createdAt: isoTimestamp(row.created_at), updatedAt: isoTimestamp(row.updated_at),
     ...(row.kind === "opening_balance" ? { direction: row.opening_direction } : {}) });

@@ -14,6 +14,8 @@ function isSecurityBoundaryVariable(variable: string): boolean {
     || normalized.startsWith("API_")
     || normalized.startsWith("AUTH_")
     || normalized.startsWith("BFF_")
+    || normalized.startsWith("BANK_")
+    || normalized.startsWith("KFTC_")
     || normalized.startsWith("SUPABASE_")
     || normalized.startsWith("TEST_DATABASE_")
     || normalized.startsWith("MIGRATION_DATABASE_");

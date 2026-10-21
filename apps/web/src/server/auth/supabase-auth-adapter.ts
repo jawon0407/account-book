@@ -166,7 +166,7 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
   }
 
   /**
-   * 새 SDK 클라이언트에 토큰 쌍을 설정한 뒤 제공자 로그아웃을 호출하고 오류를 검사합니다.
+   * 새 SDK 클라이언트에 토큰 쌍을 설정한 뒤 현재 제공자 세션만 로그아웃합니다. 다른 기기는 유지합니다.
    * @param accessToken 복호화한 제공자 접근 토큰.
    * @param refreshToken 복호화한 제공자 갱신 토큰.
    * @returns 제공자 폐기가 완료되면 값 없이 종료합니다.
@@ -179,7 +179,7 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
         const client = this.client(operation.fetch);
         dataOf(await client.auth.setSession(tokens));
         operation.assertActive();
-        accepted(await client.auth.signOut());
+        accepted(await client.auth.signOut({ scope: "local" }));
       });
     } catch (error) { return rethrowProviderError(error); }
   }

@@ -14,6 +14,7 @@ import {
   type AuthProvider,
 } from "@account-book/contracts";
 import { z } from "zod";
+import type { DelegatedClientChannel } from "@account-book/contracts/internal-api";
 import type { AuthProviderPort } from "../auth/auth-provider-port.js";
 import type { AccountAccessPort } from "../auth/account-access.js";
 import type { EmailAuthService } from "../auth/email-auth-service.js";
@@ -62,6 +63,7 @@ type PublicSession = Readonly<{
 }>;
 
 type ResolvedSession = Readonly<{
+  clientChannel: DelegatedClientChannel;
   accessToken: string;
   refreshToken: string;
   sessionId: string;
@@ -659,12 +661,18 @@ export class AuthController {
   /**
    * CSRF 검증 후 로컬 세션을 먼저 폐기하고 제공자 로그아웃을 시도합니다. 외부 실패는 보류 기록으로 남기며 응답에서는 세션 쿠키를 지웁니다.
    * @param request 표준 브라우저 Request; 헤더·쿠키·본문을 검증하며 사용합니다.
-   * @returns signedOut JSON 또는 안전한 오류 응답; 어느 쪽이든 세션 쿠키 삭제를 포함합니다.
+   * @returns signedOut JSON 또는 안전한 오류 응답. 요청 검증에 통과한 경우에만 세션 쿠키를 삭제합니다.
    */
   public async signOut(request: Request): Promise<Response> {
+    let selected: string;
+    try {
+      selected = this.verifyMutation(request, "session");
+    } catch (error) {
+      // 거절된 외부/CSRF 요청에는 쿠키 삭제도 허용하지 않는다.
+      return errorResponse(error);
+    }
     const cleared = serializedCookie(clearAuthCookie(SESSION_COOKIE_NAME, this.dependencies.secureCookies));
     try {
-      const selected = this.verifyMutation(request, "session");
       const now = safeNow(this.dependencies.now);
       const resolved = await this.dependencies.sessions.resolve(selected, now);
       await this.dependencies.sessions.revokeCurrent(selected, now);
@@ -696,6 +704,7 @@ export class AuthController {
       let upstream: Response;
       try {
         upstream = await this.dependencies.delegatedApiClient.request({
+          clientChannel: resolved.clientChannel,
           body: new Uint8Array(),
           contentType: null,
           method: "GET",

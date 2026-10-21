@@ -117,7 +117,7 @@ function providerFailure(error: unknown): never {
  * @returns 검증된 원래 토큰 쌍.
  * @throws 메일 미인증 또는 토큰 데이터 오류.
  */
-function verifiedPair(pair: AuthTokenPair, now: Date): AuthTokenPair {
+export function verifiedPair(pair: AuthTokenPair, now: Date): AuthTokenPair {
   const parsed = CurrentUserSchema.safeParse(pair?.user);
   if (!parsed.success || !parsed.data.emailVerified || parsed.data.id !== pair?.userId) return fail("AUTH_EMAIL_VERIFICATION_REQUIRED");
   if (!validUuid(pair?.userId) || !validUuid(pair?.supabaseSessionId) || typeof pair?.accessToken !== "string" || pair.accessToken.length === 0 || typeof pair?.refreshToken !== "string" || pair.refreshToken.length === 0 || !validProviderIssuedAt(pair?.issuedAtSeconds, now.getTime()) || !validDate(pair?.accessTokenExpiresAt) || pair.accessTokenExpiresAt.getTime() <= now.getTime() || pair.accessTokenExpiresAt.getTime() <= pair.issuedAtSeconds * 1000) return fail();

@@ -29,7 +29,7 @@ export async function bankHttpFixture(disabled = false) {
   async function headers(method: "GET" | "POST", target: string, scope: string, body = "") {
     const requestId = randomUUID(), now = Math.floor(Date.now() / 1000), contentType = method === "GET" ? null : "application/json";
     const rbh = createHash("sha256").update(canonicalDelegatedRequest({ method, target, contentType, bodySha256: createHash("sha256").update(body).digest("base64url"), requestId })).digest("base64url");
-    const token = await new SignJWT({ aud: "urn:account-book:api", iss: "urn:account-book:bff", iat: now, nbf: now, exp: now + 30, jti: randomBytes(16).toString("base64url"), rid: requestId, rbh, scp: scope, sub: h.who.userId, sid: h.who.sessionId })
+    const token = await new SignJWT({ chn: "web", aud: "urn:account-book:api", iss: "urn:account-book:bff", iat: now, nbf: now, exp: now + 30, jti: randomBytes(16).toString("base64url"), rid: requestId, rbh, scp: scope, sub: h.who.userId, sid: h.who.sessionId })
       .setProtectedHeader({ alg: "ES256", typ: "at+jwt", kid: "test" }).sign(keys.privateKey);
     return { authorization: `Bearer ${token}`, "x-request-id": requestId, ...(contentType ? { "content-type": contentType } : {}) };
   }

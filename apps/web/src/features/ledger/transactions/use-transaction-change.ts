@@ -13,7 +13,7 @@ export function useTransactionChange(onSaved: () => void, onPending?: (value: bo
     busy.current = true; setPending(true); onPending?.(true); setMessage("");
     try { await operation(); onSaved(); }
     catch (error) {
-      const recoverable = error instanceof ApiClientError && ["LEDGER_VALIDATION_FAILED", "AUTH_CSRF_REJECTED", "AUTH_RATE_LIMITED"].includes(error.code);
+      const recoverable = error instanceof ApiClientError && ["LEDGER_VALIDATION_FAILED", "LEDGER_TIME_REVIEW_REQUIRED", "LEDGER_TIME_CHANGE_REQUIRED", "AUTH_CSRF_REJECTED", "AUTH_RATE_LIMITED"].includes(error.code);
       blockedRef.current = !recoverable; setBlocked(!recoverable);
       const known = error instanceof ApiClientError && !["LEDGER_SERVICE_UNAVAILABLE", "AUTH_PROVIDER_UNAVAILABLE"].includes(error.code);
       setMessage(known ? errorMessage(error) : "변경 결과를 확인하지 못했어요. 다시 전송하지 않고 닫은 뒤 최신 목록을 확인해 주세요.");

@@ -1,0 +1,21 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2023", "DOM"],
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": [
+    "src/api/native-client*.ts",
+    "src/api/native-ledger-client*.ts",
+    "src/api/client-error.ts",
+    "src/auth/session-manager*.ts",
+    "src/auth/session-persistence.ts",
+    "src/auth/session-restore.test.ts",
+    "src/auth/session-ledger.test.ts",
+    "src/ledger/**/*.ts",
+    "src/ui/ledger-presentation*.ts"
+  ]
+}

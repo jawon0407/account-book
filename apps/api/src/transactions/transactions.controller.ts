@@ -2,7 +2,7 @@ import { Controller, Delete, Get, Header, Inject, Param, Patch, Post, Req, UseGu
 import type { FastifyRequest } from "fastify";
 import { CreateTransactionInputSchema, UpdateTransactionInputSchema, DeleteTransactionInputSchema, LedgerIdSchema, type Transaction, type TransactionListResponse } from "@account-book/contracts";
 import { AuthGuard } from "../auth/auth.guard.js";
-import { RequireDelegatedScope } from "../auth/delegated-scope.js";
+import { RequireDelegatedChannels, RequireDelegatedScope } from "../auth/delegated-scope.js";
 import { body, input, owner } from "../core/http-input.js";
 import { parseTransactionQuery } from "./transaction-query.js";
 import { TransactionsRepository } from "./transactions.repository.js";
@@ -23,6 +23,7 @@ export class TransactionsController {
   /** @param request 검증된 principal과 생성 JSON. @returns 멱등 생성 결과,201. */
   @Post()
   @RequireDelegatedScope("transaction:write")
+  @RequireDelegatedChannels("android")
   @Header("Cache-Control", "private, no-store")
   public create(@Req() request: FastifyRequest): Promise<Transaction> {
     return this.repository.create(owner(request), body(CreateTransactionInputSchema, request));

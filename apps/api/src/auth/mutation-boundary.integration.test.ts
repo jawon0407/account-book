@@ -262,6 +262,7 @@ function signMutation(
   overrides: Partial<Parameters<DelegatedJwtSigner["sign"]>[0]> = {},
 ) {
   return signer.sign({
+    clientChannel: "web",
     method: "POST",
     target: "/v1/test-mutation",
     contentType: "application/json",
@@ -479,6 +480,7 @@ describe("delegated financial mutation HTTP boundary", () => {
       randomUUID: () => REQUEST_ID,
     });
     const signed = await expiredSigner.sign({
+      clientChannel: "web",
       method: "POST",
       target: "/v1/test-mutation",
       contentType: "application/json",
@@ -525,6 +527,7 @@ describe("delegated financial mutation HTTP boundary", () => {
       randomUUID: () => REQUEST_ID,
     });
     const signed = await unknownKeySigner.sign({
+      clientChannel: "web",
       method: "POST",
       target: "/v1/test-mutation",
       contentType: "application/json",

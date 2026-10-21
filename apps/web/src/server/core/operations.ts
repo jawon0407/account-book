@@ -3,6 +3,7 @@ import {
   AccountSchema, AccountListResponseSchema, CreateAccountInputSchema, UpdateAccountInputSchema, ArchiveAccountInputSchema,
   CategorySchema, CategoryListResponseSchema, CreateCategoryInputSchema, UpdateCategoryInputSchema, ArchiveCategoryInputSchema,
   LedgerIdSchema,
+  CollectorChangeInputSchema, CollectorStateSchema,
   TransactionSchema, TransactionListResponseSchema, CreateTransactionInputSchema, UpdateTransactionInputSchema, DeleteTransactionInputSchema, TransactionTombstoneSchema,
 } from "@account-book/contracts";
 import type { DelegatedScope } from "@account-book/contracts/internal-api";
@@ -13,7 +14,8 @@ import { transactionTarget } from "./transaction-target.js";
 type Operation = Readonly<{
   method: "GET" | "POST" | "PATCH" | "DELETE";
   scope: DelegatedScope;
-  path: "/v1/profile" | "/v1/accounts" | "/v1/categories" | "/v1/transactions";
+  path: "/v1/profile" | "/v1/accounts" | "/v1/categories" | "/v1/transactions" | "/v1/collector";
+  androidOnly?: true;
   item?: true;
   archive?: true;
   list?: true;
@@ -24,10 +26,12 @@ type Operation = Readonly<{
 
 /** 코드가 선택하는 닫힌 작업 표. 브라우저는 내부 주소·scope·응답 계약을 지정할 수 없다. */
 const operations = {
+  collectorGet: { method: "GET", scope: "collector:read", path: "/v1/collector", androidOnly: true, output: CollectorStateSchema, status: 200 },
+  collectorChange: { method: "PATCH", scope: "collector:write", path: "/v1/collector", androidOnly: true, input: CollectorChangeInputSchema, output: CollectorStateSchema, status: 200 },
   transactionsUpdate: { method: "PATCH", scope: "transaction:write", path: "/v1/transactions", item: true, input: UpdateTransactionInputSchema, output: TransactionSchema, status: 200 },
   transactionsDelete: { method: "DELETE", scope: "transaction:write", path: "/v1/transactions", item: true, input: DeleteTransactionInputSchema, output: TransactionTombstoneSchema, status: 200 },
   transactionsList: { method: "GET", scope: "transaction:read", path: "/v1/transactions", list: true, output: TransactionListResponseSchema, status: 200 },
-  transactionsCreate: { method: "POST", scope: "transaction:write", path: "/v1/transactions", input: CreateTransactionInputSchema, output: TransactionSchema, status: 201 },
+  transactionsCreate: { method: "POST", scope: "transaction:write", path: "/v1/transactions", androidOnly: true, input: CreateTransactionInputSchema, output: TransactionSchema, status: 201 },
   profileGet: { method: "GET", scope: "profile:read", path: "/v1/profile", output: ProfileSchema, status: 200 },
   profileUpdate: { method: "PATCH", scope: "profile:write", path: "/v1/profile", input: UpdateProfileInputSchema, output: ProfileSchema, status: 200 },
   accountsList: { method: "GET", scope: "account:read", path: "/v1/accounts", list: true, output: AccountListResponseSchema, status: 200 },
@@ -50,6 +54,7 @@ export function operationFor(name: string): Operation {
 
 /** @param operation 선택된 고정 작업. @returns 해당 도메인의 입력 거부 오류. */
 export function invalidInput(operation: Operation): CoreBoundaryError {
+  if (operation.path === "/v1/collector") return new CoreBoundaryError("COLLECTOR_VALIDATION_FAILED", 400);
   return new CoreBoundaryError(operation.path === "/v1/profile" ? "PROFILE_VALIDATION_FAILED" : "LEDGER_VALIDATION_FAILED", 400);
 }
 
@@ -57,7 +62,7 @@ export function invalidInput(operation: Operation): CoreBoundaryError {
  * UUID/쿼리만 검증하여 고정 내부 경로에 붙인다. 알 수 없는·중복 query와 우회 경로는 거부한다.
  * @param operation 코드가 선택한 작업. @param url 브라우저 요청 URL. @param parameters Next 경로 매개변수.
  */
-export function targetFor(operation: Operation, url: URL, parameters: Readonly<Record<string, string>>): `/${string}` {
+export function targetFor(operation: Operation, url: URL, parameters: Readonly<Record<string, string>>, prefix: "/api/" | "/api/native/" = "/api/"): `/${string}` {
   let target: `/${string}` = operation.path;
   if (Object.keys(parameters).length !== (operation.item ? 1 : 0)) throw invalidInput(operation);
   if (operation.item) {
@@ -65,7 +70,7 @@ export function targetFor(operation: Operation, url: URL, parameters: Readonly<R
     if (!parsed.success) throw invalidInput(operation);
     target = `${target}/${parsed.data}${operation.archive ? "/archive" : ""}`;
   }
-  const browserPath = operation.path.replace(/^\/v1\//u, "/api/") + (operation.item ? `/${parameters.id}${operation.archive ? "/archive" : ""}` : "");
+  const browserPath = operation.path.replace(/^\/v1\//u, prefix) + (operation.item ? `/${parameters.id}${operation.archive ? "/archive" : ""}` : "");
   if (url.pathname !== browserPath) throw invalidInput(operation);
   if (operation.path === "/v1/transactions" && operation.list) return transactionTarget(url.searchParams);
   const query = [...url.searchParams.entries()];

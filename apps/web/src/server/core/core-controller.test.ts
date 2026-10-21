@@ -14,12 +14,12 @@ const now = new Date("2040-01-01T00:00:00.000Z");
 const profile = { id, nickname: "테스트", avatarObjectKey: null, signupProvider: "email", role: "member", version: 1, createdAt: now.toISOString(), updatedAt: now.toISOString() };
 const account = { id, name: "현금", kind: "cash", currentBalanceKrw: 0, archivedAt: null, version: 1, createdAt: now.toISOString(), updatedAt: now.toISOString() };
 const category = { id, name: "식비", kind: "expense", sortOrder: 0, archivedAt: null, version: 1, createdAt: now.toISOString(), updatedAt: now.toISOString() };
-const transaction = { id, accountId: id, categoryId: id, transferId: null, kind: "expense", amountKrw: 1000, occurredOn: "2040-01-01", memo: null, version: 1, deletedAt: null, createdAt: now.toISOString(), updatedAt: now.toISOString() };
+const transaction = { id, accountId: id, categoryId: id, counterpartyName: null, transferId: null, kind: "expense", amountKrw: 1000, occurredOn: "2040-01-01", memo: null, version: 1, deletedAt: null, createdAt: now.toISOString(), updatedAt: now.toISOString() };
 const transactionInput = { accountId: id, categoryId: id, type: "expense", amountKrw: 1000, occurredOn: "2040-01-01", idempotencyKey: id };
 
 /** @param reply 외부 HTTP 응답. 실제 BFF/위임 클라이언트를 실행하되 DB 세션 조회와 네트워크/서명만 대역으로 분리한다. */
 function setup(reply: Response = Response.json(profile)) {
-  const sessions = { resolve: vi.fn(async () => ({ userId: id, sessionId, accessToken: "never-browser-access", refreshToken: "never-browser-refresh", supabaseSessionId: id, rotationVersion: 0, accessTokenExpiresAt: new Date(now.getTime() + 120_000) })) };
+  const sessions = { resolve: vi.fn(async () => ({ userId: id, sessionId, accessToken: "never-browser-access", refreshToken: "never-browser-refresh", supabaseSessionId: id, rotationVersion: 0, clientChannel: "web" as const, deviceId: null, accessTokenExpiresAt: new Date(now.getTime() + 120_000) })) };
   const signer = { sign: vi.fn(async () => ({ requestId: sessionId, token: "server-only-delegated" })) };
   const fetcher = vi.fn<typeof fetch>().mockResolvedValue(reply);
   const controller = new CoreController({ configuredOrigin: new URL(origin), csrfKey: key, now: () => now, sessions, delegatedApiClient: new DelegatedApiClient(new URL("https://api.example.test"), signer, fetcher) });
@@ -44,6 +44,11 @@ async function failure(response: Response, status: number, code: string): Promis
 afterEach(() => vi.useRealTimers());
 
 describe("Core BFF", () => {
+  it("denies web creation despite a client-controlled Android header", async () => {
+    const { controller, fetcher } = setup(Response.json(transaction, { status: 201 }));
+    await failure(await controller.handle("transactionsCreate", request("/api/transactions", "POST", transactionInput, { "x-client-channel": "android" })), 403, "LEDGER_CHANNEL_FORBIDDEN");
+    expect(fetcher).not.toHaveBeenCalled();
+  });
   it.each([
     ["profileGet", "/api/profile", "GET", undefined],
     ["profileUpdate", "/api/profile", "PATCH", { nickname: "이전 계정 입력", expectedVersion: 1 }],
@@ -73,7 +78,6 @@ describe("Core BFF", () => {
     ["categoriesUpdate", `/api/categories/${id}`, "PATCH", { sortOrder: 0, expectedVersion: 1 }, { id }, "category:write", category, 200],
     ["categoriesArchive", `/api/categories/${id}/archive`, "POST", { expectedVersion: 1 }, { id }, "category:write", category, 200],
     ["transactionsList", "/api/transactions?limit=2&type=expense", "GET", undefined, {}, "transaction:read", { items: [transaction], nextCursor: null }, 200],
-    ["transactionsCreate", "/api/transactions", "POST", transactionInput, {}, "transaction:write", transaction, 201],
     ["transactionsUpdate", `/api/transactions/${id}`, "PATCH", { memo: null, expectedVersion: 1 }, { id }, "transaction:write", transaction, 200],
     ["transactionsDelete", `/api/transactions/${id}`, "DELETE", { expectedVersion: 1 }, { id }, "transaction:write", { id, version: 2, deletedAt: now.toISOString() }, 200],
   ] as const)("binds %s to its exact method/scope/target and returns only contract data", async (operation, path, method, body, params, scope, output, status) => {
@@ -102,6 +106,22 @@ describe("Core BFF", () => {
     const { controller, sessions, fetcher } = setup();
     await failure(await controller.handle("profileGet", request(undefined, "GET", undefined, { cookie })), 401, "AUTH_SESSION_EXPIRED");
     expect(sessions.resolve).not.toHaveBeenCalled(); expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("rejects a missing cookie header before resolving the web session", async () => {
+    const { controller, sessions, fetcher } = setup();
+    const input = request(); input.headers.delete("cookie");
+    await failure(await controller.handle("profileGet", input), 401, "AUTH_SESSION_EXPIRED");
+    expect(sessions.resolve).not.toHaveBeenCalled(); expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("rejects cross-site GET even when the origin header matches", async () => {
+    const { controller, sessions, fetcher } = setup();
+    await failure(await controller.handle("profileGet", request(undefined, "GET", undefined, { "sec-fetch-site": "cross-site" })), 403, "AUTH_CSRF_REJECTED");
+    expect(sessions.resolve).not.toHaveBeenCalled(); expect(fetcher).not.toHaveBeenCalled();
+  });
+  it("accepts a direct-navigation GET with a valid web cookie", async () => {
+    const { controller, fetcher } = setup();
+    const response = await controller.handle("profileGet", request(undefined, "GET", undefined, { "sec-fetch-site": "none" }));
+    expect(response.status).toBe(200); expect(fetcher).toHaveBeenCalledOnce();
   });
   it.each(["limit=1&limit=2", "limit=01", "limit=101", "userId=x", "from=2040-01-02&to=2040-01-01"])("rejects transaction query before delegation: %s", async query => {
     const { controller, fetcher } = setup();

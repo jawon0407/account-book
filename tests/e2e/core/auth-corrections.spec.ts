@@ -37,3 +37,28 @@ test("social signup return shows the fixed login notice without a session", asyn
   await expect(page.getByRole("status").filter({ hasText: "소셜 계정을 확인했어요" })).toContainText("로그인");
   expect((await context.cookies()).some((cookie) => cookie.name === "__Host-ab_session")).toBe(false);
 });
+
+test("rejected logout keeps the authenticated browser usable until intentional logout", async ({ page, context }) => {
+  await page.goto("/login");
+  await page.getByLabel("이메일", { exact: true }).fill("verified@example.test");
+  await page.getByLabel("비밀번호", { exact: true }).fill("correct horse battery staple");
+  await page.getByRole("button", { name: "로그인", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "내 계좌", exact: true })).toBeVisible();
+
+  // 브라우저가 실제 거절 응답을 처리한 뒤에도 기존 로그인 쿠키가 남아 있어야 한다.
+  // 합성 계정만 사용하며 쿠키 값·CSRF 값은 로그나 스크린샷에 출력하지 않는다.
+  const status = await page.evaluate(async () => (await fetch("/api/auth/sign-out", {
+    method: "POST", headers: { "Content-Type": "application/json", "X-CSRF-Token": "invalid" }, body: "{}",
+  })).status);
+  expect(status).toBe(403);
+  expect((await context.cookies()).some((cookie) => cookie.name === "__Host-ab_session")).toBe(true);
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "내 계좌", exact: true })).toBeVisible();
+  await page.screenshot({ path: "output/playwright/rejected-logout-session-preserved.png", fullPage: true });
+
+  await page.getByRole("button", { name: "로그아웃", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "로그아웃했어요", exact: true })).toBeVisible();
+  expect((await context.cookies()).some((cookie) => cookie.name === "__Host-ab_session")).toBe(false);
+  await page.goto("/app");
+  await expect(page.getByRole("link", { name: "로그인하기" })).toBeVisible();
+});
