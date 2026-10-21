@@ -7,7 +7,7 @@ related_targets: ["apps/mobile/src/ui/notification-access-guide.tsx"]
 
 # Collector settings — Android / Operate
 
-Scope: existing Bookify mobile UI extension; user already requested implementation without routine approval loops. No new brand, assets, dependencies or OS permissions. Actual capture is not implemented.
+Scope: existing Bookify mobile UI extension; user already requested implementation without routine approval loops. No new brand, assets or package dependencies. Explicit local consent and Android notification-access settings are now connected; actual capture is not implemented.
 
 ## Direction contract
 
@@ -30,3 +30,10 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 - One 48dp minimum disclosure control, expanded accessibility state, headings, inherited text scales and scroll. No storage/network/OS permission side effect.
 - Separate other-app notification access from own-app notification display. Explain selected sources, unsupported/hidden notifications, no history retrieval, future stop/withdrawal and separate ledger deletion.
 - User deferred native screenshots/font scale/TalkBack/Back verification. Code and bundle checks cannot grant visual approval; no new raster or global design-system change.
+
+## 2026-10-21 consent/permission connection
+
+- Add a separate panel below designation; keep local consent, OS access, listener connection, and device designation as distinct statuses. No optimistic grant or start-collection switch.
+- Disclosure expand remains side-effect free. Explicit accept confirmation explains purpose/minimum fields/local record, optional manual use, withdrawal, and unimplemented processing. Revoke is a separate confirmed action, not OS revoke or ledger deletion.
+- Use existing blue/gray/white tokens, headings, 48dp buttons and scroll. Background hides/unmounts; return revalidates session and rereads OS state.
+- Android16 device capture confirms readable statuses and visible disabled/active actions. Full large-font/TalkBack/OEM review remains open. No generated assets or shared token changes.

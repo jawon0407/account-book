@@ -64,6 +64,17 @@ export class SessionManager {
   }
   /** UI에 공개 가능한 상태만 반환하며 credential은 포함하지 않는다. */
   public snapshot = (): SessionState => this.state;
+  /** 로컬 동의를 현재 서버·회원·설치에 결속한다. 비밀 토큰은 반환하지 않는다. */
+  public notificationConsentScope() {
+    if (this.state.status !== "ready" || !this.credential || !this.deviceId)
+      return null;
+    return {
+      origin: this.client.origin,
+      userId: this.credential.session.userId,
+      deviceId: this.deviceId,
+      generation: this.generation,
+    };
+  }
   /** @param listener 상태 변경 시 UI를 갱신한다. 반환 함수로 구독을 제거한다. */
   public subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);

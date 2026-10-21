@@ -60,6 +60,23 @@ function fixture() {
   };
 }
 describe("session-owned collector access", () => {
+  it("exposes consent scope only while verified, with a new generation after re-login", async () => {
+    const f = fixture();
+    expect(f.manager.notificationConsentScope()).toBeNull();
+    await f.login();
+    const first = f.manager.notificationConsentScope();
+    expect(first).toMatchObject({
+      origin: "https://ledger.example",
+      userId: auth.session.userId,
+      deviceId,
+    });
+    await f.manager.signOut();
+    expect(f.manager.notificationConsentScope()).toBeNull();
+    await f.manager.signIn("a@example.test", "password-password");
+    expect(f.manager.notificationConsentScope()?.generation).not.toBe(
+      first?.generation,
+    );
+  });
   it("blocks reads and changes before login", async () => {
     const f = fixture();
     await f.manager.restore();

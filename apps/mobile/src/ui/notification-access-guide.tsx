@@ -15,8 +15,8 @@ export function NotificationAccessGuide() {
         알림 접근 전 알아두세요
       </Text>
       <Text style={common.body}>
-        지금은 안내만 제공해요. 안내를 읽거나 기기를 지정해도 동의·권한이
-        저장되거나 알림 수집이 시작되지 않아요.
+        안내를 읽거나 기기를 지정하는 것만으로는 동의하지 않아요. 아래에서
+        동의를 따로 저장하고 Android 설정에서 권한을 직접 선택해야 해요.
       </Text>
       <Text style={common.secondary}>
         자동 기록은 선택 사항이에요. 권한을 허용하지 않아도 수기로 장부를 사용할
@@ -35,8 +35,8 @@ export function NotificationAccessGuide() {
       {expanded ? (
         <View style={styles.details}>
           <Text style={common.secondary}>
-            아래 내용은 앞으로 연결할 자동 기록 기능의 처리 기준이에요. 실제
-            동의와 권한 설정은 기능이 준비된 뒤 별도로 안내해요.
+            아래 내용은 앞으로 연결할 자동 기록 기능의 처리 기준이에요. 현재는
+            동의 저장과 권한 설정까지만 제공하고, 알림 분석·저장은 하지 않아요.
           </Text>
           <Section
             title="어떤 알림을 사용하나요?"
@@ -63,7 +63,7 @@ export function NotificationAccessGuide() {
           <Section
             title="원하지 않을 때는 멈출 수 있나요?"
             paragraphs={[
-              "앱에서 수집을 일시 중지하거나 동의를 철회하고, Android 설정에서도 알림 접근을 해제할 수 있도록 연결할 예정이에요. 중지·철회와 이미 저장한 거래의 삭제는 별개예요.",
+              "이 화면에서 기기에 저장한 동의를 철회하고, Android 설정에서 알림 접근을 해제할 수 있어요. 실제 수집의 일시 중지·서버 동의 관리는 후속 단계예요. 중지·철회와 이미 저장한 거래의 삭제는 별개예요.",
               "알림이 오지 않거나 내용이 숨겨진 경우, 지원하지 않는 형식은 자동 기록을 보장할 수 없어요. 빠진 거래는 직접 작성하고, 다시 켜도 중지 중의 알림을 소급 수집하지 않는 방식이에요.",
             ]}
           />

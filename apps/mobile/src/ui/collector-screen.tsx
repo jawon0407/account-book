@@ -15,7 +15,7 @@ import {
   collectorStateCopy,
 } from "../collector/collector-copy";
 import { colors, common } from "./theme";
-import { NotificationAccessGuide } from "./notification-access-guide";
+import { NotificationAccessPanel } from "./notification-access-panel";
 
 /** @param manager 현재 인증 경계. @param onBack 초안을 보존한 채 장부로 돌아가는 동작. */
 export function CollectorScreen({
@@ -141,7 +141,7 @@ export function CollectorScreen({
         기기를 바꾸거나 지정을 해제해도 이미 저장한 거래는 유지돼요. 실제 알림을
         읽는 기능은 아직 준비 중이에요.
       </Text>
-      <NotificationAccessGuide />
+      <NotificationAccessPanel manager={manager} />
     </ScrollView>
   );
 }

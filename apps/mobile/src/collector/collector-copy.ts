@@ -5,7 +5,7 @@ import type {
 import { ClientError } from "../api/client-error";
 
 export const COLLECTOR_PREPARATION =
-  "현재는 수집 기기만 지정할 수 있어요. 금융 앱·문자·카카오톡 알림을 읽거나 거래로 저장하지 않아요.";
+  "수집 기기 지정·이 기기의 동의 저장·Android 권한 설정을 준비할 수 있어요. 금융 앱·문자·카카오톡 알림을 읽거나 거래로 저장하지 않아요.";
 
 /** @param state 서버가 확인한 지정 상태. 알림 수집 중이라는 표현은 사용하지 않는다. */
 export function collectorStateCopy(state: CollectorState["state"]) {

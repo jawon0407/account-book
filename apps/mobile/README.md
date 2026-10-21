@@ -25,6 +25,9 @@ Android를 먼저 구현하고 검증한 뒤 iOS를 개발한다. **이메일 �
 | `src/collector/collector-settings.ts`, `collector-copy.ts` | 조회·확인·저장 상태와 고정 안내. 중복 변경을 막고 실패하면 현재 상태만 다시 조회한다 |
 | `src/ui/collector-screen.tsx` | 수집 기기 지정/교체/해제 확인 화면. 실제 알림 읽기는 아직 제공하지 않는다 |
 | `src/ui/notification-access-guide.tsx` | 선택적 동의·두 종류의 권한·예정 처리 범위를 펼쳐 읽는 안내. 동의 저장이나 OS 권한 요청은 하지 않는다 |
+| `src/collector/notification-consent.ts`, `notification-access.ts` | 계정/설치별 로컬 동의 저장·철회·재조회와 늦은 응답 차단. 서버 동의 증빙은 아님 |
+| `src/platform/notification-access.ts`, `modules/notification-access/` | OS의 실제 알림 접근/연결 상태와 설정 이동만 제공. 본문 callback/조회/전송 없음 |
+| `src/ui/notification-access-panel.tsx` | 명시적 동의·철회, Android 설정 이동, 실제 상태 확인. 안내를 읽기만 해서는 저장하지 않음 |
 | `src/ui/ledger-presentation.ts` | 금액/방향/미분류 표시를 화면 밖에서 검증 가능한 함수로 분리한다 |
 | `src/api/native-ledger-client.ts` | 프로필·선택 목록·수기 생성의 고정 경로와 strict 계약 |
 | `src/ledger/manual-input.ts`, `manual-time.ts` | 화면 문자열을 금액/날짜/UTC로 변환. 모르는 시각은 만들지 않고 DST 중복은 사용자 선택 |
@@ -89,3 +92,5 @@ pnpm audit --json
 수집 설정 화면의 파일별 역할·동시 변경 방어·검증 범위는 [수집 설정 진행 기록](../../docs/status/2026-10-21-android-collector-settings.ko.md)에 있다.
 
 알림 접근 전 안내는 수집 설정 화면 아래에서 언제든 펼쳐 읽을 수 있다. ‘안내 보기’는 이 화면의 표시만 바꾸며, 기기 지정 API·동의 저장·OS 권한 설정·알림 읽기를 호출하지 않는다. 안내에는 후속 자동 기록의 처리 범위와 선택권, 알림 접근/표시 권한의 차이, 중지·철회와 기존 거래 삭제의 차이, 누락 시 수기 보완을 설명한다. 자세한 범위와 검증 제한은 [동의·권한 안내 기록](../../docs/status/2026-10-21-android-notification-access-guide.ko.md)을 참고한다.
+
+10/21 후속으로 별도 확인 버튼에서 **실제 로컬 동의 저장·철회와 OS 설정 연결**을 제공한다. 새 개발 APK가 필요하며, 예전 APK에서는 업데이트 안내를 표시한다. 자동 기록은 여전히 하지 않는다. 동의/OS 접근/서비스 연결/서버 기기 지정은 별개다. [구현·APK·실기기 결과](../../docs/status/2026-10-21-notification-consent-permission.ko.md)에서 서버 동의 검증이 남아 있는 이유와 테스트 범위를 확인할 수 있다.
