@@ -32,11 +32,11 @@
 
 **Interfaces:** Consumes `CollectorChangeInputSchema`, `CollectorStateSchema`. Produces `NativeClient.collector.read(token):Promise<CollectorState>`, `.change(token,input):Promise<CollectorState>` and `SessionManager.collectorState()`, `.changeCollector(input)` with no public token.
 
-- [ ] Add failing tests: GET/PATCH fixed path + Bearer/omit cookies; strict injection/invalid success rejected; PATCH 503 exactly one request; signed-out blocks reads/writes; 401 clears session; logout/revalidation drops late response; refresh-required rotates but does not replay.
-- [ ] Run `pnpm --filter @account-book/mobile exec vitest run src/api/native-collector-client.test.ts src/auth/session-collector.test.ts`. Expected: new methods absent.
-- [ ] Implement API adapter and SessionManager wrappers through existing authenticatedRequest; include new files in core typecheck.
-- [ ] Same command. Expected: PASS. Run mobile typecheck, expected PASS.
-- [ ] Commit `feat(mobile): connect collector settings API` with this plan/spec and API changes.
+- [x] Add failing tests: GET/PATCH fixed path + Bearer/omit cookies; strict injection/invalid success rejected; PATCH 503 exactly one request; signed-out blocks reads/writes; 401 clears session; logout/revalidation drops late response; refresh-required rotates but does not replay.
+- [x] Run `pnpm --filter @account-book/mobile exec vitest run src/api/native-collector-client.test.ts src/auth/session-collector.test.ts`. Expected: new methods absent.
+- [x] Implement API adapter and SessionManager wrappers through existing authenticatedRequest; include new files in core typecheck.
+- [x] Same command. Expected: PASS. Run mobile typecheck, expected PASS.
+- [x] Commit `feat(mobile): connect collector settings API` with this plan/spec and API changes (`ce87576`).
 
 ### Task 2: 설정 상태 모델
 
@@ -44,11 +44,11 @@
 
 **Interfaces:** Consumes SessionManager methods from Task 1. Produces `CollectorSettings.start/stop/reload/choose/confirm/cancel`, `snapshot/subscribe`. State has phase (`idle/loading/ready/saving/error`), value, confirmation, notice. Copy helpers return fixed Korean labels, no raw errors.
 
-- [ ] Add failing tests for all three server states; confirmation cancellation; explicit replacement true; deactivate current/other; duplicate click; conflict/network failure triggers GET only; GET failure locks; reload clears old confirmation; stop drops response; start after stop re-reads.
-- [ ] Run `pnpm --filter @account-book/mobile exec vitest run src/collector`. Expected: missing modules fail.
-- [ ] Implement lifecycle epoch and fixed copy; never optimistic success; failure notices remain even when GET succeeds.
-- [ ] Same command. Expected PASS. Run mobile typecheck, expected PASS.
-- [ ] Commit `feat(mobile): guard collector settings transitions`.
+- [x] Add failing tests for all three server states; confirmation cancellation; explicit replacement true; deactivate current/other; duplicate click; conflict/network failure triggers GET only; GET failure locks; reload clears old confirmation; stop drops response; start after stop re-reads.
+- [x] Run `pnpm --filter @account-book/mobile exec vitest run src/collector`. Expected: missing modules fail.
+- [x] Implement lifecycle epoch and fixed copy; never optimistic success; failure notices remain even when GET succeeds.
+- [x] Same command. Expected PASS. Run mobile typecheck, expected PASS.
+- [x] Commit `feat(mobile): guard collector settings transitions` (`963a68f`).
 
 ### Task 3: 설정 화면과 통합 검증
 
@@ -56,12 +56,14 @@
 
 **Interfaces:** Consumes Task 2 model; extends ManualWorkspaceScreen with `collector`; LedgerScreen `onCollector`; CollectorScreen receives manager/onBack. No new persistent storage.
 
-- [ ] Add failing workspace navigation test: manual draft unchanged after collector → ledger → manual, logout clears owner data.
-- [ ] Run `pnpm --filter @account-book/mobile exec vitest run src/ledger/manual-workspace.test.ts`. Expected new collector screen type/behavior required.
-- [ ] Build screen with existing tokens, fixed copy, confirmation/cancel, refreshing and locked failure states. Wire navigation and Back.
-- [ ] Run mobile tests/typecheck and Android export. Expected PASS; inspect real-device screenshots if available. Do not substitute browser renders for native UI.
-- [ ] Run full lint/typecheck/tests and PC Playwright regression. Expected PASS, no live sensitive data.
-- [ ] Fresh code review and independent native visual review (when screenshots available); document actual evidence and limitations in MD/Notion. Commit `feat(mobile): add collector settings screen` after checks. Push feature branch only; no merge/deploy.
+- [x] Add workspace navigation regression: manual draft unchanged after collector → ledger → manual, logout clears owner data. Existing generic behavior already passed; missing screen type supplied RED (recorded deviation).
+- [x] Run `pnpm --filter @account-book/mobile exec vitest run src/ledger/manual-workspace.test.ts`; typecheck found the missing collector route, then passed after wiring.
+- [x] Build screen with existing tokens, fixed copy, confirmation/cancel, refreshing and locked failure states. Wire navigation and Back.
+- [x] Run mobile tests/typecheck and Android export. PASS; no native device available, so actual native visual/interaction verification is separately pending, not replaced by browser renders.
+- [x] Run full lint/typecheck/tests and PC Playwright regression. PASS (2,197 tests), no live sensitive data.
+- [x] Fresh code review: Critical 0 / Important 0 / Minor 2 deferred. Document actual evidence and limitations in MD/Notion. Commit `feat(mobile): add collector settings screen` (`f618b28`).
+- [ ] Independent native visual/interaction review: disposition `recapture`; current screenshots unavailable (0 devices). Source-based design documentation review completed without global design changes.
+- 원격 동기화는 feature branch push와 실제 원격 해시 대조로 확인한다. 결과는 푸시 후 Notion/최종 응답에 기록하며 main 병합·배포는 하지 않는다.
 
 ## Self-review
 
