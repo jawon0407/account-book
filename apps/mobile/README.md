@@ -21,6 +21,9 @@ Android를 먼저 구현하고 검증한 뒤 iOS를 개발한다. **이메일 �
 | `src/auth/secure-storage.ts` | Expo SecureStore를 작은 저장소 인터페이스로 감싼다 |
 | `src/ui/login-screen.tsx` | 이메일 로그인 입력과 오류 안내 |
 | `src/ui/ledger-screen.tsx` | 50건씩 조회·새로고침·추가 조회·로그아웃 |
+| `src/api/native-collector-client.ts` | 수집 기기 조회/변경 HTTP 계약. UI가 토큰이나 기기 식별자를 입력하지 않는다 |
+| `src/collector/collector-settings.ts`, `collector-copy.ts` | 조회·확인·저장 상태와 고정 안내. 중복 변경을 막고 실패하면 현재 상태만 다시 조회한다 |
+| `src/ui/collector-screen.tsx` | 수집 기기 지정/교체/해제 확인 화면. 실제 알림 읽기는 아직 제공하지 않는다 |
 | `src/ui/ledger-presentation.ts` | 금액/방향/미분류 표시를 화면 밖에서 검증 가능한 함수로 분리한다 |
 | `src/api/native-ledger-client.ts` | 프로필·선택 목록·수기 생성의 고정 경로와 strict 계약 |
 | `src/ledger/manual-input.ts`, `manual-time.ts` | 화면 문자열을 금액/날짜/UTC로 변환. 모르는 시각은 만들지 않고 DST 중복은 사용자 선택 |
@@ -56,6 +59,7 @@ Windows SDK/JDK 설치·개발 APK 산출 현황은 [APK 준비 기록](../../do
 - background에서 초안/저장 시도는 같은 계정 메모리에만 남고 화면은 가린다. 로그아웃/계정 변경/프로세스 종료 시 금융 초안을 폐기한다. 완전 종료 후에는 저장 여부를 목록에서 먼저 확인한다.
 - 이사 전 거래는 ‘거래 당시 장부 거주 시간대’를 선택 입력해 UTC 순간을 유지하면서 날짜를 정정한다. 서버가 실제 거주 이력과 대조하므로 이 입력은 기록 기준을 임의로 덮어쓰지 않는다. 프로필 변경은 expectedVersion으로 동시 수정을 확인한다.
 - 금융 데이터 영구 캐시, 모바일 계좌/카테고리 생성·관리, 다중 필터, 알림 수집, 환불/통계, iOS는 후속이다.
+- 장부의 ‘수집 설정’에서 계정의 지정 기기를 조회하고 이 기기로 지정/교체하거나 해제할 수 있다. 변경 전 영향 안내를 확인하며, 서버 버전 충돌/통신 실패 때 자동으로 다시 변경하지 않는다. 조회조차 실패하면 상태 확인 전까지 변경을 막는다. 이는 기기 지정 UI이며 Android 알림 접근 권한과 자동 기록을 켜는 기능은 아니다. 새 화면의 실기기 확인은 아직 남아 있다.
 - 화면 가림 코드가 Android 최근 앱 미리보기까지 확실히 가린다는 실기기 증거는 아직 없다.
 - 알려진 의존성 경고와 네이티브 검증 게이트가 남아 있으므로 실금융정보 베타/배포에 사용하지 않는다.
 
@@ -80,3 +84,5 @@ pnpm audit --json
 로그인 유지의 설계·복원 실패 처리·독립 리뷰 결과는 [세션 복원 기록](../../docs/status/2026-10-20-android-session-restore.ko.md)에 있다. 소셜 로그인은 [Supabase 설정 안내](../../docs/guides/social-auth-readiness.ko.md)를 참고하되, 공급자 활성만으로 Android 소셜 복귀 화면이 구현되는 것은 아니다.
 
 실제 SecureStore를 사용한 핵심 3개 시나리오와 PC 재확인 증거는 [10-21 세션 실기기 결과](../../docs/status/2026-10-20-android-session-device-test.ko.md)에 있다. 10-21 후속 문구 수정으로 로그인 화면에도 서버 확인 후 복원하며 세션 만료 때 재로그인한다는 현재 동작을 안내한다.
+
+수집 설정 화면의 파일별 역할·동시 변경 방어·검증 범위는 [수집 설정 진행 기록](../../docs/status/2026-10-21-android-collector-settings.ko.md)에 있다.

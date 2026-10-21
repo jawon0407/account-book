@@ -10,6 +10,7 @@ import { colors, common } from "./theme";
 export function LedgerScreen({
   manager,
   onCreate,
+  onCollector,
   onLoadStarted,
   onLoaded,
   notice,
@@ -17,6 +18,7 @@ export function LedgerScreen({
 }: {
   manager: SessionManager;
   onCreate: () => void;
+  onCollector: () => void;
   onLoadStarted: () => object | null;
   onLoaded: (receipt: object | null) => void;
   notice: ReactNode;
@@ -76,6 +78,13 @@ export function LedgerScreen({
             onPress={onCreate}
           >
             <Text style={common.buttonText}>{createLabel}</Text>
+          </Pressable>
+          <Pressable
+            accessibilityRole="button"
+            style={common.textButton}
+            onPress={onCollector}
+          >
+            <Text style={common.link}>수집 설정</Text>
           </Pressable>
           <Pressable
             accessibilityRole="button"

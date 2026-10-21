@@ -54,6 +54,21 @@ async function ready(workspace: ManualWorkspace) {
 }
 
 describe("account-owned manual workspace", () => {
+  it("preserves manual draft through collector settings and clears it on logout", async () => {
+    const { workspace } = fixture();
+    await ready(workspace);
+    workspace.open("manual");
+    workspace.edit({ amount: "20,000", memo: "unfinished manual entry" });
+    const draft = workspace.snapshot().draft;
+    workspace.open("collector");
+    expect(workspace.snapshot().screen).toBe("collector");
+    workspace.open("ledger");
+    workspace.open("manual");
+    expect(workspace.snapshot().draft).toEqual(draft);
+    workspace.acceptSession({ status: "signed_out" });
+    expect(workspace.snapshot().draft).toBeNull();
+    expect(workspace.snapshot().screen).toBe("ledger");
+  });
   it("makes no reference requests before a ready session", async () => {
     const { workspace, api } = fixture();
     await workspace.load();

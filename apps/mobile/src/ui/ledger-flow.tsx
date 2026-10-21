@@ -5,6 +5,7 @@ import type { ManualWorkspace } from "../ledger/manual-workspace";
 import { LedgerScreen } from "./ledger-screen";
 import { ManualEntryScreen } from "./manual-entry-screen";
 import { ResidenceScreen } from "./residence-screen";
+import { CollectorScreen } from "./collector-screen";
 import { common } from "./theme";
 
 /** 인증된 화면의 경로만 담당한다. 초안/저장 시도의 수명은 상위 workspace에 있다. */
@@ -42,12 +43,20 @@ export function LedgerFlow({
         <ResidenceScreen workspace={workspace} />
       </KeyboardAvoidingView>
     );
+  if (state.screen === "collector")
+    return (
+      <CollectorScreen
+        manager={manager}
+        onBack={() => workspace.open("ledger")}
+      />
+    );
   const status = state.entry?.snapshot().status;
   return (
     <LedgerScreen
       key={state.listVersion}
       manager={manager}
       onCreate={() => workspace.open("manual")}
+      onCollector={() => workspace.open("collector")}
       onLoadStarted={() => workspace.beginListCheck()}
       onLoaded={(receipt) => workspace.markListChecked(receipt)}
       notice={

@@ -12,7 +12,7 @@ type Api = Pick<
   SessionManager,
   "profile" | "updateProfile" | "accounts" | "categories" | "createTransaction"
 >;
-type Screen = "ledger" | "manual" | "residence";
+type Screen = "ledger" | "manual" | "residence" | "collector";
 type State = Readonly<{
   ownerId: string | null;
   screen: Screen;
