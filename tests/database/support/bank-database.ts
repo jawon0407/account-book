@@ -3,7 +3,7 @@ import { Client } from "pg";
 
 const TEST_URL = "postgresql://postgres:postgres@127.0.0.1:5432/account_book_test";
 const BANK_URL = "postgresql://postgres:postgres@127.0.0.1:5432/account_book_bank_test";
-export type BankTestDatabase = { admin: Client; close(): Promise<void> };
+export type BankTestDatabase = { admin: Client; connect(): Promise<Client>; close(): Promise<void> };
 export type BankTestRole = "app_api" | "app_session_bff" | "anon" | "authenticated" | "service_role";
 
 /**
@@ -21,9 +21,18 @@ export async function openBankDatabase(
   const control = new Client({ connectionString: TEST_URL });
   const admin = new Client({ connectionString: BANK_URL });
   let created = false;
+  const clients: Client[] = [];
+  /** @returns 동시성 검사용 독립 연결. close()가 소유한 연결만 종료한다. */
+  async function connect(): Promise<Client> {
+    const client = new Client({ connectionString: BANK_URL });
+    await client.connect();
+    clients.push(client);
+    return client;
+  }
   /** @returns 모든 연결을 닫고 이번 호출이 만든 고정 DB만 삭제한다. FORCE 삭제는 사용하지 않는다. */
   async function close(): Promise<void> {
     try {
+      await Promise.all(clients.map((client) => client.end()));
       await admin.end();
       if (created) {
         await control.query("drop database account_book_bank_test");
@@ -52,13 +61,13 @@ export async function openBankDatabase(
     for (const name of ["202607200001_security_auth_foundation.sql", "202607230001_delegated_jwt_replay.sql"]) {
       await admin.query(await readFile(new URL(`../../../supabase/migrations/${name}`, import.meta.url), "utf8"));
     }
-    for (const name of ["202609280001_bank_connection_storage.sql", "202609280002_bank_connection_access.sql"]) {
+    for (const name of ["202609280001_bank_connection_storage.sql", "202609280002_bank_connection_access.sql", "202610010003_bank_request_intake.sql", "202610010004_bank_request_exchange.sql", "202610010005_bank_request_end.sql", "202610020001_bank_request_limits.sql", "202610020002_bank_request_cleanup.sql"]) {
       // RED에서 아직 없는 migration만 건너뛴다. 실제 테이블·권한 assertion은 반드시 실패해야 한다.
       const migration = await readFile(new URL(`../../../supabase/migrations/${name}`, import.meta.url), "utf8")
         .catch((error: NodeJS.ErrnoException) => { if (error.code === "ENOENT") return ""; throw error; });
       if (migration) await admin.query(migration);
     }
-    return { admin, close };
+    return { admin, connect, close };
   } catch (error) {
     await close();
     throw error;

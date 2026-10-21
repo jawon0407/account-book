@@ -9,6 +9,7 @@ import {
   CreateTransferResultSchema,
   TransactionListQuerySchema,
   TransactionListResponseSchema,
+  type CreateTransactionInput,
 } from "./transactions.js";
 
 const accountId = "123e4567-e89b-42d3-a456-426614174000";
@@ -30,6 +31,37 @@ const baseTransaction = {
 };
 
 describe("transaction command schemas", () => {
+  it.each(["income", "expense"])("accepts unassigned %s without inventing references", (type) => {
+    const input = { amountKrw: 100, idempotencyKey, occurredOn: "2026-10-16", type };
+    expect(CreateTransactionInputSchema.parse(input)).toMatchObject({ accountId: null, categoryId: null });
+    for (const account of [accountId, null]) for (const category of [categoryId, null]) {
+      expect(CreateTransactionInputSchema.parse({ ...input, accountId: account, categoryId: category })).toMatchObject({ accountId: account, categoryId: category });
+      expect(TransactionSchema.parse({ ...baseTransaction, kind: type, accountId: account, categoryId: category, transferId: null })).toMatchObject({ accountId: account, categoryId: category, counterpartyName: null });
+    }
+  });
+
+  it("allows typed callers to omit unresolved references", () => {
+    const input: CreateTransactionInput = { amountKrw: 100, idempotencyKey, occurredOn: "2026-10-16", type: "expense" };
+    expect(CreateTransactionInputSchema.parse(input)).toMatchObject({ accountId: null, categoryId: null });
+  });
+
+  it("distinguishes omitted edits from explicit clearing and validates counterparty text", () => {
+    expect(UpdateTransactionInputSchema.parse({ expectedVersion: 1, accountId: null, categoryId: null, counterpartyName: null })).toEqual({ expectedVersion: 1, accountId: null, categoryId: null, counterpartyName: null });
+    expect(UpdateTransactionInputSchema.parse({ expectedVersion: 1, counterpartyName: "  합성 상점  " })).toEqual({ expectedVersion: 1, counterpartyName: "합성 상점" });
+    const input = { amountKrw: 100, idempotencyKey, occurredOn: "2026-10-16", type: "expense" };
+    expect(CreateTransactionInputSchema.parse({ ...input, counterpartyName: null })).toMatchObject({ counterpartyName: null });
+    expect(CreateTransactionInputSchema.parse({ ...input, counterpartyName: "가".repeat(200) })).toHaveProperty("counterpartyName");
+    for (const counterpartyName of ["", "   ", "가".repeat(201), "😀".repeat(101)]) {
+      expect(() => CreateTransactionInputSchema.parse({ ...input, counterpartyName })).toThrow();
+      expect(() => UpdateTransactionInputSchema.parse({ expectedVersion: 1, counterpartyName })).toThrow();
+    }
+  });
+
+  it.each(["transfer_out", "transfer_in", "opening_balance"])("still requires an account for %s", (kind) => {
+    const value = { ...baseTransaction, accountId: null, kind, categoryId: null, transferId: kind === "opening_balance" ? null : transferId, ...(kind === "opening_balance" ? { direction: "asset" } : {}) };
+    expect(() => TransactionSchema.parse(value)).toThrow();
+  });
+
   it("normalizes valid create and update commands", () => {
     expect(CreateTransactionInputSchema.parse({
       accountId,

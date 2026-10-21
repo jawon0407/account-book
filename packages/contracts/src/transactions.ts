@@ -11,40 +11,49 @@ import {
   VersionSchema,
 } from "./ledger-common.js";
 import { OpeningBalanceDirectionSchema } from "./accounts.js";
+import { ManualLedgerTimeInputSchema, TransactionTimeSnapshotSchema } from "./transaction-time.js";
 
 const MemoSchema = z.string().trim().min(1).max(500);
+// 소비 목적(카테고리)이 아닌 돈을 주고받은 상대의 표시명이다.
+const CounterpartyNameSchema = z.string().trim().min(1).max(200);
 
 export const TransactionInputTypeSchema = z.enum(["income", "expense"]);
 export type TransactionInputType = z.infer<typeof TransactionInputTypeSchema>;
 
 export const CreateTransactionInputSchema = z.object({
-  accountId: LedgerIdSchema,
+  accountId: LedgerIdSchema.nullable().default(null),
   amountKrw: PositiveKrwAmountSchema,
-  categoryId: LedgerIdSchema,
+  categoryId: LedgerIdSchema.nullable().default(null),
+  counterpartyName: CounterpartyNameSchema.nullable().optional(),
   idempotencyKey: IdempotencyKeySchema,
   memo: MemoSchema.optional(),
   occurredOn: LocalDateSchema,
+  time: ManualLedgerTimeInputSchema.optional(),
   type: TransactionInputTypeSchema,
 }).strict();
-export type CreateTransactionInput = z.infer<typeof CreateTransactionInputSchema>;
+// 외부 호출은 참조를 생략할 수 있고, parse 결과에서만 NULL로 정규화된다.
+export type CreateTransactionInput = z.input<typeof CreateTransactionInputSchema>;
 
 /**
  * 실제 수정 필드가 하나 이상 있어야 한다. refine은 expectedVersion만 있는 빈 수정을 거부한다.
- * memo: null은 메모 삭제 요청이므로 유효하고, 생략(undefined)은 수정하지 않겠다는 뜻이다.
+ * 관계·상대명·memo의 null은 지정 해제이며, 생략(undefined)은 수정하지 않겠다는 뜻이다.
  * 입력 형식 검사만 하며 거래 변경·소유권 조회·버전 충돌 처리는 수행하지 않는다.
  */
 export const UpdateTransactionInputSchema = z.object({
-  accountId: LedgerIdSchema.optional(),
+  accountId: LedgerIdSchema.nullable().optional(),
   amountKrw: PositiveKrwAmountSchema.optional(),
-  categoryId: LedgerIdSchema.optional(),
+  categoryId: LedgerIdSchema.nullable().optional(),
+  counterpartyName: CounterpartyNameSchema.nullable().optional(),
   expectedVersion: ExpectedVersionSchema,
   memo: MemoSchema.nullable().optional(),
   occurredOn: LocalDateSchema.optional(),
+  time: ManualLedgerTimeInputSchema.nullable().optional(),
   type: TransactionInputTypeSchema.optional(),
 }).strict().refine((input) =>
   input.accountId !== undefined || input.amountKrw !== undefined || input.categoryId !== undefined ||
-  input.memo !== undefined || input.occurredOn !== undefined || input.type !== undefined,
-{ message: "TRANSACTION_UPDATE_EMPTY" });
+  input.memo !== undefined || input.occurredOn !== undefined || input.type !== undefined || input.counterpartyName !== undefined || input.time !== undefined,
+{ message: "TRANSACTION_UPDATE_EMPTY" }).refine(value => value.time === undefined || value.occurredOn !== undefined,
+{ message: "TIME_CORRECTION_DATE_REQUIRED", path: ["occurredOn"] });
 export type UpdateTransactionInput = z.infer<typeof UpdateTransactionInputSchema>;
 
 export const DeleteTransactionInputSchema = z.object({ expectedVersion: ExpectedVersionSchema }).strict();
@@ -72,15 +81,18 @@ const TransactionBaseSchema = z.object({
   accountId: LedgerIdSchema,
   amountKrw: PositiveKrwAmountSchema,
   occurredOn: LocalDateSchema,
+  time: TransactionTimeSnapshotSchema.optional(),
   memo: z.string().nullable(),
+  // 구버전 멱등 응답 snapshot에는 이 필드가 없으므로 읽을 때만 NULL로 보완한다.
+  counterpartyName: CounterpartyNameSchema.nullable().default(null),
   version: VersionSchema,
   deletedAt: TimestampSchema.nullable(),
   createdAt: TimestampSchema,
   updatedAt: TimestampSchema,
 });
 
-const IncomeTransactionSchema = TransactionBaseSchema.extend({ kind: z.literal("income"), categoryId: LedgerIdSchema, transferId: z.null() }).strict();
-const ExpenseTransactionSchema = TransactionBaseSchema.extend({ kind: z.literal("expense"), categoryId: LedgerIdSchema, transferId: z.null() }).strict();
+const IncomeTransactionSchema = TransactionBaseSchema.extend({ kind: z.literal("income"), accountId: LedgerIdSchema.nullable(), categoryId: LedgerIdSchema.nullable(), transferId: z.null() }).strict();
+const ExpenseTransactionSchema = TransactionBaseSchema.extend({ kind: z.literal("expense"), accountId: LedgerIdSchema.nullable(), categoryId: LedgerIdSchema.nullable(), transferId: z.null() }).strict();
 export const TransferOutTransactionSchema = TransactionBaseSchema.extend({ kind: z.literal("transfer_out"), categoryId: z.null(), transferId: LedgerIdSchema }).strict();
 export type TransferOutTransaction = z.infer<typeof TransferOutTransactionSchema>;
 export const TransferInTransactionSchema = TransactionBaseSchema.extend({ kind: z.literal("transfer_in"), categoryId: z.null(), transferId: LedgerIdSchema }).strict();
@@ -93,7 +105,7 @@ export const TransactionSchema = z.discriminatedUnion("kind", [
   TransferOutTransactionSchema,
   TransferInTransactionSchema,
   OpeningBalanceTransactionSchema,
-]);
+]).refine(value => value.time === undefined || value.time.occurredOn === value.occurredOn, { message: "TIME_SNAPSHOT_DATE_MISMATCH" });
 export type Transaction = z.infer<typeof TransactionSchema>;
 
 export const TransactionTombstoneSchema = z.object({ id: LedgerIdSchema, version: VersionSchema, deletedAt: TimestampSchema }).strict();

@@ -128,6 +128,7 @@ describe("delegated API authentication boundary", () => {
    */
   async function token(target = "/v1/me", rid = requestId): Promise<string> {
     return new SignJWT({
+      chn: "web",
       aud: "urn:account-book:api", exp: now + 30, iat: now, iss: "urn:account-book:bff",
       jti: randomBytes(16).toString("base64url"), nbf: now,
       rbh: binding(target), rid, scp: "me:read", sid: sessionId, sub: userId,
@@ -150,7 +151,7 @@ describe("delegated API authentication boundary", () => {
     const replay = await app.inject({ method: "GET", url: "/v1/me", headers });
 
     expect(first.statusCode).toBe(200);
-    expect(CurrentUserSchema.parse(first.json())).toEqual({ id: userId, email: null, emailVerified: true });
+    expect(CurrentUserSchema.parse(first.json())).toEqual({ id: userId, email: null, emailVerified: false });
     expect(first.headers["x-request-id"]).toBe(requestId);
     expect(replay.statusCode).toBe(401);
     expect(ApiErrorSchema.parse(replay.json()).code).toBe("AUTH_SESSION_EXPIRED");

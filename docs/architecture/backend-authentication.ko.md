@@ -137,7 +137,7 @@ flowchart LR
 6. `sub`, session UUID, `jti`가 canonical 형식인지 확인하고 PostgreSQL에서 `jti`를 원자적으로 한 번만 consume한 뒤 최소 immutable `AuthPrincipal`을 만든다.
 7. 모든 검증이 끝난 뒤에만 Fastify request에 principal을 부착한다.
 
-따라서 body, query, 일반 header나 이메일·역할 같은 임의 JWT claim으로 사용자 소유권을 결정할 수 없다. `/v1/me`는 공유 `CurrentUser` 계약에 맞춰 검증된 `userId`, `email: null`, 기존 verified-session 불변조건을 나타내는 `emailVerified: true`만 반환한다.
+따라서 body, query, 일반 header나 이메일·역할 같은 임의 JWT claim으로 사용자 소유권을 결정할 수 없다. `/v1/me`는 공유 `CurrentUser` 계약에 맞춰 검증된 `userId`, `email: null`, `emailVerified: false`를 반환한다. API는 이메일 인증 증거를 전달받지 않으므로 검증 완료라고 주장하지 않는다. 이 false는 세션 인증 실패가 아니라 이메일 미확인 표시이며 인가는 검증된 사용자 ID와 서버 권한으로 판단한다.
 
 잘못된 credential은 세부 원인을 구분하지 않는 401 `AUTH_SESSION_EXPIRED`, keyring·replay store·내부 운영 실패는 503 `AUTH_PROVIDER_UNAVAILABLE`로 고정한다. 두 경우 모두 strict `ApiError`, 서버 생성 UUID `X-Request-Id`, `Cache-Control: private, no-store`를 사용하며 exception, token, 공급자 URL/message, header/body나 환경값을 직렬화하거나 로그로 남기지 않는다. Helmet은 등록하고 CORS는 등록하지 않는다.
 
@@ -233,6 +233,10 @@ provider 교환이 실패해도 claim은 되돌리지 않는다. 사용자는 �
 
 Supabase provider mapping은 Google `google`, Kakao `kakao`, Naver `custom:naver`로 고정된다.
 
+2026-09-30 후속: `AUTH_ENABLED_PROVIDERS`는 기본 `[]`인 서버 허용 목록이다. start·continue·callback 모두 이 목록을 검사한다. 공개 `GET /api/auth/providers`에는 활성 이름만 넣고 DB·키를 전달하지 않는다. UI는 조회 중/오류/과거 캐시 재검증 중에는 버튼을 비활성화한다. 실제 콘솔 설정과 별개이며 목록 변경 후 실행 환경 재시작/재배포가 필요하다.
+
+이메일 없는 OAuth는 고정 Supabase 응답에서 비익명 사용자, OAuth AMR, 기대 공급자와 동일 user ID의 identity 및 비어 있지 않은 sub가 확인될 때만 세션을 만든다. 공개 값은 `email: null`, `emailVerified: false`다. 이메일이 있는 미인증 계정·이메일 비밀번호·확인·복구에는 이 예외를 적용하지 않는다. 파서는 브라우저가 제출한 JWT 검증기가 아니며 기존 서버 HTTPS 공급자 경계에만 적용한다. 실제 Google/Kakao/Naver 응답과 갱신 여정은 아직 미검증이다. [준비·활성화 가이드](../guides/social-auth-readiness.ko.md).
+
 ### 완료
 
 1. callback의 provider, `state`, code와 기존 interaction selector를 먼저 검증한다.
@@ -286,7 +290,18 @@ Supabase provider mapping은 Google `google`, Kakao `kakao`, Naver `custom:naver
 2. interaction digest와 encrypted PKCE verifier가 든 pending row를 만든다.
 3. 수명은 정확히 15분이다.
 4. Supabase recovery 요청에는 callback URL과 challenge만 보낸다.
-5. 계정 존재 여부와 무관하게 공개 결과는 `{ accepted: true }`다.
+5. 2026-10-01 사용자 승인으로 기존 열거 방지 정책에 예외를 둔다. HTTP 경계가 BFF 전용 `app_private.check_email_account`로 존재 여부를 확인하며, 미가입은 404 `AUTH_ACCOUNT_NOT_FOUND`다. 존재하면 서비스를 호출하고 `{ accepted: true }`로 **발송 요청 접수**만 알린다. 조회 실패는 없는 계정으로 취급하지 않고 503으로 닫는다.
+
+### 2026-10-01 인증 보정 및 승인된 보안 예외
+
+- 이메일 가입 전 존재하는 계정은 409 `AUTH_ACCOUNT_EXISTS`와 로그인 링크를 표시한다. 서버 HMAC 지문으로 10분당 이메일 5회, 브라우저 20회, 전역 120회 예산을 종류별로 적용한다. 브라우저 예산 쿠키는 회전하는 CSRF/PKCE 상호작용 쿠키와 분리된 `__Host-ab_auth_budget`이며 600초, HttpOnly/Secure/SameSite=Lax다. 로그인 자격 증명으로는 사용하지 않는다.
+- 이는 이메일 가입 여부를 공개하는 정책이다. 쿠키 삭제로 브라우저 식별자를 새로 얻을 수 있고, 전역 예산 소진은 다른 사용자의 요청도 잠시 막을 수 있다. 공개 운영 전 플랫폼 호출 제한·CAPTCHA·모니터링이 필요하다. DB 역할은 회원 목록을 읽을 수 없고 고정 search_path의 단일 이메일 함수만 실행한다.
+- 만료·실패 복구 callback은 `/app` 대신 공개 `/forgot-password/invalid-link`로 이동하고, 코드·토큰을 다음 URL로 전달하지 않는다. 실제 비밀번호 변경은 여전히 일회성 복구 문맥을 요구한다.
+- Supabase SDK가 `expires_at`을 로컬 시계로 계산할 수 있으므로 JWT `exp`와 최대 60초 차이를 허용하되, 세션의 실제 만료는 원래 JWT `exp`다. `iat`도 60초 이내 미래 발급 오차만 허용하며 원본 값을 유지한다. 원시 HTTP 응답에 명시된 만료의 모순과 실제 만료는 계속 거부한다.
+- 복구 후 세션 발급 하한은 DB 시각에 발급 오차 60초와 1초를 더한다. Auth·DB·BFF는 시계 동기화가 필요하며 Auth↔DB 오차도 60초 이내라는 운영 전제다. 변경 전 미래 `iat`를 가진 토큰을 차단하기 위한 보수적 조치로, 비밀번호 변경 직후 새 로그인은 약 1~2분 대기가 필요할 수 있다.
+- OAuth 가입 의도는 `oauth_transactions.intent`에 저장한다. 가입 callback은 공급자 인증을 확인하되 앱 세션을 만들지 않고 로그인 화면으로 보낸다. 신규/기존 회원을 시각 비교로 추측하지 않으며, 같은 identity 중복 생성 방지는 공급자가 수행한다. 따라서 신규 소셜 가입자도 로그인 버튼을 다시 눌러야 한다.
+
+실제 적용·검증 및 남은 확인 사항은 [인증 수정 기록](../status/2026-10-01-auth-corrections.ko.md)을 따른다. 위 예외는 과거 문서의 일괄 `accepted` 설명보다 우선한다.
 
 ### code 교환
 

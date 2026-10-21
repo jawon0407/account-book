@@ -14,6 +14,8 @@ function isSecurityBoundaryVariable(variable: string): boolean {
     || normalized.startsWith("API_")
     || normalized.startsWith("AUTH_")
     || normalized.startsWith("BFF_")
+    || normalized.startsWith("BANK_")
+    || normalized.startsWith("KFTC_")
     || normalized.startsWith("SUPABASE_")
     || normalized.startsWith("TEST_DATABASE_")
     || normalized.startsWith("MIGRATION_DATABASE_");
@@ -70,6 +72,7 @@ export function buildPlaywrightServerEnvironments(input: PlaywrightServerEnviron
       API_INTERNAL_URL: "http://127.0.0.1:4511",
       APP_ORIGIN: input.baseURL,
       AUTH_ADAPTER_MODE: "fake",
+      AUTH_ENABLED_PROVIDERS: '["google","kakao","naver"]',
       AUTH_CSRF_HMAC_KEY: input.csrfKey,
       AUTH_FAKE_PROVIDER_URL: "http://127.0.0.1:4510/token",
       AUTH_TOKEN_KEY: input.sessionKey,

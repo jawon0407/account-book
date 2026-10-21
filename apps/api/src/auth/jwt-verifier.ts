@@ -5,6 +5,7 @@ import {
   DELEGATED_JWT_MAX_BYTES,
   DELEGATED_JWT_REPLAY_SECONDS,
   DELEGATED_JWT_TTL_SECONDS,
+  DelegatedClientChannelSchema,
   DelegatedScopeSchema,
   canonicalDelegatedRequest,
   type DelegatedScope,
@@ -101,8 +102,10 @@ function decodeCanonicalBase64url(value: unknown, pattern: RegExp, byteLength: n
  * @throws 필수 값, UUID, 시간 관계, 권한, 인코딩이 맞지 않으면 InvalidAccessTokenError.
  */
 function validateClaims(payload: Record<string, unknown>, requiredScope: DelegatedScope): Readonly<{ jti: string; binding: Uint8Array; principal: AuthPrincipal; iat: number }> {
-  const required = ["aud", "exp", "iat", "iss", "jti", "nbf", "rbh", "rid", "scp", "sid", "sub"];
+  const required = ["aud", "chn", "exp", "iat", "iss", "jti", "nbf", "rbh", "rid", "scp", "sid", "sub"];
   if (!required.every((claim) => Object.hasOwn(payload, claim))) throw new InvalidAccessTokenError();
+  const channel = DelegatedClientChannelSchema.safeParse(payload.chn);
+  if (!channel.success) throw new InvalidAccessTokenError();
   if (
     payload.iss !== DELEGATED_JWT_ISSUER
     || payload.aud !== DELEGATED_JWT_AUDIENCE
@@ -130,7 +133,7 @@ function validateClaims(payload: Record<string, unknown>, requiredScope: Delegat
     jti: Buffer.from(jti).toString("base64url"),
     binding,
     iat: payload.iat,
-    principal: Object.freeze({ userId: payload.sub, sessionId: payload.sid, scope: payload.scp, requestId: payload.rid }),
+    principal: Object.freeze({ clientChannel: channel.data, userId: payload.sub, sessionId: payload.sid, scope: payload.scp, requestId: payload.rid }),
   };
 }
 
@@ -213,7 +216,7 @@ export class DelegatedJwtVerifier implements AccessTokenVerifier {
         algorithms: ["ES256"],
         audience: DELEGATED_JWT_AUDIENCE,
         issuer: DELEGATED_JWT_ISSUER,
-        requiredClaims: ["aud", "exp", "iat", "iss", "jti", "nbf", "rbh", "rid", "scp", "sid", "sub"],
+        requiredClaims: ["aud", "chn", "exp", "iat", "iss", "jti", "nbf", "rbh", "rid", "scp", "sid", "sub"],
         clockTolerance: 5,
         currentDate: this.now(),
       });

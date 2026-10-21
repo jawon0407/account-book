@@ -4,7 +4,7 @@
 
 선행 A1 PR #13은 main `e23271e364eeaee0e751f1d35e4397a4ef174dbe`에 병합됐다. push36401595302·PR36401600908의 필수13단계와 PR 검사 부모 `[e43260d,435b21a]`, main36402134184의 실제 병합 근거/품질 검사가 모두 성공했다. 코드 저장소 공개가 DB 공개·서비스 배포를 뜻하지는 않는다.
 
-현재 `feature/bank-connection-storage`에서 A2.1을 진행한다. [설계](../superpowers/specs/2026-09-28-bank-storage-design.md)와 [계획](../superpowers/plans/2026-09-28-bank-storage.md)을 먼저 작성했고 사용자 요청에 따라 일반 개발 재승인은 기다리지 않는다.
+A2.1은 [PR #18](https://github.com/jawon0407/account-book/pull/18)로 main `b7ecd830c3aefd9b225b100b1087d78d39e2ddc1`에 정상 병합했고, 병합 후 검사까지 완료했다. [설계](../superpowers/specs/2026-09-28-bank-storage-design.md)와 [계획](../superpowers/plans/2026-09-28-bank-storage.md)에 따라 구현했다. 다음 `feature/bank-state-transitions`에서는 [A2.2 사전 점검](2026-09-29-bank-state-transitions-next.ko.md)을 정리했으며 상세 설계·구현은 아직 후속이다. 사용자 요청에 따라 일반 개발 재승인은 기다리지 않는다.
 
 ## 작업 체크
 
@@ -17,14 +17,15 @@
 - [x] 독립 리뷰: Critical0/Important1/Minor0. 실DB 구조 대조·시간 제약 테스트 누락 보완 요구
 - [x] 추가 테스트848ca89/36442885620:109통과·3실패. 실제 제약 이름 차이1건, 테스트의 name[] 해석 차이2건 확인
 - [x] 보완2e2a068: SQL에 맞춰 TS UNIQUE 이름 지정, 카탈로그 배열을 text[]로 조회. 로컬 전체 1,192개·lint·타입·빌드 종료0, CI36443403382 필수13단계 성공
-- [ ] 정상 PR·main 사후 검사
+- [x] 최신 c13a5a7의 push36444134209·PR36444190431 필수13단계 성공, PR 검사 부모 [e23271e,c13a5a7] 확인
+- [x] PR18 정상 병합 → main b7ecd830/36444621225 provenance·품질 검사 성공, DB112·브라우저10개 통과
 - [ ] A2.2 원자적 상태 처리, A2.3 공유 요청 제한·만료 정리
 
 ## 검증 구분
 
 로컬에 PostgreSQL/Docker가 없어 DB는 기존 무료 GitHub Actions PostgreSQL17에서 검증한다. 준비된 테스트를 실행 완료로 표시하지 않는다. A2.1은 테이블/권한 기반이며 HTTP API·은행 Callback·웹 버튼·실은행 조회는 후속이다.
 
-최신 후보 `2e2a0688291b6f50563a4c26ecdba1e8fffcaa51`의 [CI 실행36443403382](https://github.com/jawon0407/account-book/actions/runs/36443403382)에서 실제 DB 112개와 실제 BFF/API를 거친 브라우저 인증 10개를 통과했다. 독립 리뷰의 Important 1건은 추가 검사와 최소 수정 후 이 결과로 해소했다. 브라우저 인증 회귀 성공이 아직 없는 장부 UI의 완성이나 실은행 연결 성공을 뜻하지는 않는다. 새 문서 커밋 이후 PR은 해당 최신 SHA로 다시 검사한다.
+제품 보완 후보 `2e2a0688291b6f50563a4c26ecdba1e8fffcaa51`의 [CI 실행36443403382](https://github.com/jawon0407/account-book/actions/runs/36443403382)에서 실제 DB 112개와 실제 BFF/API를 거친 브라우저 인증 10개를 통과했다. 독립 리뷰의 Important 1건은 추가 검사와 최소 수정 후 이 결과로 해소했다. 문서 포함 최신 c13a5a7의 push/PR 검사를 다시 통과한 뒤 병합했고 [main 실행36444621225](https://github.com/jawon0407/account-book/actions/runs/36444621225)에서도 같은 회귀와 병합 출처 검사를 통과했다. 브라우저 인증 회귀 성공이 아직 없는 장부 UI의 완성이나 실은행 연결 성공을 뜻하지는 않는다.
 
 ## 사용자가 알아둘 사항
 
@@ -52,3 +53,5 @@ Next 개발 서버가 생성한 AGENTS.md/CLAUDE.md/next-env.d.ts 변경은 기�
 - SQL fixture는 봉투 모양만 검증한다. GCM 진위는 API가 검증하며 DB 형식 통과를 진짜 토큰 인증으로 취급하지 않는다.
 
 초기 기능 diff24파일 +911/-4(진행 문서 정합성 갱신 제외). 역할별로 나누고 검증 보완 파일2개와 테스트 의존성 연결을 추가해 첫 예상보다 파일 수가 늘었다. 앱의 외부 공개 API나 운영 DB는 변경하지 않았다.
+
+PR18 최종 diff는 문서 정합성 갱신을 포함해 27파일 +946/-11이다. main 보호·필수 검사·관리자 적용을 유지했고 우회 병합을 하지 않았다. 병합 뒤 최신 현황 및 A2.2 사전 점검 문서는 다음 기능 브랜치에서 기록한다. A2.2 제품 코드가 이미 구현됐다는 뜻은 아니다.

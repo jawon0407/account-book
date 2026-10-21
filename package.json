@@ -10,8 +10,8 @@
   },
   "scripts": {
     "test:structure": "node --test scripts/verify-structure.test.mjs",
-    "test:legacy": "node --test scripts/verify-structure.test.mjs scripts/workspace-policy.test.mjs scripts/security/*.test.mjs scripts/security-gate.test.mjs scripts/setup-hooks.test.mjs",
-    "test:workspace": "pnpm build:packages && pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api test",
+    "test:legacy": "node --test scripts/verify-structure.test.mjs scripts/workspace-policy.test.mjs scripts/security/*.test.mjs scripts/security-gate.test.mjs scripts/setup-hooks.test.mjs scripts/local-auth/*.test.mjs",
+    "test:workspace": "pnpm build:packages && pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api --filter @account-book/mobile test",
     "test:e2e-preflight": "pnpm --filter @account-book/e2e test:preflight",
     "test": "pnpm test:legacy && pnpm test:workspace && pnpm test:e2e-preflight",
     "test:db": "pnpm --filter @account-book/database-tests test",
@@ -20,9 +20,9 @@
     "verify:structure": "node scripts/verify-structure.mjs",
     "lint": "eslint . --max-warnings=0",
     "build:packages": "pnpm --filter @account-book/contracts build && pnpm --filter @account-book/database build",
-    "typecheck:workspace": "pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api --filter @account-book/database-tests --filter @account-book/e2e typecheck",
+    "typecheck:workspace": "pnpm --filter @account-book/contracts --filter @account-book/database --filter @account-book/web --filter @account-book/api --filter @account-book/mobile --filter @account-book/database-tests --filter @account-book/e2e typecheck",
     "typecheck": "pnpm build:packages && pnpm typecheck:workspace",
-    "build": "pnpm build:packages && pnpm --filter @account-book/api build && pnpm --filter @account-book/web build",
+    "build": "pnpm build:packages && pnpm --filter @account-book/api build && pnpm --filter @account-book/web build && pnpm --filter @account-book/mobile build",
     "verify": "pnpm lint && pnpm typecheck && pnpm test && pnpm build"
   },
   "devDependencies": {

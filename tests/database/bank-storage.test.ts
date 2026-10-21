@@ -8,9 +8,9 @@ beforeAll(async () => { database = await openBankDatabase(); });
 afterAll(async () => { await database?.close(); });
 
 describe("bank storage constraints on disposable PostgreSQL", () => {
-  it("creates the three private storage tables", async () => {
+  it("creates the three private storage tables and shared request limits", async () => {
     const result = await database.admin.query("select tablename from pg_tables where schemaname='app_bank' order by tablename");
-    expect(result.rows.map((row) => row.tablename)).toEqual(["bank_connection_credentials", "bank_connection_requests", "bank_connections"]);
+    expect(result.rows.map((row) => row.tablename)).toEqual(["bank_connection_credentials", "bank_connection_requests", "bank_connections", "bank_request_limits"]);
   });
 
   it("stores only bound encrypted credentials and permits no refresh token", async () => {

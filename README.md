@@ -2,7 +2,15 @@
 
 PC와 모바일에서 사용할 수 있는 보안 우선 동기화형 개인 가계부입니다.
 
-## Current Stage
+## Current Direction (2026-10-07)
+
+개인 휴대폰 금융 알림과 수기 입력을 기반으로 한 가계부를 먼저 개발합니다. 자동 분류 규칙은 **선택 기능**이며 규칙 없이도 미분류 거래를 기록하고 입출금 합계에 포함합니다. 미분류 안내와 사용자별 계좌·거래 대상·선택적 요일/시간대 규칙을 설계합니다. 실계좌 API·공동 장부·라온 연동·AI 분석은 후속 범위입니다.
+
+[최신 요구사항·선택형 분류 설계](docs/superpowers/specs/2026-10-07-personal-notification-ledger-design.md)와 [클라우드 작업 인수인계](docs/status/2026-10-07-personal-notification-ledger-handoff.ko.md)를 먼저 읽어 주세요. 기존 웹/API 원장은 재사용하지만 별도 모바일 수집·분류 기능은 아직 구현 전입니다. 코드 구현과 설계 목표를 구분합니다.
+
+## Historical Verification Snapshot (2026-09-08)
+
+아래는 당시 기록이며 현재 전체 구현 상태는 [문서 지도](docs/README.md)를 따릅니다.
 
 인증·보안 기반의 로컬 구현과 disposable CI 검증까지 완료되었습니다. server-side 인증 도메인, PostgreSQL opaque session 저장소, server-owned PKCE·password recovery, 14개 same-origin Next.js BFF route, 반응형 인증 UI, BFF가 요청마다 발급하는 30초 ES256 delegated JWT, NestJS/Fastify의 static public-key 검증·request binding·PostgreSQL one-time replay 방어가 포함됩니다.
 
@@ -25,6 +33,8 @@ The approved target is a separate PC web and native mobile app, not an installab
 
 ## Documentation
 
+- [최신 개인 알림 가계부·선택형 자동 분류 설계](docs/superpowers/specs/2026-10-07-personal-notification-ledger-design.md)
+- [클라우드에서 이어서 작업하기 위한 인수인계](docs/status/2026-10-07-personal-notification-ledger-handoff.ko.md)
 - [저장소 보호 운영: 읽기 확인·PR 증거·공개 전 중단 조건](docs/security/free-plan-compensating-controls.md)
 - [현재 CI 보호 보완과 검증 기록 — 원격 적용/P1 종결은 별도](docs/status/2026-09-24-ci-merge-provenance.ko.md)
 - [문서 전체 지도와 최신 상태](docs/README.md)

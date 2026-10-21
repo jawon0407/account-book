@@ -30,6 +30,19 @@ function validEnvironment(overrides: Readonly<Record<string, string>> = {}): Rec
 }
 
 describe("parseApiEnvironment", () => {
+  it("accepts Supavisor app_api.projectref login syntax without accepting a different database role", () => {
+    const url = "postgresql://app_api.abcdefghijklmnopqrst:test-password@aws-0-region.pooler.supabase.com:5432/postgres?sslmode=verify-full";
+    expect(parseApiEnvironment(validEnvironment({ API_DATABASE_URL: url })).apiDatabaseUrl).toBe(url);
+    for (const invalid of [
+      url.replace("app_api.", "postgres."),
+      url.replace("app_api.", "app_bff_login."),
+      url.replace("abcdefghijklmnopqrst", "invalid"),
+      url.replace("pooler.supabase.com", "pooler.supabase.com.evil.test"),
+      url.replace("aws-0-region.pooler.supabase.com", "127.0.0.1"),
+      url.replace(":5432/", ":1234/"),
+    ]) expect(() => parseApiEnvironment(validEnvironment({ API_DATABASE_URL: invalid }))).toThrow("API_CONFIGURATION_INVALID");
+  });
+
   it("creates an immutable local static-keyring configuration", () => {
     const result = parseApiEnvironment(validEnvironment());
 

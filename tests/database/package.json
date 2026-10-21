@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@account-book/contracts": "workspace:*",
     "@account-book/database": "workspace:*",
     "pg": "8.22.0"
   },

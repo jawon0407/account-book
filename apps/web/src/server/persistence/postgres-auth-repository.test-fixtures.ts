@@ -10,7 +10,7 @@ const PostgresAuthRepository = repositoryModule.PostgresAuthRepository as
       createSession(input: Record<string, unknown>, providerIssuedAtSeconds: number): Promise<boolean>;
       findActiveBySelectorHash(hash: Uint8Array, now: Date): Promise<unknown>;
       rotate(input: Record<string, unknown>): Promise<boolean>;
-      revokeBySelectorHash(hash: Uint8Array, now: Date): Promise<boolean>;
+      revokeBySelectorHash(hash: Uint8Array, now: Date, channel?: "web" | "android"): Promise<boolean>;
       revokeAllForUser(userId: string, now: Date): Promise<number>;
       markRevocationPending(sessionId: string, now: Date): Promise<void>;
       createOAuthTransaction(input: Record<string, unknown>): Promise<void>;
@@ -51,6 +51,8 @@ function session(overrides: Record<string, unknown> = {}): Record<string, unknow
     revokedAt: null,
     revocationPendingAt: null,
     rotationVersion: 0,
+    clientChannel: "web",
+    deviceId: null,
     ...overrides,
   };
 }

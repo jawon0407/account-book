@@ -2,10 +2,11 @@ import type { ExecutionContext } from "@nestjs/common";
 import type { FastifyRequest } from "fastify";
 import { describe, expect, it, vi } from "vitest";
 import { AuthGuard } from "./auth.guard.js";
-import { DELEGATED_SCOPE } from "./delegated-scope.js";
+import { DELEGATED_CHANNELS, DELEGATED_SCOPE } from "./delegated-scope.js";
 import { InvalidAccessTokenError, type AccessTokenVerifier } from "./jwt-verifier.js";
 
 const principal = {
+  clientChannel: "web",
   userId: "123e4567-e89b-12d3-a456-426614174000",
   sessionId: "123e4567-e89b-12d3-a456-426614174001",
   scope: "me:read",
@@ -55,14 +56,19 @@ function handler(): void {}
  * @param scope - 경로가 선언했다고 가정할 권한. 잘못된 값도 테스트하려고 unknown을 받는다.
  * @returns 실제 가드 인스턴스.
  */
-function guard(verifier: AccessTokenVerifier, scope: unknown = "me:read"): AuthGuard {
+function guard(verifier: AccessTokenVerifier, scope: unknown = "me:read", channels?: unknown): AuthGuard {
   const reflector = {
-    getAllAndOverride: vi.fn((key: unknown) => key === DELEGATED_SCOPE ? scope : undefined),
+    getAllAndOverride: vi.fn((key: unknown) => key === DELEGATED_SCOPE ? scope : key === DELEGATED_CHANNELS ? channels : undefined),
   };
   return new AuthGuard(verifier, reflector as never);
 }
 
 describe("AuthGuard", () => {
+  it.each([null, [], ["android", "android"], ["ios"], "android", ["web", "android", "web"]])("fails closed for malformed route channel metadata %j", async channels => {
+    const incoming = request(["Authorization", "Bearer aaa.bbb.ccc", "X-Request-Id", principal.requestId]);
+    await expect(guard({ verify: async () => principal }, "me:read", channels).canActivate(context(incoming))).rejects.toBeInstanceOf(InvalidAccessTokenError);
+    expect(incoming.principal).toBeUndefined();
+  });
   it.each(["POST", "PATCH", "DELETE"] as const)("passes the exact raw %s JSON mutation binding to the delegated verifier", async (method) => {
     const verify = vi.fn(async () => principal);
     const subject = guard({ verify } satisfies AccessTokenVerifier, "transaction:write");

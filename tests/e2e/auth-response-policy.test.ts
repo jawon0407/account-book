@@ -90,6 +90,7 @@ test("mutation guard: exact fixed public contracts remain accepted", () => {
     expiresAt: "2026-07-27T23:00:00.000Z",
     user: { email: syntheticEmail, emailVerified: true, id: userId },
   }, { email: syntheticEmail, userId }), true);
-  assert.equal(isMeResponse({ email: null, emailVerified: true, id: userId }, { email: null, userId }), true);
+  assert.equal(isMeResponse({ email: null, emailVerified: false, id: userId }, { email: null, userId }), true);
+  assert.equal(isMeResponse({ email: null, emailVerified: true, id: userId }, { email: null, userId }), false);
   assert.equal(isSignOutResponse({ signedOut: true }), true);
 });

@@ -13,10 +13,10 @@
   "dependencies": {
     "@account-book/contracts": "workspace:*",
     "@fastify/helmet": "13.1.0",
-    "@nestjs/common": "11.1.28",
-    "@nestjs/core": "11.1.28",
-    "@nestjs/platform-fastify": "11.1.28",
-    "fastify": "5.12.3",
+    "@nestjs/common": "11.2.5",
+    "@nestjs/core": "11.2.5",
+    "@nestjs/platform-fastify": "11.2.5",
+    "fastify": "5.12.5",
     "jose": "6.2.3",
     "pg": "8.22.0",
     "reflect-metadata": "0.2.2",
@@ -24,7 +24,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@nestjs/testing": "11.1.28",
+    "@nestjs/testing": "11.2.5",
     "@types/pg": "8.20.0"
   }
 }
