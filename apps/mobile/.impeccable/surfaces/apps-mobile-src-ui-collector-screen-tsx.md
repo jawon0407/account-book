@@ -2,7 +2,7 @@
 version: 1
 slug: "apps-mobile-src-ui-collector-screen-tsx"
 primary_target: "apps/mobile/src/ui/collector-screen.tsx"
-related_targets: []
+related_targets: ["apps/mobile/src/ui/notification-access-guide.tsx"]
 ---
 
 # Collector settings — Android / Operate
@@ -22,3 +22,11 @@ FIRST VIEWPORT: Back above 24sp title, short readiness statement, verified statu
 FORM: User-pinned existing world, narrow local extension; no seed. Code-led native screen. Signature interaction: explicit impact confirmation before designation changes, never an optimistic switch. No decorative motion.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+
+## 2026-10-21 permission guidance extension
+
+- Keep the existing first viewport and device controls. Inline disclosure follows refresh and the designation explanation; no new route/modal or nested cards.
+- Always show that this is guidance only and manual use needs no notification access. Expanded content describes planned behavior, never an already-granted consent or running capture service.
+- One 48dp minimum disclosure control, expanded accessibility state, headings, inherited text scales and scroll. No storage/network/OS permission side effect.
+- Separate other-app notification access from own-app notification display. Explain selected sources, unsupported/hidden notifications, no history retrieval, future stop/withdrawal and separate ledger deletion.
+- User deferred native screenshots/font scale/TalkBack/Back verification. Code and bundle checks cannot grant visual approval; no new raster or global design-system change.
