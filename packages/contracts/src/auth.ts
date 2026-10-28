@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { utf16Length } from "./string-length.js";
 
 const EmailSchema = z.email().max(254);
-const PasswordSchema = z.string().min(12).max(1024);
+const PasswordSchema = z.string().check(utf16Length(12, 1024));
 
 export const AuthProviderSchema = z.enum(["google", "kakao", "naver"]);
 export type AuthProvider = z.infer<typeof AuthProviderSchema>;

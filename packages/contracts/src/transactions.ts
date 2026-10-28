@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { utf16Length } from "./string-length.js";
 import {
   CursorSchema,
   ExpectedVersionSchema,
@@ -13,9 +14,9 @@ import {
 import { OpeningBalanceDirectionSchema } from "./accounts.js";
 import { ManualLedgerTimeInputSchema, TransactionTimeSnapshotSchema } from "./transaction-time.js";
 
-const MemoSchema = z.string().trim().min(1).max(500);
+const MemoSchema = z.string().trim().check(utf16Length(1, 500));
 // 소비 목적(카테고리)이 아닌 돈을 주고받은 상대의 표시명이다.
-const CounterpartyNameSchema = z.string().trim().min(1).max(200);
+const CounterpartyNameSchema = z.string().trim().check(utf16Length(1, 200));
 
 export const TransactionInputTypeSchema = z.enum(["income", "expense"]);
 export type TransactionInputType = z.infer<typeof TransactionInputTypeSchema>;

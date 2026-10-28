@@ -25,8 +25,8 @@ const eslintConfigPath = join(rootDir, "eslint.config.mjs");
 
 const expectedDevDependencies = {
   typescript: "6.0.3",
-  vitest: "4.1.11",
-  "@vitest/coverage-v8": "4.1.11",
+  vitest: "4.1.12",
+  "@vitest/coverage-v8": "4.1.12",
   eslint: "10.7.0",
   "@eslint/js": "10.0.1",
   "typescript-eslint": "8.64.0",
@@ -61,20 +61,23 @@ const approvedPackageLocalSkipLibCheck = [
 ];
 
 const expectedWorkspaceOverrides = {
+  "@expo/cli@57.0.31>zod": "4.6.6",
   "query-string@7.1.3>decode-uri-component": "0.5.0",
   "browserslist@4.29.3": "4.28.7",
   "xcode@3.0.1>uuid": "11.1.1",
-  "next@16.3.8>sharp": "-",
-  "next@16.3.8>postcss": "8.5.23",
-  "next@16.3.8>baseline-browser-mapping": "2.11.0",
+  "next@16.4.1>sharp": "-",
+  "next@16.4.1>postcss": "8.5.23",
+  "next@16.4.1>baseline-browser-mapping": "2.11.0",
   "source-map-js@1.2.1": "1.2.2",
-  "undici@7.29.0": "7.29.1",
+  "undici@>=7.0.0 <7.30.1": "7.30.1",
+  "node-forge@<=1.4.0": "1.4.1",
+  "vite@>=8.0.0 <8.1.6": "8.1.6",
   "brace-expansion@5.0.9": "5.0.12",
   "nanoid@3.3.16": "3.3.18",
   "find-my-way@9.6.0": "9.7.0",
-  "@nestjs/platform-fastify@11.2.5>fastify": "5.12.5",
-  "fast-uri@3.1.5": "3.1.8",
-  "fast-uri@4.1.2": "4.1.5",
+  "@nestjs/platform-fastify@11.2.5>fastify": "5.12.6",
+  "fast-uri@>=3.0.0 <3.1.9": "3.1.9",
+  "fast-uri@>=4.0.0 <4.2.3": "4.2.3",
 };
 
 /**
@@ -161,9 +164,10 @@ function assertPatchedProductionResolutions(lockfile) {
     /^ {2}postcss@8\.5\.23:\r?$/mu,
     /^ {2}nanoid@3\.3\.18:(?: \{\})?\r?$/mu,
     /^ {2}find-my-way@9\.7\.0:\r?$/mu,
-    /^ {2}fastify@5\.12\.5:\r?$/mu,
-    /^ {2}fast-uri@3\.1\.8:(?: \{\})?\r?$/mu,
-    /^ {2}fast-uri@4\.1\.5:(?: \{\})?\r?$/mu,
+    /^ {2}fastify@5\.12\.6:\r?$/mu,
+    /^ {2}fast-uri@3\.1\.9:(?: \{\})?\r?$/mu,
+    /^ {2}fast-uri@4\.2\.3:(?: \{\})?\r?$/mu,
+    /^ {2}zod@4\.6\.6:(?: \{\})?\r?$/mu,
   ];
   const vulnerableEntries = [
     /^ {2}source-map-js@1\.2\.1:(?: \{\})?\r?$/mu,
@@ -171,13 +175,16 @@ function assertPatchedProductionResolutions(lockfile) {
     /^ {2}nanoid@3\.3\.16:(?: \{\})?\r?$/mu,
     /^ {2}find-my-way@9\.6\.0:\r?$/mu,
     /^ {2}fastify@5\.10\.0:\r?$/mu,
-    /^ {2}fastify@5\.12\.[34]:\r?$/mu,
+    /^ {2}fastify@5\.12\.[345]:\r?$/mu,
     /^ {2}fast-uri@3\.1\.4:(?: \{\})?\r?$/mu,
     /^ {2}fast-uri@4\.1\.1:(?: \{\})?\r?$/mu,
     /^ {2}fast-uri@3\.1\.5:(?: \{\})?\r?$/mu,
-    /^ {2}fast-uri@3\.1\.[67]:(?: \{\})?\r?$/mu,
+    /^ {2}fast-uri@3\.1\.[678]:(?: \{\})?\r?$/mu,
     /^ {2}fast-uri@4\.1\.2:(?: \{\})?\r?$/mu,
-    /^ {2}fast-uri@4\.1\.[34]:(?: \{\})?\r?$/mu,
+    /^ {2}fast-uri@4\.1\.[345]:(?: \{\})?\r?$/mu,
+    /^ {2}fast-uri@4\.2\.[012]:(?: \{\})?\r?$/mu,
+    /^ {2}zod@4\.4\.3:(?: \{\})?\r?$/mu,
+    /^ {2}zod@3\.25\.76:(?: \{\})?\r?$/mu,
   ];
 
   for (const section of resolutionSections) {
@@ -208,8 +215,13 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
   const npmrc = readFileSync(npmrcPath, "utf8");
 
   assert.deepEqual(pkg.devDependencies, expectedDevDependencies);
-  assert.equal(apiPackage.dependencies.fastify, "5.12.5");
-  assert.equal(webPackage.dependencies.next, "16.3.8");
+  assert.equal(apiPackage.dependencies.fastify, "5.12.6");
+  assert.equal(webPackage.dependencies.next, "16.4.1");
+  for (const path of [apiPackagePath, webPackagePath,
+    join(rootDir, "apps/mobile/package.json"),
+    join(rootDir, "packages/contracts/package.json")]) {
+    assert.equal(JSON.parse(readFileSync(path, "utf8")).dependencies.zod, "4.6.6");
+  }
   for (const name of [
     "@nestjs/common",
     "@nestjs/core",
@@ -285,7 +297,7 @@ test("workspace pins strict TypeScript, boundaries, and verification policy", ()
       }),
   );
   assert.deepEqual(allowBuilds, { esbuild: true });
-  // Next 16.3.8 declares sharp only as an optional image optimizer.
+  // Next 16.4.1 declares sharp only as an optional image optimizer.
   // The app has no next/image usage, so keep that unused native dependency absent.
   // Its production PostCSS dependency and Fastify stack are pinned to patched releases.
   assert.deepEqual(
@@ -330,12 +342,12 @@ test("Next security update excludes audited vulnerable resolutions", () => {
   // 콜백 매개변수는 없으며 파일 읽기 외에 설치나 네트워크 부작용은 없다.
   const lockfile = readFileSync(lockfilePath, "utf8");
   assert.equal(
-    /^ {2}next@16\.3\.8:/mu.test(lockfile),
+    /^ {2}next@16\.4\.1:/mu.test(lockfile),
     true,
     "patched Next resolution must exist",
   );
   assert.equal(
-    /^ {2}next@16\.3\.[0-7]:/mu.test(lockfile),
+    /^ {2}next@16\.(?:3\.\d+|4\.0):/mu.test(lockfile),
     false,
     "audited vulnerable Next must be absent",
   );
@@ -395,7 +407,7 @@ test("development tools exclude audited vulnerable dependency resolutions", () =
   );
   for (const section of sections) {
     assert.equal(
-      /^ {2}undici@7\.29\.1:(?: \{\})?\r?$/mu.test(section),
+      /^ {2}undici@7\.30\.1:(?: \{\})?\r?$/mu.test(section),
       true,
       "patched undici must exist",
     );
@@ -405,7 +417,7 @@ test("development tools exclude audited vulnerable dependency resolutions", () =
       "patched brace-expansion must exist",
     );
     assert.equal(
-      /^ {2}undici@7\.29\.0:/mu.test(section),
+      /^ {2}undici@7\.(?:29\.[01]|30\.0):/mu.test(section),
       false,
       "audited vulnerable undici must be absent",
     );
@@ -414,6 +426,14 @@ test("development tools exclude audited vulnerable dependency resolutions", () =
       false,
       "audited vulnerable brace-expansion must be absent",
     );
+    for (const [name, patched, vulnerable] of [
+      ["node-forge", /^ {2}node-forge@1\.4\.1:/mu, /^ {2}node-forge@1\.4\.0:/mu],
+      ["vite", /^ {2}vite@8\.1\.6[(:]/mu, /^ {2}vite@8\.1\.5[(:]/mu],
+      ["vitest", /^ {2}vitest@4\.1\.12[(:]/mu, /^ {2}vitest@4\.1\.11[(:]/mu],
+    ]) {
+      assert.match(section, patched, `patched ${name} must exist`);
+      assert.doesNotMatch(section, vulnerable, `vulnerable ${name} must be absent`);
+    }
   }
 });
 
@@ -445,7 +465,7 @@ test("lockfile resolves only patched production dependency versions", () => {
   assert.throws(
     () =>
       assertPatchedProductionResolutions(
-        lockfile.replaceAll("fastify@5.12.5", "fastify@5.10.0"),
+        lockfile.replaceAll("fastify@5.12.6", "fastify@5.12.5"),
       ),
     /patched production dependency resolution/u,
   );
@@ -466,14 +486,14 @@ test("lockfile resolves only patched production dependency versions", () => {
   assert.throws(
     () =>
       assertPatchedProductionResolutions(
-        lockfile.replaceAll("fast-uri@3.1.8", "fast-uri@3.1.5"),
+        lockfile.replaceAll("fast-uri@3.1.9", "fast-uri@3.1.8"),
       ),
     /patched production dependency resolution/u,
   );
   assert.throws(
     () =>
       assertPatchedProductionResolutions(
-        lockfile.replaceAll("fast-uri@4.1.5", "fast-uri@4.1.2"),
+        lockfile.replaceAll("fast-uri@4.2.3", "fast-uri@4.1.5"),
       ),
     /patched production dependency resolution/u,
   );
@@ -492,7 +512,7 @@ test("lockfile resolves only patched production dependency versions", () => {
     /vulnerable production dependency resolution/u,
   );
   // mailto 필드명 인코딩 취약 버전이 새 패치와 함께 재유입돼도 거부한다.
-  for (const version of ["4.1.3", "4.1.4"]) {
+  for (const version of ["4.1.3", "4.1.4", "4.1.5", "4.2.2"]) {
     assert.throws(
       () =>
         assertPatchedProductionResolutions(

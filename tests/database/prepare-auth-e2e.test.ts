@@ -61,7 +61,7 @@ describe("disposable authentication E2E database preparation", () => {
     expect(admin.end).toHaveBeenCalledOnce();
   });
 
-  it("recreates roles/schema, applies migrations 001 through 004 in order, then sets the disposable password", async () => {
+  it("applies authentication foundations and native session channels before setting the disposable password", async () => {
     const { admin, queries } = fakeAdmin();
     await prepareAuthE2e!(exactEnvironment, () => admin);
     const migrationFiles = [
@@ -69,6 +69,7 @@ describe("disposable authentication E2E database preparation", () => {
       "202607200002_server_pkce_transactions.sql",
       "202607200003_user_security_state.sql",
       "202607230001_delegated_jwt_replay.sql",
+      "20261016040532_native_session_channel.sql",
     ];
     const migrations = await Promise.all(migrationFiles.map((name) => readFile(new URL(`../../supabase/migrations/${name}`, import.meta.url), "utf8")));
     expect(queries[0]).toMatch(/current_user/u);
@@ -77,7 +78,7 @@ describe("disposable authentication E2E database preparation", () => {
     for (const role of ["anon", "authenticated", "service_role", "app_session_bff", "app_api"]) {
       expect(queries[2]).toMatch(new RegExp(`drop role ${role}.*create role ${role}`, "isu"));
     }
-    expect(queries.slice(-5, -1)).toEqual(migrations);
+    expect(queries.slice(3, -1)).toEqual(migrations);
     expect(queries.at(-1)).toBe("alter role app_api password 'account-book-e2e-only'");
     expect(admin.end).toHaveBeenCalledOnce();
   });
