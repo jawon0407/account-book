@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -7,8 +7,8 @@ import {
   Text,
   View,
 } from "react-native";
-import type { SessionManager } from "../auth/session-manager";
-import { CollectorSettings } from "../collector/collector-settings";
+import type { CollectorEnrollment } from "../collector/collector-enrollment";
+import { consentPresentation } from "../collector/notification-consent-copy";
 import {
   COLLECTOR_PREPARATION,
   collectorConfirmationCopy,
@@ -17,24 +17,27 @@ import {
 import { colors, common } from "./theme";
 import { NotificationAccessPanel } from "./notification-access-panel";
 
-/** @param manager 현재 인증 경계. @param onBack 초안을 보존한 채 장부로 돌아가는 동작. */
+/** @param enrollment OS 설정 왕복 의도를 관리하는 연결 모델. @param onBack 의도를 취소하고 장부로 돌아가는 동작. */
 export function CollectorScreen({
-  manager,
+  enrollment,
   onBack,
 }: {
-  manager: SessionManager;
+  enrollment: CollectorEnrollment;
   onBack: () => void;
 }) {
-  const model = useMemo(() => new CollectorSettings(manager), [manager]);
+  const { settings: model, access } = enrollment;
+  const flow = useSyncExternalStore(enrollment.subscribe, enrollment.snapshot);
   const state = useSyncExternalStore(model.subscribe, model.snapshot);
+  const accessState = useSyncExternalStore(access.subscribe, access.snapshot);
   useEffect(() => {
-    void model.start();
-    return () => model.stop();
-  }, [model]);
+    void enrollment.start();
+    return () => enrollment.stop();
+  }, [enrollment]);
   const busy =
     state.phase === "idle" ||
     state.phase === "loading" ||
     state.phase === "saving";
+  const refreshing = flow.busy || busy || consentPresentation(accessState).busy;
   const copy = state.value ? collectorStateCopy(state.value.state) : null;
   const confirmation = state.confirmation
     ? collectorConfirmationCopy(state.confirmation)
@@ -44,13 +47,33 @@ export function CollectorScreen({
       style={common.page}
       contentContainerStyle={[common.container, styles.content]}
     >
-      <Pressable
-        accessibilityRole="button"
-        style={[common.textButton, styles.back]}
-        onPress={onBack}
-      >
-        <Text style={common.link}>장부로 돌아가기</Text>
-      </Pressable>
+      <View style={styles.toolbar}>
+        <Pressable
+          accessibilityRole="button"
+          style={[common.textButton, styles.back]}
+          onPress={onBack}
+        >
+          <Text style={common.link}>장부로 돌아가기</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="알림 설정 상태 새로고침"
+          accessibilityHint="수집 기기, 동의와 Android 권한 상태를 다시 확인해요"
+          accessibilityState={{
+            disabled: refreshing,
+          }}
+          disabled={refreshing}
+          onPress={() => {
+            void enrollment.reload();
+          }}
+          style={({ pressed }) => [
+            common.textButton,
+            (refreshing || pressed) && styles.dimmed,
+          ]}
+        >
+          <Text style={common.link}>새로고침</Text>
+        </Pressable>
+      </View>
       <Text accessibilityRole="header" style={common.title}>
         알림 수집 설정
       </Text>
@@ -101,47 +124,41 @@ export function CollectorScreen({
             <Text style={common.body}>{confirmation.body}</Text>
             <Action
               label={confirmation.confirmLabel}
+              disabled={refreshing}
               onPress={() => {
-                void model.confirm();
+                void enrollment.confirm();
               }}
             />
-            <Action label="취소" secondary onPress={() => model.cancel()} />
+            <Action
+              label="취소"
+              secondary
+              disabled={refreshing}
+              onPress={() => enrollment.cancel()}
+            />
           </View>
         ) : state.phase === "ready" && state.value ? (
           <View style={styles.actions}>
-            {state.value.state !== "active_here" ? (
-              <Action
-                label={
-                  state.value.state === "active_elsewhere"
-                    ? "이 기기로 변경"
-                    : "이 기기 지정"
-                }
-                onPress={() => model.choose("activate")}
-              />
-            ) : null}
             {state.value.state !== "inactive" ? (
               <Action
                 label="기기 지정 해제"
                 secondary
+                disabled={refreshing}
                 onPress={() => model.choose("deactivate")}
               />
             ) : null}
           </View>
         ) : null}
       </View>
-      <Action
-        label={state.phase === "error" ? "다시 조회" : "지정 상태 새로고침"}
-        secondary
-        disabled={busy}
-        onPress={() => {
-          void model.reload();
-        }}
-      />
+      {flow.notice ? (
+        <Text accessibilityLiveRegion="polite" style={common.body}>
+          {flow.notice}
+        </Text>
+      ) : null}
       <Text style={common.secondary}>
         기기를 바꾸거나 지정을 해제해도 이미 저장한 거래는 유지돼요. 실제 알림을
         읽는 기능은 아직 준비 중이에요.
       </Text>
-      <NotificationAccessPanel manager={manager} />
+      <NotificationAccessPanel model={access} enrollment={enrollment} />
     </ScrollView>
   );
 }
@@ -178,6 +195,13 @@ function Action({
 const styles = StyleSheet.create({
   content: { paddingTop: 8, paddingBottom: 32, gap: 16 },
   back: { alignSelf: "flex-start", paddingHorizontal: 0 },
+  toolbar: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 8,
+  },
   introduction: { gap: 8 },
   section: {
     backgroundColor: colors.surface,

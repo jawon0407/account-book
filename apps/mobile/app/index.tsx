@@ -8,6 +8,8 @@ import { errorMessage } from "../src/api/client-error";
 import { LoginScreen } from "../src/ui/login-screen";
 import { LedgerFlow } from "../src/ui/ledger-flow";
 import { ManualWorkspace } from "../src/ledger/manual-workspace";
+import { CollectorEnrollment } from "../src/collector/collector-enrollment";
+import { androidNotificationAccess } from "../src/platform/notification-access";
 import { common } from "../src/ui/theme";
 
 /** 설정 오류도 앱 크래시 대신 안전한 안내로 보여 준다. 임의 서버 주소 입력 UI는 없다. */
@@ -40,6 +42,15 @@ function SessionApp({ manager }: { manager: SessionManager }) {
   const state = useSyncExternalStore(manager.subscribe, manager.snapshot);
   const [active, setActive] = useState(AppState.currentState === "active");
   const [error, setError] = useState<string | null>(null);
+  // OS 설정으로 나가면 화면은 비우지만 명시적 지정 의도만 같은 로그인 경계에서 유지한다.
+  const [enrollment] = useState(
+    () =>
+      new CollectorEnrollment(
+        () => manager.notificationConsentScope(),
+        manager,
+        androidNotificationAccess,
+      ),
+  );
   const [workspace] = useState(
     () =>
       new ManualWorkspace(
@@ -74,8 +85,10 @@ function SessionApp({ manager }: { manager: SessionManager }) {
       listener.remove();
       unsubscribe();
       workspace.dispose();
+      enrollment.cancel();
+      enrollment.stop();
     };
-  }, [manager, workspace]);
+  }, [manager, workspace, enrollment]);
   if (!active)
     return (
       <View style={common.container}>
@@ -84,7 +97,12 @@ function SessionApp({ manager }: { manager: SessionManager }) {
     );
   if (state.status === "ready")
     return (
-      <LedgerFlow key={state.userId} manager={manager} workspace={workspace} />
+      <LedgerFlow
+        key={state.userId}
+        manager={manager}
+        workspace={workspace}
+        enrollment={enrollment}
+      />
     );
   if (state.status === "signed_out")
     return (

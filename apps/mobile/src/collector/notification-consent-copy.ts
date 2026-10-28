@@ -13,6 +13,17 @@ export function consentPresentation(state: AccessState) {
   };
   return {
     busy,
+    // 알려진 거절은 다른 쪽 조회 실패에 가리지 않는다. 양쪽 허용을 확인해야 허용이다.
+    allowanceLabel: busy
+      ? "확인 중"
+      : (known && status !== "granted") ||
+          (state.permission?.available && !state.permission.accessGranted)
+        ? "허용되지 않음"
+        : status === "granted" &&
+            state.permission?.available &&
+            state.permission.accessGranted
+          ? "허용됨"
+          : "확인 필요",
     consentLabel: status ? labels[status] : "확인 중 또는 확인 필요",
     canAccept:
       known && status !== "granted" && state.permission?.available === true,

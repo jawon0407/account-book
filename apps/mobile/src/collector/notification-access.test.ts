@@ -60,6 +60,93 @@ function fixture(initial = consent("not_granted")) {
 }
 
 describe("server consent and independent Android permission", () => {
+  it("opens access settings only after a verified consent save, without granting OS access", async () => {
+    const f = fixture();
+    let finish!: (value: NotificationConsentState) => void;
+    f.server.changeNotificationConsent.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await f.model.start();
+    const pending = f.model.requestAccess();
+    expect(f.native.openSettings).not.toHaveBeenCalled();
+    expect(f.model.snapshot().phase).toBe("saving");
+    finish(consent("granted", 1));
+    await pending;
+    expect(f.server.changeNotificationConsent).toHaveBeenCalledWith({
+      action: "accept",
+      expectedVersion: 0,
+      noticeVersion: NOTIFICATION_NOTICE_VERSION,
+    });
+    expect(f.native.openSettings).toHaveBeenCalledTimes(1);
+    expect(f.model.snapshot().permission?.accessGranted).toBe(false);
+  });
+  it("opens settings without saving consent again when consent is already current", async () => {
+    const f = fixture(consent("granted", 3));
+    await f.model.start();
+    await f.model.requestAccess();
+    expect(f.server.changeNotificationConsent).not.toHaveBeenCalled();
+    expect(f.native.openSettings).toHaveBeenCalledTimes(1);
+    expect(f.model.snapshot().consent?.version).toBe(3);
+  });
+  it("does not open settings or retry after the consent save fails", async () => {
+    const f = fixture();
+    f.server.changeNotificationConsent.mockRejectedValue(new Error("private"));
+    await f.model.start();
+    await f.model.requestAccess();
+    await f.model.requestAccess();
+    expect(f.native.openSettings).not.toHaveBeenCalled();
+    expect(f.server.changeNotificationConsent).toHaveBeenCalledTimes(1);
+    expect(f.model.snapshot().phase).toBe("error");
+  });
+  it("coalesces repeated permission requests while saving", async () => {
+    const f = fixture();
+    let finish!: (value: NotificationConsentState) => void;
+    f.server.changeNotificationConsent.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await f.model.start();
+    const first = f.model.requestAccess();
+    await f.model.requestAccess();
+    finish(consent("granted", 1));
+    await first;
+    expect(f.server.changeNotificationConsent).toHaveBeenCalledTimes(1);
+    expect(f.native.openSettings).toHaveBeenCalledTimes(1);
+  });
+  it.each(["stop", "relogin"] as const)(
+    "does not open OS settings after %s during consent save",
+    async (action) => {
+      const f = fixture();
+      let finish!: (value: NotificationConsentState) => void;
+      f.server.changeNotificationConsent.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
+      await f.model.start();
+      const pending = f.model.requestAccess();
+      if (action === "stop") f.model.stop();
+      else f.relogin();
+      finish(consent("granted", 1));
+      await pending;
+      expect(f.native.openSettings).not.toHaveBeenCalled();
+    },
+  );
+  it("keeps saved consent when OS settings cannot open, without inventing permission", async () => {
+    const f = fixture();
+    f.native.openSettings.mockResolvedValue(false);
+    await f.model.start();
+    await f.model.requestAccess();
+    expect(f.model.snapshot().consent?.state).toBe("granted");
+    expect(f.model.snapshot().permission?.accessGranted).toBe(false);
+    expect(f.model.snapshot().notice).toContain("열지 못했어요");
+  });
   it("reads server state; explicitly accepts with notice and version, without opening settings", async () => {
     const f = fixture();
     await f.model.start();

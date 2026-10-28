@@ -2,6 +2,7 @@ import { useEffect, useSyncExternalStore } from "react";
 import { BackHandler, KeyboardAvoidingView, Text } from "react-native";
 import type { SessionManager } from "../auth/session-manager";
 import type { ManualWorkspace } from "../ledger/manual-workspace";
+import type { CollectorEnrollment } from "../collector/collector-enrollment";
 import { LedgerScreen } from "./ledger-screen";
 import { ManualEntryScreen } from "./manual-entry-screen";
 import { ResidenceScreen } from "./residence-screen";
@@ -12,9 +13,11 @@ import { common } from "./theme";
 export function LedgerFlow({
   manager,
   workspace,
+  enrollment,
 }: {
   manager: SessionManager;
   workspace: ManualWorkspace;
+  enrollment: CollectorEnrollment;
 }) {
   const state = useSyncExternalStore(workspace.subscribe, workspace.snapshot);
   useEffect(() => {
@@ -25,12 +28,13 @@ export function LedgerFlow({
       "hardwareBackPress",
       () => {
         if (state.screen === "ledger") return false;
+        if (state.screen === "collector") enrollment.cancel();
         workspace.open(state.screen === "residence" ? "manual" : "ledger");
         return true;
       },
     );
     return () => subscription.remove();
-  }, [state.screen, workspace]);
+  }, [state.screen, workspace, enrollment]);
   if (state.screen === "manual")
     return (
       <KeyboardAvoidingView style={common.page} behavior="height">
@@ -46,8 +50,11 @@ export function LedgerFlow({
   if (state.screen === "collector")
     return (
       <CollectorScreen
-        manager={manager}
-        onBack={() => workspace.open("ledger")}
+        enrollment={enrollment}
+        onBack={() => {
+          enrollment.cancel();
+          workspace.open("ledger");
+        }}
       />
     );
   const status = state.entry?.snapshot().status;

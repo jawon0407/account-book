@@ -2,7 +2,7 @@
 version: 1
 slug: "apps-mobile-src-ui-collector-screen-tsx"
 primary_target: "apps/mobile/src/ui/collector-screen.tsx"
-related_targets: ["apps/mobile/src/ui/notification-access-guide.tsx"]
+related_targets: ["apps/mobile/src/ui/notification-access-guide.tsx", "apps/mobile/src/ui/notification-access-panel.tsx"]
 ---
 
 # Collector settings — Android / Operate
@@ -37,3 +37,38 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 - Disclosure expand remains side-effect free. Explicit accept confirmation explains purpose/minimum fields/local record, optional manual use, withdrawal, and unimplemented processing. Revoke is a separate confirmed action, not OS revoke or ledger deletion.
 - Use existing blue/gray/white tokens, headings, 48dp buttons and scroll. Background hides/unmounts; return revalidates session and rereads OS state.
 - Android16 device capture confirms readable statuses and visible disabled/active actions. Full large-font/TalkBack/OEM review remains open. No generated assets or shared token changes.
+
+## 2026-10-28 source preference extension (superseded)
+
+Historical design only: the user subsequently rejected this fixed-list approach. The six implementation/test files are removed; see the current direction below.
+
+- Keep the first viewport/device and consent controls unchanged. Add a separate flat section after consent, with five checkbox rows of 56dp minimum height (above the 48dp target), 8dp gaps and the existing colors/type. No nested cards or decorative assets.
+- Headline is “알림 출처 선택 (준비)”; copy distinguishes selection from OS permission/consent/actual collection. Chat/SMS describe future financial-only analysis, not reading conversation history.
+- Selection is a draft until explicit save. Show count, unsaved status, clear-all draft action, save state and generic retry errors. Leaving the screen discards unsaved changes.
+- Store only source IDs in per-origin/account/install SecureStore; a new device needs selection again. No backend or native capture changes in this unit.
+- Verify on the connected Android device at its current settings. Large-font, TalkBack and other OEM coverage remain separate, not implied by one screenshot.
+
+## 2026-10-28 current permission entry
+
+- One primary “알림 허용” control; no fixed financial-app selection list. Keep existing theme and 48dp controls. Put the primary action before expanded help.
+- Native Alert explains Account Book Dev notification access, financial-only intended processing, explicit server consent, and the current no-capture state. Cancel is inert; confirm opens Android settings only after verified consent. This is not the OS grant dialog itself.
+- Keep withdrawal, refresh, and OS-management when access is already enabled (including server-error recovery). Never pretend settings navigation grants permission.
+- React checklist: effect cleanup invalidates late operations; derived readiness is not duplicated in state; no new subscriptions/dependencies; sequential save→settings is a required dependency, not an avoidable network waterfall.
+- Device reconnected after initial implementation: both new-consent and existing-consent Alert text/buttons inspected on the connected portrait phone at its current font setting. Cancel/back dismissal, settings navigation, permission reflection and withdrawal/restart state verified. Large-font/TalkBack/landscape/other OEM coverage remains unverified.
+
+## 2026-10-28 latest simplification (supersedes layout above)
+
+- Keep multiple logins and the account's shared ledger. One collector is a separate permission, not a single-login policy. Permission-entry enrollment is approved for a subsequent unit; keep current designation controls until it is implemented.
+- Main status is now one line: “알림 여부”. Only verified current server consent AND available/granted Android access yields “허용됨”. Known rejection is “허용되지 않음”; busy/unknown are “확인 중”/“확인 필요”. Internal consent and OS conditions remain separate.
+- One compact header “새로고침” button replaces both large refresh controls. It reads both models, blocks during either model's loading/save, and preserves screen cleanup/revalidation. No new icon dependency or developer-launcher coupling.
+- Rounded 14sp “자세히 알아보기” next to the intro (wrap below on narrow screens) opens a read-only native Modal. Touch targets stay 48dp. Fixed header close and Android back dismiss it; long content scrolls. It neither grants nor withdraws consent.
+- Preserve explicit permission Alert, withdrawal and OS-management paths. Actual capture remains unimplemented. No new tests for layout only; combined allowance adds 12 cases to the existing presentation test.
+- Current verification: USB has zero devices, so the latest Modal/layout has NOT been visually approved. Earlier device results above belong to the prior permission Alert, not this new UI. Type checks, existing tests and bundle/PC smoke are tracked in the latest status document.
+
+## 2026-10-28 permission-driven enrollment (latest)
+
+- Independent review corrected known-denial priority: a verified rejection remains not allowed even if the other source is unavailable. Both must be verified to show allowed.
+- Actual device verified compact refresh, guide scroll to the final paragraph, fixed close and Android Back returning to settings without consent mutation. Large fonts/TalkBack/other OEMs remain outside evidence.
+- Remove separate activate/replace buttons. The primary permission Alert explains consent + OS check + designation. Keep designation status/deactivation. Replacement retains an explicit second confirmation; multiple logins remain allowed.
+- Hold only an expiring in-memory intent across OS settings. Background hides content, return revalidates login and permissions. No successful OS-launch acknowledgement means no resumed enrollment. Old native Alert callbacks cannot act on a restarted screen/account.
+- Retain no-capture warning. Neither permission nor designation is labeled as running capture. No new palette, font or raster assets.

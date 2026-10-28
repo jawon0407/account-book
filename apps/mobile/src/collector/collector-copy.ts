@@ -13,7 +13,7 @@ export function collectorStateCopy(state: CollectorState["state"]) {
     case "inactive":
       return {
         title: "지정된 기기 없음",
-        body: "나중에 알림을 수집할 기기로 이 휴대폰을 지정할 수 있어요.",
+        body: "아래 ‘알림 허용’에서 동의와 Android 접근을 확인하면 이 휴대폰을 지정해요.",
       };
     case "active_here":
       return {
@@ -44,7 +44,7 @@ export function collectorConfirmationCopy(input: CollectorChangeInput) {
       }
     : {
         title: "이 기기를 지정할까요?",
-        body: "현재 로그인 세션을 수집 기기로 지정해요. 이 단계에서는 알림 접근 권한을 요청하지 않아요.",
+        body: "동의와 Android 접근이 확인된 현재 로그인 세션을 수집 기기로 지정해요. 실제 알림 수집은 아직 준비 중이에요.",
         confirmLabel: "기기 지정 확인",
       };
 }

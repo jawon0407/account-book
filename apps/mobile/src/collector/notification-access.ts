@@ -74,19 +74,30 @@ export class NotificationAccess {
     if (this.active && !consentPresentation(this.state).busy) await this.load();
   }
   /** 명시적으로 고지를 확인한 뒤 호출한다. 저장 성공도 OS 허용이나 자동 기록 시작을 뜻하지 않는다. */
-  public accept(): Promise<void> {
-    return this.change("accept");
+  public async accept(): Promise<void> {
+    await this.change("accept");
   }
-  public withdraw(): Promise<void> {
-    return this.change("withdraw");
+  public async withdraw(): Promise<void> {
+    await this.change("withdraw");
+  }
+  /** 팝업에서 명시적으로 동의한 뒤 호출한다. 저장 성공을 검증한 같은 작업에서만 OS 설정을 연다. */
+  public async requestAccess(): Promise<void> {
+    const presentation = consentPresentation(this.state);
+    if (!this.current(this.epoch) || presentation.busy) return;
+    const epoch = presentation.canAccept
+      ? await this.change("accept")
+      : this.state.consent?.state === "granted"
+        ? this.epoch
+        : null;
+    if (epoch !== null && this.current(epoch)) await this.openSettings();
   }
   /** 서버 장애 중에도 이미 켜진 OS 접근을 끄기 위한 이동은 막지 않는다. */
-  public async openSettings(): Promise<void> {
+  public async openSettings(): Promise<boolean> {
     if (
       !this.current(this.epoch) ||
       !consentPresentation(this.state).canOpenSettings
     )
-      return;
+      return false;
     const epoch = ++this.epoch,
       before = this.state;
     this.publish({ ...before, phase: "saving" });
@@ -96,7 +107,7 @@ export class NotificationAccess {
     } catch {
       /* 시스템 오류 내용은 화면에 노출하지 않는다. */
     }
-    if (!this.current(epoch)) return;
+    if (!this.current(epoch)) return opened;
     const notice = opened
       ? "Android 설정에서 직접 선택해 주세요. 돌아오면 실제 상태를 다시 확인해요."
       : "Android 알림 접근 설정을 열지 못했어요. 휴대폰 설정에서 직접 확인해 주세요.";
@@ -107,15 +118,16 @@ export class NotificationAccess {
           ? `${before.notice ?? "서버 동의는 확인하지 못했어요."} ${notice}`
           : notice,
     });
+    return opened;
   }
   /** @param action 사용자 확인을 마친 동작. 조회 버전과 응답 버전을 대조하여 덮어쓰기를 방지한다. */
-  private async change(action: "accept" | "withdraw"): Promise<void> {
+  private async change(action: "accept" | "withdraw"): Promise<number | null> {
     const presentation = consentPresentation(this.state);
     if (
       !this.current(this.epoch) ||
       !(action === "accept" ? presentation.canAccept : presentation.canWithdraw)
     )
-      return;
+      return null;
     const expectedVersion = this.state.consent!.version,
       epoch = ++this.epoch;
     this.publish({
@@ -134,7 +146,7 @@ export class NotificationAccess {
             }
           : { action, expectedVersion };
       const consent = await this.server.changeNotificationConsent(input);
-      if (!this.current(epoch)) return;
+      if (!this.current(epoch)) return null;
       if (
         consent.version !== expectedVersion + 1 ||
         consent.state !== (action === "accept" ? "granted" : "withdrawn") ||
@@ -151,8 +163,9 @@ export class NotificationAccess {
             ? "현재 계정·설치의 동의를 서버에 저장했어요. 자동 기록은 아직 시작되지 않아요."
             : "현재 계정·설치의 동의를 서버에서 철회했어요. Android 알림 접근은 별도로 해제할 수 있어요.",
       });
+      return epoch;
     } catch (error) {
-      if (!this.current(epoch)) return;
+      if (!this.current(epoch)) return null;
       this.failedAction = action;
       this.fail(
         error instanceof ClientError &&
@@ -160,6 +173,7 @@ export class NotificationAccess {
           ? "서버의 동의 상태가 바뀌었어요. 동의·철회 요청을 다시 보내지 않았어요. 상태를 다시 조회한 뒤 선택해 주세요."
           : "동의·철회 결과를 확인하지 못했어요. 완료되지 않았을 수 있어요. 자동 재전송하지 않으니 상태를 다시 조회해 주세요.",
       );
+      return null;
     }
   }
   private async load(): Promise<void> {
