@@ -189,7 +189,7 @@ describe("collector settings transitions", () => {
     await first;
     expect(model.snapshot().value).toEqual(elsewhere);
   });
-  it("does not requery or publish an old failed mutation after leaving", async () => {
+  it("does not requery or publish an old successful mutation after leaving", async () => {
     const { api, model } = fixture(),
       late = deferred<CollectorState>();
     await model.start();

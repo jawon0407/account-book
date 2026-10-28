@@ -55,12 +55,10 @@ export function collectorFailure(
   operation: "read" | "change",
 ): string {
   if (error instanceof ClientError) {
-    if (
-      ["COLLECTOR_VERSION_CONFLICT", "COLLECTOR_REPLACE_REQUIRED"].includes(
-        error.code,
-      )
-    )
+    if (error.code === "COLLECTOR_VERSION_CONFLICT")
       return "다른 요청에서 기기 지정이 변경됐어요. 현재 상태를 확인한 뒤 다시 선택해 주세요.";
+    if (error.code === "COLLECTOR_REPLACE_REQUIRED")
+      return "다른 기기의 지정을 바꾸려면 교체 확인이 필요해요. 현재 상태를 확인한 뒤 이 기기로 변경할지 선택해 주세요.";
     if (["AUTH_SESSION_EXPIRED", "SESSION_CHANGED"].includes(error.code))
       return "로그인 상태가 바뀌었어요. 현재 계정에서 다시 확인해 주세요.";
     if (error.status === 429)
