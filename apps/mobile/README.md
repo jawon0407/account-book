@@ -21,11 +21,12 @@ Android를 먼저 구현하고 검증한 뒤 iOS를 개발한다. **이메일 �
 | `src/auth/secure-storage.ts` | Expo SecureStore를 작은 저장소 인터페이스로 감싼다 |
 | `src/ui/login-screen.tsx` | 이메일 로그인 입력과 오류 안내 |
 | `src/ui/ledger-screen.tsx` | 50건씩 조회·새로고침·추가 조회·로그아웃 |
-| `src/api/native-collector-client.ts` | 수집 기기 조회/변경 HTTP 계약. UI가 토큰이나 기기 식별자를 입력하지 않는다 |
+| `src/api/native-collector-client.ts` | 수집 기기 및 서버 동의 조회/변경 HTTP 계약. UI가 토큰이나 기기 식별자를 입력하지 않는다 |
 | `src/collector/collector-settings.ts`, `collector-copy.ts` | 조회·확인·저장 상태와 고정 안내. 중복 변경을 막고 실패하면 현재 상태만 다시 조회한다 |
 | `src/ui/collector-screen.tsx` | 수집 기기 지정/교체/해제 확인 화면. 실제 알림 읽기는 아직 제공하지 않는다 |
 | `src/ui/notification-access-guide.tsx` | 선택적 동의·두 종류의 권한·예정 처리 범위를 펼쳐 읽는 안내. 동의 저장이나 OS 권한 요청은 하지 않는다 |
-| `src/collector/notification-consent.ts`, `notification-access.ts` | 계정/설치별 로컬 동의 저장·철회·재조회와 늦은 응답 차단. 서버 동의 증빙은 아님 |
+| `src/collector/notification-access.ts`, `notification-consent-copy.ts` | 서버 동의 조회·철회·재동의와 OS 상태를 분리하고 늦은 응답/중복 변경을 차단한다. 표시와 버튼 조건을 함께 검증한다 |
+| `src/collector/notification-consent.ts` | 이전 로컬 동의 저장 모듈. 현재 화면은 읽거나 자동 전송하지 않으며, 저장된 과거 값은 이 단계에서 삭제하지 않는다 |
 | `src/platform/notification-access.ts`, `modules/notification-access/` | OS의 실제 알림 접근/연결 상태와 설정 이동만 제공. 본문 callback/조회/전송 없음 |
 | `src/ui/notification-access-panel.tsx` | 명시적 동의·철회, Android 설정 이동, 실제 상태 확인. 안내를 읽기만 해서는 저장하지 않음 |
 | `src/ui/ledger-presentation.ts` | 금액/방향/미분류 표시를 화면 밖에서 검증 가능한 함수로 분리한다 |
@@ -93,6 +94,8 @@ pnpm audit --json
 
 알림 접근 전 안내는 수집 설정 화면 아래에서 언제든 펼쳐 읽을 수 있다. ‘안내 보기’는 이 화면의 표시만 바꾸며, 기기 지정 API·동의 저장·OS 권한 설정·알림 읽기를 호출하지 않는다. 안내에는 후속 자동 기록의 처리 범위와 선택권, 알림 접근/표시 권한의 차이, 중지·철회와 기존 거래 삭제의 차이, 누락 시 수기 보완을 설명한다. 자세한 범위와 검증 제한은 [동의·권한 안내 기록](../../docs/status/2026-10-21-android-notification-access-guide.ko.md)을 참고한다.
 
-10/21 후속으로 별도 확인 버튼에서 **실제 로컬 동의 저장·철회와 OS 설정 연결**을 제공한다. 새 개발 APK가 필요하며, 예전 APK에서는 업데이트 안내를 표시한다. 자동 기록은 여전히 하지 않는다. 동의/OS 접근/서비스 연결/서버 기기 지정은 별개다. [구현·APK·실기기 결과](../../docs/status/2026-10-21-notification-consent-permission.ko.md)를 참고한다.
+10/21 앞선 단계에서 **로컬 동의 저장·철회와 OS 설정 연결**을 실기기로 확인했다. 이 당시의 [구현·APK·실기기 결과](../../docs/status/2026-10-21-notification-consent-permission.ko.md)와 아래 서버 연결 결과를 구분한다. OS 연결 모듈이 없는 예전 APK에서는 업데이트 안내를 표시한다.
 
-서버 동의 조회/변경 API와 철회 후 자동 저장 차단 기반은 [별도 검증 기록](../../docs/status/2026-10-21-server-notification-consent.ko.md)에 있다. **현재 모바일 화면은 아직 로컬 동의만 저장**한다. 서버 API 호출과 명시적 확인 연결이 다음 단계이며 기존 로컬 동의를 자동 이관하지 않는다. 독립 실행 APK가 아니라 PC Metro/HTTPS와 USB 연결이 필요한 개발 빌드다.
+서버 동의 조회/변경 API와 철회 후 자동 저장 차단 기반은 [서버 검증 기록](../../docs/status/2026-10-21-server-notification-consent.ko.md)에 있다. **현재 모바일 화면은 서버 동의 API에 연결됐다.** 현재 회원·설치의 상태를 조회하고 고지를 명시적으로 확인한 뒤 저장/철회한다. 이전 로컬 동의는 자동 이관하지 않는다. 실패/충돌 시 PATCH를 재전송하지 않고 GET으로 상태를 확인한 뒤 사용자가 다시 결정한다. 서버 장애 중에도 OS 접근이 켜져 있으면 해제용 설정 이동은 가능하며 OS 조회 실패가 서버 철회를 막지 않는다.
+
+동의/OS 접근/서비스 연결/서버 기기 지정은 별개다. **알림 분석·자동 기록은 아직 하지 않는다.** [화면 연결 검증 기록](../../docs/status/2026-10-21-mobile-server-consent.ko.md)은 실제 로컬 HTTPS 왕복과 실기기 미검증을 구분한다. 개발 앱은 PC Metro/HTTPS와 USB 연결이 필요하며 독립 실행 배포본이 아니다.

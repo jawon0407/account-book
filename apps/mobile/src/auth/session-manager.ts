@@ -6,6 +6,7 @@ import {
   type UpdateProfileInput,
   type Profile,
   type CollectorChangeInput,
+  type NotificationConsentChangeInput,
 } from "@account-book/contracts";
 import type { NativeClient } from "../api/native-client";
 import { ClientError } from "../api/client-error";
@@ -64,7 +65,7 @@ export class SessionManager {
   }
   /** UI에 공개 가능한 상태만 반환하며 credential은 포함하지 않는다. */
   public snapshot = (): SessionState => this.state;
-  /** 로컬 동의를 현재 서버·회원·설치에 결속한다. 비밀 토큰은 반환하지 않는다. */
+  /** 동의 화면의 늦은 응답을 현재 서버·회원·설치에 결속한다. 비밀 토큰은 반환하지 않는다. */
   public notificationConsentScope() {
     if (this.state.status !== "ready" || !this.credential || !this.deviceId)
       return null;
@@ -211,6 +212,18 @@ export class SessionManager {
   public changeCollector(input: CollectorChangeInput) {
     return this.authenticatedRequest((token) =>
       this.client.collector.change(token, input),
+    );
+  }
+  /** 서버가 확인한 현재 회원·설치의 동의. 이전 기기 저장값을 서버 동의로 승격하지 않는다. */
+  public notificationConsent() {
+    return this.authenticatedRequest((token) =>
+      this.client.collector.readConsent(token),
+    );
+  }
+  /** @param input 현재 화면에서 확인한 동의/철회 및 기대 버전. 인증 갱신 후에도 쓰기는 재전송하지 않는다. */
+  public changeNotificationConsent(input: NotificationConsentChangeInput) {
+    return this.authenticatedRequest((token) =>
+      this.client.collector.changeConsent(token, input),
     );
   }
   /** 현재 로그인 사용자의 프로필만 반환한다. HTTP schema와 별도로 사용자 ID를 대조한다. */

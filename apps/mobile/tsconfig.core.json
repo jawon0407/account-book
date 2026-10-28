@@ -17,6 +17,7 @@
     "src/auth/session-restore.test.ts",
     "src/auth/session-ledger.test.ts",
     "src/auth/session-collector.test.ts",
+    "src/auth/session-consent.test.ts",
     "src/collector/**/*.ts",
     "src/ledger/**/*.ts",
     "src/ui/ledger-presentation*.ts"

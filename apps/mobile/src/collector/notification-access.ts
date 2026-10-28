@@ -1,9 +1,11 @@
-import type { SessionStorage } from "../auth/session-persistence";
 import {
-  NotificationConsentStore,
-  type ConsentScope,
-  type ConsentRecord,
-} from "./notification-consent";
+  NOTIFICATION_NOTICE_VERSION,
+  type NotificationConsentChangeInput,
+  type NotificationConsentState,
+} from "@account-book/contracts";
+import { ClientError } from "../api/client-error";
+import type { ConsentScope } from "./notification-consent";
+import { consentPresentation } from "./notification-consent-copy";
 
 export type AccessScope = ConsentScope & { generation: number };
 export type PermissionStatus = Readonly<{
@@ -15,9 +17,15 @@ export type NotificationAccessPort = {
   getStatus(): Promise<PermissionStatus>;
   openSettings(): Promise<boolean>;
 };
+export type NotificationConsentPort = {
+  notificationConsent(): Promise<NotificationConsentState>;
+  changeNotificationConsent(
+    input: NotificationConsentChangeInput,
+  ): Promise<NotificationConsentState>;
+};
 export type AccessState = Readonly<{
   phase: "idle" | "loading" | "ready" | "saving" | "error";
-  consent: ConsentRecord | null;
+  consent: NotificationConsentState | null;
   permission: PermissionStatus | null;
   notice: string | null;
 }>;
@@ -28,17 +36,18 @@ const empty = (): AccessState => ({
   notice: null,
 });
 
-/** 동의와 OS 상태를 따로 관리한다. 실제 금융 알림 수집 기능은 제공하지 않는다. */
+/** 서버 동의와 OS 상태를 독립적으로 확인한다. 알림 본문 수집·업로드 경로는 없다. */
 export class NotificationAccess {
   private state = empty();
   private active = false;
   private epoch = 0;
   private scope: AccessScope | null = null;
+  private failedAction: "accept" | "withdraw" | null = null;
   private listeners = new Set<() => void>();
-  /** @param getScope 현재 검증 세션. @param storage 보안 저장소. @param native OS 접근 상태/설정 이동만 제공하는 어댑터. */
+  /** @param getScope 검증된 현재 세션. @param server 세션에 결속된 동의 API. @param native OS 조회/설정 이동만 제공한다. */
   public constructor(
     private readonly getScope: () => AccessScope | null,
-    private readonly storage: SessionStorage,
+    private readonly server: NotificationConsentPort,
     private readonly native: NotificationAccessPort,
   ) {}
   public snapshot = (): AccessState => this.state;
@@ -51,50 +60,64 @@ export class NotificationAccess {
   public async start(): Promise<void> {
     this.active = true;
     this.scope = this.getScope();
+    this.failedAction = null;
     await this.load();
   }
   public stop(): void {
     this.active = false;
     ++this.epoch;
+    this.failedAction = null;
     this.publish(empty());
   }
+  /** 사용자가 재조회할 때 GET만 실행한다. 실패한 동의/철회 PATCH는 자동 재전송하지 않는다. */
   public async reload(): Promise<void> {
-    if (this.active && !this.busy()) await this.load();
+    if (this.active && !consentPresentation(this.state).busy) await this.load();
   }
-  /** 명시적 UI 확인 후 호출한다. 동의를 저장해도 OS 권한을 요청하거나 자동 기록하지 않는다. */
+  /** 명시적으로 고지를 확인한 뒤 호출한다. 저장 성공도 OS 허용이나 자동 기록 시작을 뜻하지 않는다. */
   public accept(): Promise<void> {
     return this.change("accept");
   }
   public withdraw(): Promise<void> {
     return this.change("withdraw");
   }
-  /** 동의가 없으면 허용 요청을 막는다. 이미 켜진 OS 접근을 끄기 위한 이동은 허용한다. */
+  /** 서버 장애 중에도 이미 켜진 OS 접근을 끄기 위한 이동은 막지 않는다. */
   public async openSettings(): Promise<void> {
     if (
-      !this.usable() ||
-      !this.state.permission?.available ||
-      (!this.state.consent && !this.state.permission.accessGranted)
+      !this.current(this.epoch) ||
+      !consentPresentation(this.state).canOpenSettings
     )
       return;
-    const epoch = ++this.epoch;
-    this.publish({ ...this.state, phase: "saving", notice: null });
+    const epoch = ++this.epoch,
+      before = this.state;
+    this.publish({ ...before, phase: "saving" });
+    let opened = false;
     try {
-      const opened = await this.native.openSettings();
-      if (this.current(epoch))
-        this.publish({
-          ...this.state,
-          phase: "ready",
-          notice: opened
-            ? "Android 설정에서 직접 선택해 주세요. 돌아오면 실제 상태를 다시 확인해요."
-            : "Android 알림 접근 설정을 열지 못했어요. 휴대폰 설정에서 직접 확인해 주세요.",
-        });
+      opened = await this.native.openSettings();
     } catch {
-      if (this.current(epoch)) this.fail();
+      /* 시스템 오류 내용은 화면에 노출하지 않는다. */
     }
+    if (!this.current(epoch)) return;
+    const notice = opened
+      ? "Android 설정에서 직접 선택해 주세요. 돌아오면 실제 상태를 다시 확인해요."
+      : "Android 알림 접근 설정을 열지 못했어요. 휴대폰 설정에서 직접 확인해 주세요.";
+    this.publish({
+      ...before,
+      notice:
+        before.phase === "error"
+          ? `${before.notice ?? "서버 동의는 확인하지 못했어요."} ${notice}`
+          : notice,
+    });
   }
+  /** @param action 사용자 확인을 마친 동작. 조회 버전과 응답 버전을 대조하여 덮어쓰기를 방지한다. */
   private async change(action: "accept" | "withdraw"): Promise<void> {
-    if (!this.usable()) return;
-    const epoch = ++this.epoch;
+    const presentation = consentPresentation(this.state);
+    if (
+      !this.current(this.epoch) ||
+      !(action === "accept" ? presentation.canAccept : presentation.canWithdraw)
+    )
+      return;
+    const expectedVersion = this.state.consent!.version,
+      epoch = ++this.epoch;
     this.publish({
       ...this.state,
       phase: "saving",
@@ -102,23 +125,41 @@ export class NotificationAccess {
       notice: null,
     });
     try {
-      const store = new NotificationConsentStore(this.storage, this.scope!);
-      const consent =
+      const input: NotificationConsentChangeInput =
         action === "accept"
-          ? await store.accept(new Date().toISOString())
-          : (await store.withdraw(), null);
+          ? {
+              action,
+              expectedVersion,
+              noticeVersion: NOTIFICATION_NOTICE_VERSION,
+            }
+          : { action, expectedVersion };
+      const consent = await this.server.changeNotificationConsent(input);
       if (!this.current(epoch)) return;
+      if (
+        consent.version !== expectedVersion + 1 ||
+        consent.state !== (action === "accept" ? "granted" : "withdrawn") ||
+        consent.noticeVersion !== NOTIFICATION_NOTICE_VERSION
+      )
+        throw new ClientError("INVALID_RESPONSE");
+      this.failedAction = null;
       this.publish({
         ...this.state,
         phase: "ready",
         consent,
         notice:
           action === "accept"
-            ? "이 계정의 동의를 이 휴대폰에 저장했어요. 자동 기록은 아직 시작되지 않아요."
-            : "이 휴대폰의 동의를 철회했어요. OS 알림 접근은 아래에서 별도로 해제할 수 있어요.",
+            ? "현재 계정·설치의 동의를 서버에 저장했어요. 자동 기록은 아직 시작되지 않아요."
+            : "현재 계정·설치의 동의를 서버에서 철회했어요. Android 알림 접근은 별도로 해제할 수 있어요.",
       });
-    } catch {
-      if (this.current(epoch)) this.fail();
+    } catch (error) {
+      if (!this.current(epoch)) return;
+      this.failedAction = action;
+      this.fail(
+        error instanceof ClientError &&
+          error.code === "COLLECTOR_VERSION_CONFLICT"
+          ? "서버의 동의 상태가 바뀌었어요. 동의·철회 요청을 다시 보내지 않았어요. 상태를 다시 조회한 뒤 선택해 주세요."
+          : "동의·철회 결과를 확인하지 못했어요. 완료되지 않았을 수 있어요. 자동 재전송하지 않으니 상태를 다시 조회해 주세요.",
+      );
     }
   }
   private async load(): Promise<void> {
@@ -128,24 +169,38 @@ export class NotificationAccess {
       if (this.active) this.fail();
       return;
     }
-    try {
-      const [consent, permission] = await Promise.all([
-        new NotificationConsentStore(this.storage, this.scope).read(),
-        this.native.getStatus(),
-      ]);
-      if (this.current(epoch))
-        this.publish({ phase: "ready", consent, permission, notice: null });
-    } catch {
-      if (this.current(epoch)) this.fail();
+    // 둘 중 하나의 오류가 다른 상태를 지우지 않게 한다. 서버 실패 시에도 OS 해제 경로를 남긴다.
+    const [remote, os] = await Promise.allSettled([
+      this.server.notificationConsent(),
+      this.native.getStatus(),
+    ]);
+    if (!this.current(epoch)) return;
+    const permission = os.status === "fulfilled" ? os.value : null;
+    if (remote.status === "rejected") {
+      this.publish({
+        ...empty(),
+        phase: "error",
+        permission,
+        notice:
+          "서버 동의 상태를 확인하지 못했어요. 상태를 다시 조회해 주세요. Android 권한은 별도로 확인할 수 있어요.",
+      });
+      return;
     }
-  }
-  private busy(): boolean {
-    return this.state.phase === "loading" || this.state.phase === "saving";
-  }
-  private usable(): boolean {
-    return (
-      this.active && this.state.phase === "ready" && this.current(this.epoch)
-    );
+    const consent = remote.value;
+    const withdrawalStillNeeded =
+      this.failedAction === "withdraw" &&
+      ["granted", "outdated"].includes(consent.state);
+    this.failedAction = withdrawalStillNeeded ? "withdraw" : null;
+    this.publish({
+      phase: "ready",
+      consent,
+      permission,
+      notice: withdrawalStillNeeded
+        ? "서버에 동의가 남아 있어요. 철회를 원하면 내용을 확인하고 다시 철회해 주세요."
+        : permission
+          ? null
+          : "Android 권한을 확인하지 못했어요. 서버 동의는 확인됐으며 필요하면 철회할 수 있어요.",
+    });
   }
   private current(epoch: number): boolean {
     const now = this.getScope(),
@@ -161,13 +216,10 @@ export class NotificationAccess {
       now.generation === before.generation
     );
   }
-  private fail(): void {
-    this.publish({
-      ...empty(),
-      phase: "error",
-      notice:
-        "동의 또는 권한 상태를 확인하지 못했어요. 저장·철회가 완료되지 않았을 수 있어요. 다시 조회해 주세요.",
-    });
+  private fail(
+    notice = "서버 동의를 확인하지 못했어요. 상태를 다시 조회해 주세요.",
+  ): void {
+    this.publish({ ...this.state, phase: "error", consent: null, notice });
   }
   private publish(state: AccessState): void {
     this.state = state;

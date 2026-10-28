@@ -1,27 +1,41 @@
 import { describe, expect, it, vi } from "vitest";
-import { NotificationAccess } from "./notification-access";
+import {
+  NOTIFICATION_NOTICE_VERSION,
+  type NotificationConsentChangeInput,
+  type NotificationConsentState,
+} from "@account-book/contracts";
+import { ClientError } from "../api/client-error";
+import { NotificationAccess, type AccessScope } from "./notification-access";
 
-function fixture() {
-  let scope: {
-    origin: string;
-    userId: string;
-    deviceId: string;
-    generation: number;
-  } | null = {
+function consent(
+  state: NotificationConsentState["state"],
+  version = 1,
+): NotificationConsentState {
+  return {
+    state,
+    version: state === "not_granted" ? 0 : version,
+    noticeVersion: NOTIFICATION_NOTICE_VERSION,
+  };
+}
+function fixture(initial = consent("not_granted")) {
+  let scope: AccessScope | null = {
     origin: "https://ledger.example",
     userId: "11111111-1111-4111-8111-111111111111",
     deviceId: "22222222-2222-4222-8222-222222222222",
     generation: 1,
   };
-  const values = new Map<string, string>();
-  const storage = {
-    get: async (key: string) => values.get(key) ?? null,
-    set: async (key: string, value: string) => {
-      values.set(key, value);
-    },
-    remove: async (key: string) => {
-      values.delete(key);
-    },
+  let stored = initial;
+  const server = {
+    notificationConsent: vi.fn(async () => stored),
+    changeNotificationConsent: vi.fn(
+      async (input: NotificationConsentChangeInput) => {
+        stored = consent(
+          input.action === "accept" ? "granted" : "withdrawn",
+          input.expectedVersion + 1,
+        );
+        return stored;
+      },
+    ),
   };
   const native = {
     getStatus: vi.fn(async () => ({
@@ -31,10 +45,10 @@ function fixture() {
     })),
     openSettings: vi.fn(async () => true),
   };
-  const model = new NotificationAccess(() => scope, storage, native);
+  const model = new NotificationAccess(() => scope, server, native);
   return {
     model,
-    storage,
+    server,
     native,
     logout: () => {
       scope = null;
@@ -44,93 +58,179 @@ function fixture() {
     },
   };
 }
-describe("notification consent and permission state", () => {
-  it("blocks settings before consent; saving does not imply OS grant", async () => {
+
+describe("server consent and independent Android permission", () => {
+  it("reads server state; explicitly accepts with notice and version, without opening settings", async () => {
     const f = fixture();
     await f.model.start();
+    expect(f.model.snapshot().consent).toEqual(consent("not_granted"));
     await f.model.openSettings();
     expect(f.native.openSettings).not.toHaveBeenCalled();
     await f.model.accept();
-    expect(f.model.snapshot().consent).not.toBeNull();
-    expect(f.model.snapshot().permission?.accessGranted).toBe(false);
+    expect(f.server.changeNotificationConsent).toHaveBeenCalledWith({
+      action: "accept",
+      expectedVersion: 0,
+      noticeVersion: NOTIFICATION_NOTICE_VERSION,
+    });
+    expect(f.model.snapshot().consent).toEqual(consent("granted"));
+    expect(f.native.openSettings).not.toHaveBeenCalled();
     await f.model.openSettings();
     expect(f.native.openSettings).toHaveBeenCalledTimes(1);
     expect(f.model.snapshot().permission?.accessGranted).toBe(false);
   });
-  it("shows preexisting OS grant separately and permits its removal settings without consent", async () => {
-    const f = fixture();
+  it("withdraws on the server without pretending OS access was removed", async () => {
+    const f = fixture(consent("granted", 4));
     f.native.getStatus.mockResolvedValue({
       available: true,
       accessGranted: true,
       listenerConnected: true,
     });
     await f.model.start();
-    expect(f.model.snapshot().consent).toBeNull();
-    await f.model.openSettings();
-    expect(f.native.openSettings).toHaveBeenCalledTimes(1);
-  });
-  it("withdraws local consent but does not pretend to revoke OS access", async () => {
-    const f = fixture();
-    f.native.getStatus.mockResolvedValue({
-      available: true,
-      accessGranted: true,
-      listenerConnected: true,
-    });
-    await f.model.start();
-    await f.model.accept();
     await f.model.withdraw();
-    expect(f.model.snapshot().consent).toBeNull();
+    expect(f.server.changeNotificationConsent).toHaveBeenCalledWith({
+      action: "withdraw",
+      expectedVersion: 4,
+    });
+    expect(f.model.snapshot().consent).toEqual(consent("withdrawn", 5));
     expect(f.model.snapshot().permission?.accessGranted).toBe(true);
   });
-  it("fails closed on storage failure and prevents settings", async () => {
+  it.each(["not_granted", "withdrawn", "outdated"] as const)(
+    "does not use %s as permission to open disabled OS access",
+    async (state) => {
+      const f = fixture(consent(state));
+      await f.model.start();
+      await f.model.openSettings();
+      expect(f.native.openSettings).not.toHaveBeenCalled();
+    },
+  );
+  it("allows removal of an existing OS grant even if server status fails", async () => {
     const f = fixture();
+    f.server.notificationConsent.mockRejectedValue(new Error("private"));
+    f.native.getStatus.mockResolvedValue({
+      available: true,
+      accessGranted: true,
+      listenerConnected: true,
+    });
     await f.model.start();
-    f.storage.set = async () => {
-      throw new Error("private");
-    };
-    await f.model.accept();
-    expect(f.model.snapshot().phase).toBe("error");
-    expect(f.model.snapshot().consent).toBeNull();
     await f.model.openSettings();
-    expect(f.native.openSettings).not.toHaveBeenCalled();
+    expect(f.native.openSettings).toHaveBeenCalledTimes(1);
+    expect(f.model.snapshot()).toMatchObject({
+      phase: "error",
+      consent: null,
+      permission: { accessGranted: true },
+    });
+    await f.model.accept();
+    await f.model.withdraw();
+    expect(f.server.changeNotificationConsent).not.toHaveBeenCalled();
     expect(JSON.stringify(f.model.snapshot())).not.toContain("private");
   });
+  it("retains verified server consent and allows withdrawal if native status fails", async () => {
+    const f = fixture(consent("granted"));
+    f.native.getStatus.mockRejectedValue(new Error("native-private"));
+    await f.model.start();
+    expect(f.model.snapshot()).toMatchObject({
+      phase: "ready",
+      consent: consent("granted"),
+      permission: null,
+    });
+    await f.model.withdraw();
+    expect(f.model.snapshot().consent).toEqual(consent("withdrawn", 2));
+    expect(JSON.stringify(f.model.snapshot())).not.toContain("native-private");
+  });
+  it.each(["accept", "withdraw"] as const)(
+    "allows %s for outdated consent only after user action",
+    async (action) => {
+      const f = fixture(consent("outdated", 8));
+      await f.model.start();
+      expect(f.server.changeNotificationConsent).not.toHaveBeenCalled();
+      await f.model[action]();
+      expect(f.model.snapshot().consent).toEqual(
+        consent(action === "accept" ? "granted" : "withdrawn", 9),
+      );
+    },
+  );
+  it.each([
+    "COLLECTOR_VERSION_CONFLICT",
+    "COLLECTOR_SERVICE_UNAVAILABLE",
+    "NETWORK",
+  ] as const)(
+    "does not retry or claim withdrawal after %s; reload is read-only",
+    async (code) => {
+      const f = fixture(consent("granted"));
+      await f.model.start();
+      f.server.changeNotificationConsent.mockRejectedValue(
+        new ClientError(code),
+      );
+      await f.model.withdraw();
+      expect(f.model.snapshot()).toMatchObject({
+        phase: "error",
+        consent: null,
+      });
+      expect(f.model.snapshot().notice).toContain("철회");
+      await f.model.reload();
+      expect(f.server.changeNotificationConsent).toHaveBeenCalledTimes(1);
+      expect(f.model.snapshot().consent?.state).toBe("granted");
+      expect(f.model.snapshot().notice).toContain("남아");
+    },
+  );
+  it("recovers a lost mutation response by GET without another write", async () => {
+    const f = fixture(consent("granted"));
+    await f.model.start();
+    f.server.changeNotificationConsent.mockImplementation(async () => {
+      f.server.notificationConsent.mockResolvedValue(consent("withdrawn", 2));
+      throw new Error("lost");
+    });
+    await f.model.withdraw();
+    await f.model.reload();
+    expect(f.model.snapshot().consent).toEqual(consent("withdrawn", 2));
+    expect(f.server.changeNotificationConsent).toHaveBeenCalledTimes(1);
+  });
+  it.each([consent("withdrawn", 1), consent("granted", 2)])(
+    "rejects mismatched mutation response %j",
+    async (response) => {
+      const f = fixture();
+      await f.model.start();
+      f.server.changeNotificationConsent.mockResolvedValue(response);
+      await f.model.accept();
+      expect(f.model.snapshot()).toMatchObject({
+        phase: "error",
+        consent: null,
+      });
+    },
+  );
   it.each(["stop", "logout", "relogin"])(
-    "drops late writes after %s without opening OS settings",
+    "ignores late consent responses after %s",
     async (action) => {
       const f = fixture();
       await f.model.start();
-      let finish!: () => void;
-      const set = f.storage.set;
-      f.storage.set = async (key, value) => {
-        await new Promise<void>((r) => {
-          finish = r;
-        });
-        await set(key, value);
-      };
+      let finish!: (value: NotificationConsentState) => void;
+      f.server.changeNotificationConsent.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      );
       const pending = f.model.accept();
-      await vi.waitFor(() => expect(finish).toBeTypeOf("function"));
       if (action === "stop") f.model.stop();
       else if (action === "logout") f.logout();
       else f.relogin();
-      finish();
+      finish(consent("granted"));
       await pending;
       expect(f.model.snapshot().consent).toBeNull();
       expect(f.native.openSettings).not.toHaveBeenCalled();
     },
   );
-  it("blocks repeated writes and surfaces unavailable settings without granting permission", async () => {
+  it("blocks double tap and does not request redundant mutations", async () => {
     const f = fixture();
     await f.model.start();
-    const writes = vi.spyOn(f.storage, "set");
     await Promise.all([f.model.accept(), f.model.accept()]);
-    expect(writes).toHaveBeenCalledTimes(1);
-    f.native.openSettings.mockResolvedValue(false);
-    await f.model.openSettings();
-    expect(f.model.snapshot().notice).toContain("열지 못");
-    expect(f.model.snapshot().permission?.accessGranted).toBe(false);
+    await f.model.accept();
+    expect(f.server.changeNotificationConsent).toHaveBeenCalledTimes(1);
+    await f.model.withdraw();
+    await f.model.withdraw();
+    expect(f.server.changeNotificationConsent).toHaveBeenCalledTimes(2);
   });
-  it("does not claim an old APK supports permissions", async () => {
+  it("does not enable consent on an old APK, but still allows server withdrawal", async () => {
     const f = fixture();
     f.native.getStatus.mockResolvedValue({
       available: false,
@@ -139,21 +239,18 @@ describe("notification consent and permission state", () => {
     });
     await f.model.start();
     await f.model.accept();
-    await f.model.openSettings();
-    expect(f.native.openSettings).not.toHaveBeenCalled();
-    expect(f.model.snapshot().permission?.available).toBe(false);
-  });
-  it("does not report a failed withdrawal as complete, and rereads the stored state", async () => {
-    const f = fixture();
-    await f.model.start();
-    await f.model.accept();
-    f.storage.remove = async () => {
-      throw new Error("private");
-    };
-    await f.model.withdraw();
-    expect(f.model.snapshot().phase).toBe("error");
-    expect(f.model.snapshot().notice).toContain("완료되지 않았을");
+    expect(f.server.changeNotificationConsent).not.toHaveBeenCalled();
+    f.server.notificationConsent.mockResolvedValue(consent("granted"));
     await f.model.reload();
-    expect(f.model.snapshot().consent).not.toBeNull();
+    await f.model.withdraw();
+    expect(f.server.changeNotificationConsent).toHaveBeenCalledTimes(1);
+  });
+  it("reports settings failure without discarding verified consent", async () => {
+    const f = fixture(consent("granted"));
+    await f.model.start();
+    f.native.openSettings.mockRejectedValue(new Error("private"));
+    await f.model.openSettings();
+    expect(f.model.snapshot().consent?.state).toBe("granted");
+    expect(f.model.snapshot().notice).toContain("열지 못");
   });
 });

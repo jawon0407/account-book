@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import type { SessionManager } from "../auth/session-manager";
-import { secureStorage } from "../auth/secure-storage";
 import { NotificationAccess } from "../collector/notification-access";
+import { consentPresentation } from "../collector/notification-consent-copy";
 import { androidNotificationAccess } from "../platform/notification-access";
 import { NotificationAccessGuide } from "./notification-access-guide";
 import { colors, common } from "./theme";
@@ -17,7 +17,7 @@ export function NotificationAccessPanel({
     () =>
       new NotificationAccess(
         () => manager.notificationConsentScope(),
-        secureStorage,
+        manager,
         androidNotificationAccess,
       ),
     [manager],
@@ -30,37 +30,25 @@ export function NotificationAccessPanel({
     void model.start();
     return () => model.stop();
   }, [model]);
-  const ready = state.phase === "ready";
-  const busy = ["idle", "loading", "saving"].includes(state.phase);
+  const presentation = consentPresentation(state);
+  const { busy } = presentation;
   return (
     <View style={styles.section}>
       <Text accessibilityRole="header" style={styles.title}>
         동의와 알림 접근
       </Text>
       <Text style={common.body}>
-        동의 저장과 Android 권한 설정을 준비할 수 있어요. 현재 버전은 알림
+        서버 동의 저장과 Android 권한 설정을 준비할 수 있어요. 현재 버전은 알림
         내용을 읽거나 거래로 저장하지 않아요.
       </Text>
       <View accessibilityLiveRegion="polite" style={styles.status}>
         <Text style={common.body}>
-          이 기기의 동의:{" "}
-          {ready
-            ? state.consent
-              ? "저장됨"
-              : "동의하지 않음"
-            : "확인 중 또는 확인 필요"}
+          현재 계정·설치의 동의: {presentation.consentLabel}
         </Text>
         <Text style={common.body}>
-          Android 알림 접근:{" "}
-          {ready
-            ? state.permission?.available
-              ? state.permission.accessGranted
-                ? "허용됨"
-                : "허용되지 않음"
-              : "새 개발 APK 설치 필요"
-            : "확인 중 또는 확인 필요"}
+          Android 알림 접근: {presentation.permissionLabel}
         </Text>
-        {ready && state.permission?.accessGranted ? (
+        {state.permission?.accessGranted ? (
           <Text style={common.secondary}>
             서비스 연결:{" "}
             {state.permission.listenerConnected
@@ -91,25 +79,29 @@ export function NotificationAccessPanel({
           <Text accessibilityRole="header" style={styles.title}>
             {confirmation === "accept"
               ? "알림 자동 기록 준비에 동의할까요? (선택)"
-              : "이 휴대폰의 동의를 철회할까요?"}
+              : "현재 계정·설치의 동의를 철회할까요?"}
           </Text>
           <Text style={common.body}>
             {confirmation === "accept"
               ? "향후 선택한 금융 앱·문자·카카오톡에서 새로 온 금융 알림을 기기 안에서 분석하고, 금액·방향·시각·거래 상대 등 필요한 정보를 내 서버 장부에 저장하기 위한 동의예요. 일반 대화·인증번호·광고는 제외하며 원문은 서버에 보내지 않아요."
-              : "이 계정·설치에 저장된 동의를 지워요. 기존 거래는 삭제하지 않고, Android의 알림 접근 권한도 자동으로 해제되지는 않아요."}
+              : "서버에 저장된 현재 계정·설치의 동의를 철회 상태로 바꿔요. 기존 거래는 삭제하지 않고, Android의 알림 접근 권한도 자동으로 해제되지는 않아요."}
           </Text>
           <Text style={common.secondary}>
             {confirmation === "accept"
-              ? "거절해도 수기 장부를 사용할 수 있고 나중에 철회할 수 있어요. 지금은 동의 버전·시각·계정 및 설치 식별자만 기기의 보안 저장소에 보관해요. 서버 동의 검증과 출처 선택이 연결되기 전에는 자동 기록을 시작하지 않아요."
+              ? "거절해도 수기 장부를 사용할 수 있고 나중에 철회할 수 있어요. 동의 고지 버전·시각과 계정·설치 식별자를 서버에 보관해요. 예전에 기기에 저장한 동의는 자동으로 전송하지 않아요. 현재는 출처 선택과 실제 수집 기능이 없어 자동 기록을 시작하지 않아요."
               : "철회 뒤에도 OS 접근이 켜져 있으면 아래 ‘Android 알림 접근 설정’에서 직접 꺼 주세요."}
           </Text>
           <Action
             label={
               confirmation === "accept"
-                ? "동의하고 이 기기에 저장"
+                ? "동의하고 서버에 저장"
                 : "동의 철회 확인"
             }
-            disabled={!ready}
+            disabled={
+              confirmation === "accept"
+                ? !presentation.canAccept
+                : !presentation.canWithdraw
+            }
             onPress={() => {
               const action = confirmation;
               setConfirmation(null);
@@ -124,20 +116,32 @@ export function NotificationAccessPanel({
           />
         </View>
       ) : (
-        <Action
-          label={state.consent ? "동의 철회 안내" : "선택 동의 확인"}
-          disabled={!ready || (!state.consent && !state.permission?.available)}
-          onPress={() => setConfirmation(state.consent ? "withdraw" : "accept")}
-        />
+        <>
+          {state.consent?.state !== "granted" ? (
+            <Action
+              label={
+                state.consent?.state === "outdated"
+                  ? "변경된 고지 확인·다시 동의"
+                  : "선택 동의 확인"
+              }
+              disabled={!presentation.canAccept}
+              onPress={() => setConfirmation("accept")}
+            />
+          ) : null}
+          {state.consent?.state === "granted" ||
+          state.consent?.state === "outdated" ? (
+            <Action
+              label="동의 철회 안내"
+              disabled={!presentation.canWithdraw}
+              onPress={() => setConfirmation("withdraw")}
+            />
+          ) : null}
+        </>
       )}
       <Action
         label="Android 알림 접근 설정"
         secondary
-        disabled={
-          !ready ||
-          !state.permission?.available ||
-          (!state.consent && !state.permission.accessGranted)
-        }
+        disabled={!presentation.canOpenSettings}
         onPress={() => {
           void model.openSettings();
         }}
