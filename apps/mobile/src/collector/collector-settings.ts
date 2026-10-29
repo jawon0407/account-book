@@ -5,17 +5,22 @@ import type {
 import type { SessionManager } from "../auth/session-manager";
 import { collectorFailure } from "./collector-copy";
 
+// 성공 안내의 자동 종료 시간은 설정 모델 한 곳에서 관리한다.
+export const COLLECTOR_TOAST_DURATION_MS = 2500;
+
 export type CollectorSettingsState = Readonly<{
   phase: "idle" | "loading" | "ready" | "saving" | "error";
   value: CollectorState | null;
   confirmation: CollectorChangeInput | null;
   notice: string | null;
+  toast: string | null;
 }>;
 const empty = (): CollectorSettingsState => ({
   phase: "idle",
   value: null,
   confirmation: null,
   notice: null,
+  toast: null,
 });
 type Port = Pick<SessionManager, "collectorState" | "changeCollector">;
 
@@ -24,6 +29,7 @@ export class CollectorSettings {
   private state = empty();
   private epoch = 0;
   private active = false;
+  private toastTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<() => void>();
   /** @param api 토큰을 노출하지 않는 현재 로그인 세션의 조회/변경 기능. */
   public constructor(private readonly api: Port) {}
@@ -44,6 +50,7 @@ export class CollectorSettings {
   }
   /** 화면을 떠나면 이전 요청 결과를 버린다. 서버에서 이미 처리된 변경은 취소됐다고 주장하지 않는다. */
   public stop(): void {
+    this.clearToastTimer();
     this.active = false;
     ++this.epoch;
     this.publish(empty());
@@ -74,7 +81,8 @@ export class CollectorSettings {
             replaceExisting: current.state === "active_elsewhere",
           }
         : { action, expectedVersion: current.version };
-    this.publish({ ...this.state, confirmation, notice: null });
+    this.clearToastTimer();
+    this.publish({ ...this.state, confirmation, notice: null, toast: null });
   }
   /** 서버 요청 전 확인만 취소한다. 이미 저장 중인 요청에는 취소 성공 표시를 하지 않는다. */
   public cancel(): void {
@@ -86,11 +94,13 @@ export class CollectorSettings {
     const input = this.state.confirmation;
     if (!this.active || this.state.phase !== "ready" || !input) return;
     const epoch = ++this.epoch;
+    this.clearToastTimer();
     this.publish({
       ...this.state,
       phase: "saving",
       confirmation: null,
       notice: null,
+      toast: null,
     });
     try {
       const value = await this.api.changeCollector(input);
@@ -99,8 +109,17 @@ export class CollectorSettings {
         phase: "ready",
         value,
         confirmation: null,
-        notice: "기기 지정을 저장했어요. 자동 기록 기능은 아직 준비 중이에요.",
+        notice: null,
+        toast:
+          input.action === "activate"
+            ? "기기 지정을 완료했습니다."
+            : "기기 지정을 해제했습니다.",
       });
+      // 현재 화면의 성공 응답에만 2.5초 안내를 붙인다. 새 작업/종료 시 타이머를 폐기한다.
+      this.toastTimer = setTimeout(() => {
+        this.toastTimer = null;
+        if (this.current(epoch)) this.publish({ ...this.state, toast: null });
+      }, COLLECTOR_TOAST_DURATION_MS);
     } catch (error) {
       if (this.current(epoch))
         await this.read(collectorFailure(error, "change"));
@@ -108,18 +127,32 @@ export class CollectorSettings {
   }
   /** @param notice 직전 변경 결과의 불확실성. 조회 성공만으로 변경 성공 안내로 바꾸지 않는다. */
   private async read(notice: string | null = null): Promise<void> {
+    this.clearToastTimer();
     const epoch = ++this.epoch;
-    this.publish({ phase: "loading", value: null, confirmation: null, notice });
+    this.publish({
+      phase: "loading",
+      value: null,
+      confirmation: null,
+      notice,
+      toast: null,
+    });
     try {
       const value = await this.api.collectorState();
       if (this.current(epoch))
-        this.publish({ phase: "ready", value, confirmation: null, notice });
+        this.publish({
+          phase: "ready",
+          value,
+          confirmation: null,
+          notice,
+          toast: null,
+        });
     } catch (error) {
       if (this.current(epoch))
         this.publish({
           phase: "error",
           value: null,
           confirmation: null,
+          toast: null,
           notice: notice
             ? `${notice} 현재 상태도 확인하지 못했어요. 다시 조회해 주세요.`
             : collectorFailure(error, "read"),
@@ -129,6 +162,11 @@ export class CollectorSettings {
   /** @param epoch 요청 시작 번호. 화면 재진입/종료 전의 응답인지 검사한다. */
   private current(epoch: number): boolean {
     return this.active && this.epoch === epoch;
+  }
+  /** 현재 화면에 속한 안내 타이머를 정리한다. 재진입/다른 성공 안내를 지우지 않게 한다. */
+  private clearToastTimer(): void {
+    if (this.toastTimer !== null) clearTimeout(this.toastTimer);
+    this.toastTimer = null;
   }
   /** @param state 민감정보 없는 새 표시 상태. 구독자에게만 변경을 알린다. */
   private publish(state: CollectorSettingsState): void {

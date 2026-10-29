@@ -69,7 +69,7 @@ Historical design only: the user subsequently rejected this fixed-list approach.
 - Preserve explicit permission Alert, withdrawal and OS-management paths. Actual capture remains unimplemented. No new tests for layout only; combined allowance adds 12 cases to the existing presentation test.
 - Current verification: USB has zero devices, so the latest Modal/layout has NOT been visually approved. Earlier device results above belong to the prior permission Alert, not this new UI. Type checks, existing tests and bundle/PC smoke are tracked in the latest status document.
 
-## 2026-10-28 permission-driven enrollment (latest)
+## 2026-10-28 permission-driven enrollment (superseded on 10/29)
 
 - Independent review corrected known-denial priority: a verified rejection remains not allowed even if the other source is unavailable. Both must be verified to show allowed.
 - Actual device verified compact refresh, guide scroll to the final paragraph, fixed close and Android Back returning to settings without consent mutation. Large fonts/TalkBack/other OEMs remain outside evidence.
@@ -91,3 +91,28 @@ Historical design only: the user subsequently rejected this fixed-list approach.
 - Verified guide scrolling to its final paragraph, fixed close, Android Back, and existing-consent Alert cancellation with unchanged server consent/designation versions. OS access was not toggled by automation; the final enabled/designated state was preserved.
 - Existing APK loaded the latest Metro bundle. No new native build, permission/data-flow change, or product-source change during this follow-up. TalkBack, landscape, other OEMs/tablets and all confirmation layouts remain outside this visual evidence.
 - Full repository tests (2,350), mobile type checks/UI lint and PC Playwright regression passed; see the status document for scope and exclusions. Device screenshots remain ignored local evidence, not committed design assets.
+
+## 2026-10-29 independent permission and designation (current)
+
+- Supersedes permission-driven enrollment above: allow/OS-return never designates. Separate activate/replace/deactivate controls use explicit confirmation and revalidate consent/OS before designation. Multiple logins and one collector remain unchanged.
+- Retain the equal-width guide/action row, 9dp face padding and at least 48dp hit targets. Verified allowed state changes the action to red `colors.error` / white “알림 거부”. Remove the two standalone withdrawal/OS-management buttons.
+- Native Alert preserves withdrawal and settings-only recovery, including withdrawn/not-granted consent with OS access still on. No re-consent is required to reach OS settings; OS changes remain manual.
+- Replace persistent designation success copy with a noninteractive three-second bottom toast, exact “기기 지정을 완료했습니다.”. Model cleanup cancels stale timers. Existing readiness/help still disclose no real capture.
+- Verdict: scoped implementation verified on the connected portrait Android device at its current font setting. Red deny/cancel, server withdrawal, OS settings round trips, permission grant without designation, standalone designation and visible/dismissed toast confirmed. No new visual assets/global theme changes. Latest large-font flow, TalkBack, landscape and other devices remain unverified.
+- Independent review found one recovery-path gap, fixed with RED→GREEN and actual-device navigation. Full tests 2,367; changed tests 84 included, mobile types/lint/export and PC smoke passed. See the 10/29 status document; no whole-app security or actual capture completion claim.
+
+## 2026-10-29 toast motion refinement (current)
+
+- Supersedes the three-second full-width toast only. Success is now visible for 2,500ms including a 220ms, 24dp upward entry; a linear shrinking bar communicates remaining display time, never server progress.
+- Content width plus 20dp horizontal padding, centered, viewport-constrained and wrapping. Radius derives from the button's 24dp minus 4 = 20dp. Black/white theme colors retained; no assets, dependencies or global palette changes.
+- Native-driven transforms avoid per-frame layout work. Reduced-motion removes entry movement and updates the decorative bar in steps. Unmount/new-action cleanup cancels animations and timers; the existing model remains responsible for dismissal.
+- Verdict: both success messages inspected on the connected portrait Android device. Video frames confirm upward entry, captures confirm compact centered box, changing bar and dismissal. Final collector/consent states restored. Two bounded inspection rounds; no speculative visual polish.
+- Fresh full repository tests 2,367, timer cases 22 (included), mobile type checks, changed-file lint, Android export and existing PC Playwright flow passed. TalkBack, reduced-motion-on, large-font/landscape/other-device runs were not repeated. See docs/status/2026-10-29-collector-toast-motion.ko.md.
+
+## 2026-10-29 central confirmation / no progress bar (current)
+
+- User follow-up removes only the toast countdown bar and its measuring/animation/interval code. Keep compact centered text, 20dp radius, upward entry and the existing 2,500ms model-owned dismissal.
+- Replace expanding in-card designation/replace/deactivate confirmation with the same native Alert used for permission decisions. Keep existing impact text. No custom dialog styling, new dependency or global theme change.
+- Cancel, Android Back and outside dismissal abandon only that pending request. Confirm callbacks bind the exact request and account/screen epoch; stale callbacks cannot submit or cancel a newer request. Access is still revalidated before activation.
+- Verdict: designation/deactivation native dialogs were inspected on the connected portrait device; cancel and Android Back preserved the existing designation. The user stopped further device testing. Outside dismissal and the updated success/toast path remain device-unverified; do not substitute older countdown-toast evidence. Last observed device state was allowed/designated after the user enabled OS access; no further state mutation was performed after the stop request.
+- Full tests 2,377 (including 10 new dialog-boundary cases), mobile types/lint, Android export and existing PC Playwright smoke passed. Keep the inherited animation/dismissal but do not claim new real-device animation evidence. No new global styling/assets/dependencies; see docs/status/2026-10-29-collector-confirmation-dialog.ko.md.

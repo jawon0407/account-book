@@ -21,6 +21,75 @@ function fixture(state = inactive) {
   return { api, model: new CollectorSettings(api) };
 }
 describe("collector settings transitions", () => {
+  it("shows confirmed designation for 2.5 seconds, not a persistent notice", async () => {
+    vi.useFakeTimers();
+    const { model } = fixture();
+    try {
+      await model.start();
+      model.choose("activate");
+      await model.confirm();
+      expect(model.snapshot().notice).toBeNull();
+      expect(model.snapshot().toast).toBe("기기 지정을 완료했습니다.");
+      await vi.advanceTimersByTimeAsync(2499);
+      expect(model.snapshot().toast).toBe("기기 지정을 완료했습니다.");
+      await vi.advanceTimersByTimeAsync(1);
+      expect(model.snapshot().toast).toBeNull();
+    } finally {
+      model.stop();
+      vi.useRealTimers();
+    }
+  });
+  it("clears toast timers on exit and never replays them on reentry", async () => {
+    vi.useFakeTimers();
+    const { model } = fixture();
+    try {
+      await model.start();
+      model.choose("activate");
+      await model.confirm();
+      expect(model.snapshot().toast).toBeTruthy();
+      model.stop();
+      expect(vi.getTimerCount()).toBe(0);
+      await model.start();
+      await vi.advanceTimersByTimeAsync(4000);
+      expect(model.snapshot().toast).toBeNull();
+    } finally {
+      model.stop();
+      vi.useRealTimers();
+    }
+  });
+  it("does not let an older timer clear a newer deactivation toast", async () => {
+    vi.useFakeTimers();
+    const { api, model } = fixture();
+    try {
+      await model.start();
+      model.choose("activate");
+      await model.confirm();
+      await vi.advanceTimersByTimeAsync(1000);
+      api.changeCollector.mockResolvedValueOnce({
+        state: "inactive",
+        version: 2,
+      });
+      model.choose("deactivate");
+      await model.confirm();
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(model.snapshot().toast).toBe("기기 지정을 해제했습니다.");
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(model.snapshot().toast).toBeNull();
+    } finally {
+      model.stop();
+      vi.useRealTimers();
+    }
+  });
+  it("never shows a success toast for a lost response even when GET finds the change", async () => {
+    const { api, model } = fixture();
+    await model.start();
+    api.changeCollector.mockRejectedValueOnce(new ClientError("NETWORK"));
+    api.collectorState.mockResolvedValueOnce(here);
+    model.choose("activate");
+    await model.confirm();
+    expect(model.snapshot().value).toEqual(here);
+    expect(model.snapshot().toast).toBeNull();
+  });
   it.each([inactive, here, elsewhere])(
     "reads %j without writing on entry",
     async (value) => {

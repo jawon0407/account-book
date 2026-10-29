@@ -13,7 +13,7 @@ export function collectorStateCopy(state: CollectorState["state"]) {
     case "inactive":
       return {
         title: "지정된 기기 없음",
-        body: "아래 ‘알림 허용’에서 동의와 Android 접근을 확인하면 이 휴대폰을 지정해요.",
+        body: "알림 허용과 기기 지정은 별도예요. 아래 ‘이 기기 지정’을 눌러 이 휴대폰을 대표 기기로 설정할 수 있어요.",
       };
     case "active_here":
       return {

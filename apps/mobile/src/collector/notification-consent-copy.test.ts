@@ -16,6 +16,59 @@ const ready: AccessState = {
   notice: null,
 };
 describe("consent presentation action policy", () => {
+  it.each(["withdrawn", "not_granted"] as const)(
+    "keeps a settings-only popup escape for %s with OS access still enabled",
+    (state) => {
+      expect(
+        consentPresentation({
+          ...ready,
+          consent: { ...ready.consent!, state },
+          permission: { ...ready.permission!, accessGranted: true },
+        }),
+      ).toMatchObject({ primaryAction: "allow", alternateAction: "settings" });
+    },
+  );
+  it("offers no settings-only escape when access is already off", () => {
+    expect(consentPresentation(ready).alternateAction).toBe("none");
+  });
+  it.each([
+    ["granted", true, true, "deny"],
+    ["granted", false, true, "allow"],
+    ["withdrawn", true, true, "allow"],
+    ["not_granted", false, true, "allow"],
+    ["outdated", true, true, "allow"],
+    ["granted", false, false, "deny"],
+    ["not_granted", false, false, "none"],
+  ] as const)(
+    "selects a usable action for %s / OS=%s / native=%s",
+    (state, accessGranted, available, primaryAction) => {
+      expect(
+        consentPresentation({
+          ...ready,
+          consent: { ...ready.consent!, state },
+          permission: { ...ready.permission!, available, accessGranted },
+        }).primaryAction,
+      ).toBe(primaryAction);
+    },
+  );
+  it("keeps a single-button OS escape when server consent cannot be read", () => {
+    expect(
+      consentPresentation({
+        ...ready,
+        phase: "error",
+        consent: null,
+        permission: { ...ready.permission!, accessGranted: true },
+      }).primaryAction,
+    ).toBe("settings");
+  });
+  it.each(["idle", "loading", "saving"] as const)(
+    "has no action while %s",
+    (phase) => {
+      expect(consentPresentation({ ...ready, phase }).primaryAction).toBe(
+        "none",
+      );
+    },
+  );
   it.each([
     ["not_granted", true, "허용되지 않음"],
     ["withdrawn", true, "허용되지 않음"],
