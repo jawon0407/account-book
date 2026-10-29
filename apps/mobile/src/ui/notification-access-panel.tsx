@@ -26,16 +26,12 @@ export function NotificationAccessPanel({
   return (
     <View style={styles.section}>
       <Text accessibilityRole="header" style={styles.title}>
-        동의와 알림 접근
+        알림 설정
       </Text>
-      <View style={styles.introduction}>
-        <Text style={[common.body, styles.introductionText]}>
-          알림 허용을 누르면 안내 팝업이 열려요. 특정 은행 목록을 고를 필요는
-          없어요. 동의·권한 확인 후 수집 기기를 지정해요. 현재는 알림을 읽거나
-          기록하지 않아요.
-        </Text>
-        <NotificationAccessGuide />
-      </View>
+      <Text style={common.body}>
+        휴대폰에 도착하는 금융 앱·카카오톡·문자 알림을 가계부에서 활용하려면
+        Account Book의 알림 접근을 허용해 주세요.
+      </Text>
       <View accessibilityLiveRegion="polite" style={styles.status}>
         <Text style={common.body}>
           알림 여부: {presentation.allowanceLabel}
@@ -60,39 +56,48 @@ export function NotificationAccessPanel({
           {state.notice}
         </Text>
       ) : null}
-      <Action
-        label="알림 허용"
-        disabled={
-          busy ||
-          collector.phase !== "ready" ||
-          !!collector.confirmation ||
-          (!presentation.canAccept &&
-            !(
-              state.consent?.state === "granted" && presentation.canOpenSettings
-            ))
-        }
-        onPress={() => {
-          const needsConsent = presentation.canAccept;
-          const confirmAccess = enrollment.prepareAccessRequest();
-          Alert.alert(
-            "Account Book Dev 알림 접근",
-            (needsConsent
-              ? "새 금융 앱·문자·카카오톡 알림을 기기에서 분석하고 필요한 거래 정보만 내 서버 장부에 저장하기 위한 선택 동의예요. 일반 대화·인증번호·광고와 과거 내역은 제외하며 원문은 서버에 보내지 않아요.\n\n동의 버전·시각·계정·설치 식별자를 서버에 보관해요. 거절해도 수기 장부를 이용할 수 있고 나중에 철회할 수 있어요.\n\n현재는 실제 알림을 읽거나 기록하지 않아요. 다음 Android 화면에서 Account Book Dev를 선택해 직접 허용해 주세요."
-              : "금융 알림 처리 동의는 이미 저장되어 있어요. Android 알림 접근이 꺼져 있으면 설정에서 직접 허용해 주세요. 현재는 실제 알림을 읽거나 기록하지 않아요.") +
-              "\n\n동의와 Android 접근을 확인하면 이 휴대폰을 수집 기기로 지정해요. 다른 기기가 지정되어 있으면 변경 여부를 다시 물어요. 여러 기기 로그인은 그대로 유지돼요.",
-            [
-              { text: "취소", style: "cancel" },
-              {
-                text: needsConsent ? "동의하고 계속" : "계속",
-                onPress: () => {
-                  void confirmAccess();
-                },
-              },
-            ],
-            { cancelable: true },
-          );
-        }}
-      />
+      <View style={styles.permissionActions}>
+        <View style={styles.actionColumn}>
+          <NotificationAccessGuide />
+        </View>
+        <View style={styles.actionColumn}>
+          <Action
+            label="알림 허용"
+            compact
+            disabled={
+              busy ||
+              collector.phase !== "ready" ||
+              !!collector.confirmation ||
+              (!presentation.canAccept &&
+                !(
+                  state.consent?.state === "granted" &&
+                  presentation.canOpenSettings
+                ))
+            }
+            onPress={() => {
+              const needsConsent = presentation.canAccept;
+              const confirmAccess = enrollment.prepareAccessRequest();
+              Alert.alert(
+                "Account Book Dev 알림 접근",
+                (needsConsent
+                  ? "새 금융 앱·문자·카카오톡 알림을 기기에서 분석하고 필요한 거래 정보만 내 서버 장부에 저장하기 위한 선택 동의예요. 일반 대화·인증번호·광고와 과거 내역은 제외하며 원문은 서버에 보내지 않아요.\n\n동의 버전·시각·계정·설치 식별자를 서버에 보관해요. 거절해도 수기 장부를 이용할 수 있고 나중에 철회할 수 있어요.\n\n현재는 실제 알림을 읽거나 기록하지 않아요. 다음 Android 화면에서 Account Book Dev를 선택해 직접 허용해 주세요."
+                  : "금융 알림 처리 동의는 이미 저장되어 있어요. Android 알림 접근이 꺼져 있으면 설정에서 직접 허용해 주세요. 현재는 실제 알림을 읽거나 기록하지 않아요.") +
+                  "\n\n동의와 Android 접근을 확인하면 이 휴대폰을 수집 기기로 지정해요. 다른 기기가 지정되어 있으면 변경 여부를 다시 물어요. 여러 기기 로그인은 그대로 유지돼요.",
+                [
+                  { text: "취소", style: "cancel" },
+                  {
+                    text: needsConsent ? "동의하고 계속" : "계속",
+                    onPress: () => {
+                      void confirmAccess();
+                    },
+                  },
+                ],
+                { cancelable: true },
+              );
+            }}
+          />
+        </View>
+      </View>
       {confirmWithdrawal ? (
         <View style={styles.confirmation}>
           <Text accessibilityRole="header" style={styles.title}>
@@ -155,11 +160,13 @@ function Action({
   onPress,
   disabled = false,
   secondary = false,
+  compact = false,
 }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
   secondary?: boolean;
+  compact?: boolean;
 }) {
   return (
     <Pressable
@@ -167,25 +174,44 @@ function Action({
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [
-        common.button,
-        secondary && styles.secondary,
-        (disabled || pressed) && styles.dimmed,
-      ]}
+      style={styles.touchTarget}
     >
-      <Text style={secondary ? common.link : common.buttonText}>{label}</Text>
+      {({ pressed }) => (
+        <View
+          style={[
+            common.button,
+            styles.buttonFace,
+            compact && styles.compactButton,
+            secondary && styles.secondary,
+            (disabled || pressed) && styles.dimmed,
+          ]}
+        >
+          <Text
+            style={[
+              secondary ? common.link : common.buttonText,
+              styles.buttonLabel,
+            ]}
+          >
+            {label}
+          </Text>
+        </View>
+      )}
     </Pressable>
   );
 }
 const styles = StyleSheet.create({
   section: { gap: 16, paddingTop: 16 },
-  introduction: {
+  permissionActions: {
     flexDirection: "row",
-    flexWrap: "wrap",
-    alignItems: "flex-end",
-    gap: 8,
+    alignItems: "center",
+    gap: 12,
   },
-  introductionText: { flexBasis: 280, flexGrow: 1, flexShrink: 1 },
+  actionColumn: { flex: 1, minWidth: 0 },
+  touchTarget: { minHeight: 48, justifyContent: "center" },
+  buttonFace: { width: "100%" },
+  // 버튼 표면만 줄이고 바깥 Pressable은 Android 최소 조작 높이를 유지한다.
+  compactButton: { minHeight: 42, paddingVertical: 9 },
+  buttonLabel: { textAlign: "center" },
   title: {
     color: colors.text,
     fontSize: 18,

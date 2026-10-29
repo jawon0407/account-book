@@ -2,7 +2,11 @@
 version: 1
 slug: "apps-mobile-src-ui-collector-screen-tsx"
 primary_target: "apps/mobile/src/ui/collector-screen.tsx"
-related_targets: ["apps/mobile/src/ui/notification-access-guide.tsx", "apps/mobile/src/ui/notification-access-panel.tsx"]
+related_targets:
+  [
+    "apps/mobile/src/ui/notification-access-guide.tsx",
+    "apps/mobile/src/ui/notification-access-panel.tsx",
+  ]
 ---
 
 # Collector settings — Android / Operate
@@ -72,3 +76,18 @@ Historical design only: the user subsequently rejected this fixed-list approach.
 - Remove separate activate/replace buttons. The primary permission Alert explains consent + OS check + designation. Keep designation status/deactivation. Replacement retains an explicit second confirmation; multiple logins remain allowed.
 - Hold only an expiring in-memory intent across OS settings. Background hides content, return revalidates login and permissions. No successful OS-launch acknowledgement means no resumed enrollment. Old native Alert callbacks cannot act on a restarted screen/account.
 - Retain no-capture warning. Neither permission nor designation is labeled as running capture. No new palette, font or raster assets.
+
+## 2026-10-28 compact actions (latest visual refinement)
+
+- Rename the permission subsection (not the page heading) to “알림 설정”. Intro names Account Book notification access for financial-app/KakaoTalk/SMS notifications; preparation/help still disclose no actual capture.
+- Reading order: purpose, verified allowance/notices, equal-width guide-left/allow-right actions. 12dp column gap, shrinkable columns and centered wrapping text; no fixed text height or font-scaling cap.
+- Reduce vertical internal padding from 12 to 9dp for permission/guide and current designation controls. Outer Pressable remains at least 48dp; inner filled/outlined faces shrink to 42/44dp at standard 24dp line height and grow with text.
+- Preserve the prior enrollment flow; do not restore obsolete standalone activation. No global theme, state/subscription, permission, API or DB changes. React checks: no new effects, fetches or dependencies; disabled/accessibility and late-callback guards remain intact.
+- Verification is recorded in docs/status/2026-10-28-notification-settings-compact.ko.md. No new raster assets.
+
+## 2026-10-29 compact-actions device verification
+
+- Verified the latest layout on the connected Android portrait device, at its original font scale 0.8 and temporary scale 1.3. Purpose text and both equal-width actions remained readable without clipping; action hit areas stayed 48dp and the column gap stayed 12dp. Restored scale 0.8 afterward.
+- Verified guide scrolling to its final paragraph, fixed close, Android Back, and existing-consent Alert cancellation with unchanged server consent/designation versions. OS access was not toggled by automation; the final enabled/designated state was preserved.
+- Existing APK loaded the latest Metro bundle. No new native build, permission/data-flow change, or product-source change during this follow-up. TalkBack, landscape, other OEMs/tablets and all confirmation layouts remain outside this visual evidence.
+- Full repository tests (2,350), mobile type checks/UI lint and PC Playwright regression passed; see the status document for scope and exclusions. Device screenshots remain ignored local evidence, not committed design assets.

@@ -181,13 +181,27 @@ function Action({
       accessibilityState={{ disabled }}
       disabled={disabled}
       onPress={onPress}
-      style={({ pressed }) => [
-        common.button,
-        secondary && styles.secondaryButton,
-        (disabled || pressed) && styles.dimmed,
-      ]}
+      style={styles.touchTarget}
     >
-      <Text style={secondary ? common.link : common.buttonText}>{label}</Text>
+      {({ pressed }) => (
+        <View
+          style={[
+            common.button,
+            styles.compactButton,
+            secondary && styles.secondaryButton,
+            (disabled || pressed) && styles.dimmed,
+          ]}
+        >
+          <Text
+            style={[
+              secondary ? common.link : common.buttonText,
+              styles.buttonLabel,
+            ]}
+          >
+            {label}
+          </Text>
+        </View>
+      )}
     </Pressable>
   );
 }
@@ -222,6 +236,10 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
   },
   actions: { gap: 8, marginTop: 4 },
+  // 안쪽 여백은 12→9dp, 바깥 조작 영역은 48dp 이상으로 유지한다.
+  touchTarget: { minHeight: 48, justifyContent: "center" },
+  compactButton: { width: "100%", minHeight: 42, paddingVertical: 9 },
+  buttonLabel: { textAlign: "center" },
   confirmation: {
     gap: 12,
     paddingTop: 16,

@@ -24,9 +24,15 @@ export function NotificationAccessGuide() {
         accessibilityLabel="알림 접근 자세히 알아보기"
         accessibilityHint="설명 팝업을 열어요. 동의나 권한은 바뀌지 않아요"
         onPress={() => setVisible(true)}
-        style={({ pressed }) => [styles.toggle, pressed && styles.pressed]}
+        style={styles.touchTarget}
       >
-        <Text style={common.link}>자세히 알아보기</Text>
+        {({ pressed }) => (
+          <View style={[styles.toggle, pressed && styles.pressed]}>
+            <Text style={[common.link, styles.buttonLabel]}>
+              자세히 알아보기
+            </Text>
+          </View>
+        )}
       </Pressable>
       <Modal
         visible={visible}
@@ -170,9 +176,13 @@ const styles = StyleSheet.create({
     lineHeight: 26,
     fontWeight: "600",
   },
+  // 작아진 버튼 표면과 별개로 누르는 영역은 최소 48dp다.
+  touchTarget: { minHeight: 48, justifyContent: "center" },
+  buttonLabel: { textAlign: "center" },
   toggle: {
-    minHeight: 48,
-    paddingVertical: 12,
+    minHeight: 42,
+    width: "100%",
+    paddingVertical: 9,
     paddingHorizontal: 16,
     alignItems: "center",
     justifyContent: "center",
