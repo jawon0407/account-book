@@ -9,7 +9,8 @@ import { LoginScreen } from "../src/ui/login-screen";
 import { LedgerFlow } from "../src/ui/ledger-flow";
 import { ManualWorkspace } from "../src/ledger/manual-workspace";
 import { CollectorEnrollment } from "../src/collector/collector-enrollment";
-import { androidNotificationAccess } from "../src/platform/notification-access";
+import { androidNotificationAccess, androidCapture } from "../src/platform/notification-access";
+import { CollectionRuntime } from "../src/collector/collection-runtime";
 import { common } from "../src/ui/theme";
 
 /** 설정 오류도 앱 크래시 대신 안전한 안내로 보여 준다. 임의 서버 주소 입력 UI는 없다. */
@@ -49,6 +50,7 @@ function SessionApp({ manager }: { manager: SessionManager }) {
         () => manager.notificationConsentScope(),
         manager,
         androidNotificationAccess,
+        new CollectionRuntime(() => manager.notificationConsentScope(), manager, androidNotificationAccess, androidCapture),
       ),
   );
   const [workspace] = useState(
@@ -64,11 +66,15 @@ function SessionApp({ manager }: { manager: SessionManager }) {
       ),
   );
   useEffect(() => {
-    const sync = () => workspace.acceptSession(manager.snapshot());
+    const sync = () => {
+      workspace.acceptSession(manager.snapshot());
+      if (!manager.notificationConsentScope()) void enrollment.capture?.stop();
+    };
     sync();
     const unsubscribe = manager.subscribe(sync);
     void manager.restore();
     const listener = AppState.addEventListener("change", (next) => {
+      if (next !== "active") void enrollment.capture?.stop();
       setActive(next === "active");
       if (
         next === "active" &&

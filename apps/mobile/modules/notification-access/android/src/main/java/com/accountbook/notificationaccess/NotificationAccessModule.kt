@@ -13,6 +13,21 @@ import expo.modules.kotlin.functions.Queues
 class NotificationAccessModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("AccountBookNotificationAccess")
+    OnActivityEntersForeground { NotificationAccessService.capture.foreground(true) }
+    OnActivityEntersBackground { NotificationAccessService.capture.foreground(false) }
+    OnDestroy { NotificationAccessService.capture.stop() }
+    AsyncFunction("beginCapture") {
+      NotificationAccessService.capture.foreground(appContext.currentActivity?.hasWindowFocus() == true)
+      NotificationAccessService.capture.begin(System.currentTimeMillis())
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("beginCaptureVerification") { epoch: Int ->
+      NotificationAccessService.capture.beginVerification(epoch)
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("renewCapture") { epoch: Int, ticket: Int ->
+      NotificationAccessService.capture.renew(epoch, ticket)
+    }.runOnQueue(Queues.MAIN)
+    AsyncFunction("stopCapture") { NotificationAccessService.capture.stop() }.runOnQueue(Queues.MAIN)
+    AsyncFunction("captureSnapshot") { NotificationAccessService.capture.snapshot().wire() }.runOnQueue(Queues.MAIN)
     AsyncFunction("getStatus") {
       val context = requireNotNull(appContext.reactContext)
       val component = ComponentName(context, NotificationAccessService::class.java)

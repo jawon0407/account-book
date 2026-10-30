@@ -6,7 +6,7 @@ PC와 모바일에서 사용할 수 있는 보안 우선 동기화형 개인 가
 
 개인 휴대폰 금융 알림과 수기 입력을 기반으로 한 가계부를 먼저 개발합니다. 자동 분류 규칙은 **선택 기능**이며 규칙 없이도 미분류 거래를 기록하고 입출금 합계에 포함합니다. 미분류 안내와 사용자별 계좌·거래 대상·선택적 요일/시간대 규칙을 설계합니다. 실계좌 API·공동 장부·라온 연동·AI 분석은 후속 범위입니다.
 
-[최신 요구사항·선택형 분류 설계](docs/superpowers/specs/2026-10-07-personal-notification-ledger-design.md)와 [클라우드 작업 인수인계](docs/status/2026-10-07-personal-notification-ledger-handoff.ko.md)를 먼저 읽어 주세요. 기존 웹/API 원장은 재사용하지만 별도 모바일 수집·분류 기능은 아직 구현 전입니다. 코드 구현과 설계 목표를 구분합니다.
+[최신 요구사항·선택형 분류 설계](docs/superpowers/specs/2026-10-07-personal-notification-ledger-design.md)와 [클라우드 작업 인수인계](docs/status/2026-10-07-personal-notification-ledger-handoff.ko.md)를 먼저 읽어 주세요. 기존 웹/API 원장은 재사용합니다. Android에는 로그인·수기 장부·동의/대표 기기 설정에 이어, 설정 화면에서 명시적으로 시작하는 KB 입출금 판독 미리보기 기반이 추가됐습니다. 자동 거래 저장·상시 백그라운드 수집·다른 알림 형식의 판독은 아직 후속 작업입니다. [최신 구현·검증 범위](docs/status/2026-10-30-notification-capture-foundation.ko.md)를 참고하고 코드 구현과 설계 목표를 구분합니다.
 
 ## Historical Verification Snapshot (2026-09-08)
 

@@ -1,4 +1,5 @@
 import { requireOptionalNativeModule } from "expo";
+import { createAndroidCapture, type NativeCapture } from "../collector/android-capture";
 import {
   createAndroidNotificationAccess,
   type NativePort,
@@ -7,4 +8,7 @@ import {
 // Expo를 순수 상태 모델과 분리한다. 예전 APK에는 이 모듈이 없으므로 안전한 미지원 상태로 시작한다.
 export const androidNotificationAccess = createAndroidNotificationAccess(
   requireOptionalNativeModule<NativePort>("AccountBookNotificationAccess"),
+);
+export const androidCapture = createAndroidCapture(
+  requireOptionalNativeModule<NativeCapture>("AccountBookNotificationAccess"),
 );

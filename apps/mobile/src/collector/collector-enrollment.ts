@@ -7,6 +7,7 @@ import {
   type NotificationAccessPort,
 } from "./notification-access";
 import { consentPresentation } from "./notification-consent-copy";
+import type { CollectionRuntime } from "./collection-runtime";
 
 type Port = Pick<
   SessionManager,
@@ -37,6 +38,7 @@ export class CollectorEnrollment {
     private readonly getScope: () => AccessScope | null,
     api: Port,
     native: NotificationAccessPort,
+    public readonly capture?: CollectionRuntime,
   ) {
     this.access = new NotificationAccess(getScope, api, native);
     this.settings = new CollectorSettings(api);
@@ -59,6 +61,7 @@ export class CollectorEnrollment {
   }
   /** 화면/계정 경계를 넘는 응답과 토스트를 폐기한다. */
   public stop(): void {
+    void this.capture?.stop();
     this.active = false;
     ++this.epoch;
     this.access.stop();
@@ -66,6 +69,7 @@ export class CollectorEnrollment {
     this.publish(false);
   }
   public async reload(): Promise<void> {
+    await this.capture?.stop();
     if (!this.current(this.epoch) || this.state.busy) return;
     this.cancel();
     const epoch = ++this.epoch;
@@ -91,6 +95,7 @@ export class CollectorEnrollment {
   public prepareCollectorChange(
     action: CollectorChangeInput["action"],
   ): CollectorDialog | null {
+    void this.capture?.stop();
     if (
       !this.current(this.epoch) ||
       this.state.busy ||
@@ -116,6 +121,7 @@ export class CollectorEnrollment {
   }
   /** 동의를 저장하고 필요한 경우 OS 설정만 연다. 대표 기기 API는 호출하지 않는다. */
   public async requestAccess(): Promise<void> {
+    await this.capture?.stop();
     if (!this.current(this.epoch) || this.state.busy) return;
     this.cancel();
     const epoch = ++this.epoch;
@@ -152,6 +158,7 @@ export class CollectorEnrollment {
   }
   /** 별도 지정 버튼에서 확인한 작업만 실행한다. 해제는 동의/OS 접근 없이도 가능하다. */
   public async confirm(): Promise<void> {
+    await this.capture?.stop();
     const confirmation = this.settings.snapshot().confirmation;
     if (!this.current(this.epoch) || this.state.busy || !confirmation) return;
     const epoch = ++this.epoch;
@@ -183,6 +190,7 @@ export class CollectorEnrollment {
   }
   /** 서버 동의를 철회하고 남아 있는 OS 접근을 직접 끌 수 있게 한다. 실패 시에도 OS 해제 경로를 보존한다. */
   public async withdraw(): Promise<void> {
+    await this.capture?.stop();
     if (!this.current(this.epoch) || this.state.busy) return;
     this.cancel();
     const epoch = ++this.epoch;

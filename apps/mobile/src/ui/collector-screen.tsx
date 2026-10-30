@@ -18,6 +18,7 @@ import {
 import { colors, common } from "./theme";
 import { NotificationAccessPanel } from "./notification-access-panel";
 import { CollectorToast } from "./collector-toast";
+import { CollectionRuntimePanel } from "./collection-runtime-panel";
 
 /** @param enrollment 독립 동의/기기 지정 모델. @param onBack 미완료 확인을 취소하고 장부로 돌아가는 동작. */
 export function CollectorScreen({
@@ -98,7 +99,7 @@ export function CollectorScreen({
           알림 수집 설정
         </Text>
         <View style={styles.introduction}>
-          <Text style={styles.sectionTitle}>자동 기록 준비 중</Text>
+          <Text style={styles.sectionTitle}>알림 판독 준비</Text>
           <Text style={common.body}>{COLLECTOR_PREPARATION}</Text>
         </View>
         <View style={styles.section}>
@@ -166,10 +167,11 @@ export function CollectorScreen({
           </Text>
         ) : null}
         <Text style={common.secondary}>
-          기기를 바꾸거나 지정을 해제해도 이미 저장한 거래는 유지돼요. 실제
-          알림을 읽는 기능은 아직 준비 중이에요.
+          기기를 바꾸거나 지정을 해제해도 이미 저장한 거래는 유지돼요. 판독 시작은
+          아래에서 별도로 선택해요.
         </Text>
         <NotificationAccessPanel model={access} enrollment={enrollment} />
+        {enrollment.capture ? <CollectionRuntimePanel model={enrollment.capture} disabled={refreshing} /> : null}
       </ScrollView>
       <CollectorToast message={state.toast} />
     </View>

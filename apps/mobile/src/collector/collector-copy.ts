@@ -5,7 +5,7 @@ import type {
 import { ClientError } from "../api/client-error";
 
 export const COLLECTOR_PREPARATION =
-  "수집 기기 지정·이 기기의 동의 저장·Android 권한 설정을 준비할 수 있어요. 금융 앱·문자·카카오톡 알림을 읽거나 거래로 저장하지 않아요.";
+  "대표 기기·알림 동의·Android 접근을 준비한 뒤 판독을 별도로 시작할 수 있어요. 이 설정 화면에서 지원 형식만 확인하며, 거래를 자동 저장하지 않아요.";
 
 /** @param state 서버가 확인한 지정 상태. 알림 수집 중이라는 표현은 사용하지 않는다. */
 export function collectorStateCopy(state: CollectorState["state"]) {
@@ -44,7 +44,7 @@ export function collectorConfirmationCopy(input: CollectorChangeInput) {
       }
     : {
         title: "이 기기를 지정할까요?",
-        body: "동의와 Android 접근이 확인된 현재 로그인 세션을 수집 기기로 지정해요. 실제 알림 수집은 아직 준비 중이에요.",
+        body: "동의와 Android 접근이 확인된 현재 로그인 세션을 수집 기기로 지정해요. 알림 판독은 별도로 시작해야 해요.",
         confirmLabel: "기기 지정 확인",
       };
 }

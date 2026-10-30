@@ -17,7 +17,7 @@ describe("collector copy", () => {
       "다른 기기가 지정되어 있어요",
     );
     expect(COLLECTOR_PREPARATION).toContain(
-      "알림을 읽거나 거래로 저장하지 않아요",
+      "거래를 자동 저장하지 않아요",
     );
   });
   it("explains remote replacement and deactivation impacts", () => {

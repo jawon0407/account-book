@@ -11,7 +11,7 @@ related_targets:
 
 # Collector settings — Android / Operate
 
-Scope: existing Bookify mobile UI extension; user already requested implementation without routine approval loops. No new brand, assets or package dependencies. Explicit local consent and Android notification-access settings are now connected; actual capture is not implemented.
+Scope: existing Bookify mobile UI extension; user already requested implementation without routine approval loops. No new brand, assets or package dependencies. The latest unit adds explicit foreground-only parsing preview, not background bookkeeping or ledger writes.
 
 ## Direction contract
 
@@ -26,6 +26,13 @@ FIRST VIEWPORT: Back above 24sp title, short readiness statement, verified statu
 FORM: User-pinned existing world, narrow local extension; no seed. Code-led native screen. Signature interaction: explicit impact confirmation before designation changes, never an optimistic switch. No decorative motion.
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+
+## 2026-10-29 capture foundation (current)
+
+- Inherit the existing Operate surface and tokens. Keep designation and permission independent. Add a flat parsing-preview section below permission, not a new nested card or route.
+- Explicit native confirmation discloses actual new-notification reading, KB-only validated format, memory-only result, no server/file writes, and stop-on-leave. Start and stop labels are distinct from notification allow/deny.
+- Show checking, stopped, running, failure and zero-results without claiming ledger persistence. Keep latest extracted result readable and clear it on stop. Standard inherited buttons maintain 48dp targets and text wrapping.
+- No new visual world, raster, motion or global token. Native screenshot/TalkBack/large-font verification remains pending until a safe device test is performed. Existing device screenshots are not evidence for this newly added panel.
 
 ## 2026-10-21 permission guidance extension
 
