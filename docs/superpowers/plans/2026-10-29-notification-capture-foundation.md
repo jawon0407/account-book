@@ -56,3 +56,14 @@ Expected: no activation solely from permission/enrollment and no late callback r
 ## Review focus
 
 Reject late native renew after stop, both JS and Android lifecycle transitions, stale server snapshots and latency exceeding lease; ensure permission/withdrawal paths stop before writes; malicious oversized/custom extras; malformed numeric strings and ambiguous time; unknown packages and card authorization must not become cash records. No UI may claim a transaction was saved.
+
+## Execution status — 2026-10-30
+
+- [x] Task 1: native foreground gate, bounded KB parser, JVM regression checks and Android module compilation.
+- [x] Task 2: session-scoped runtime, explicit preview UI, lifecycle fencing and approved polling/stop-error repairs.
+- [x] Task 3 partial: mobile 309 tests, tooling 14 tests, two type checks, targeted lint, Android export and independent code review. Approved local checkpoint: `c9909a3`; no push.
+- [x] Separate post-commit QA: scoped automated contracts pass at `c9909a3`; previous review's setup-blocked evidence retained separately.
+- [ ] CSO: not assessed; start failed after one correction, with no returned run ID. Tool failure is not evidence of either a vulnerability or safety. Runtime scanner prerequisites are also absent.
+- [ ] Full APK build/install, actual Android callbacks/accessibility/lifecycle and PC browser checks. PC local server was unavailable; no real-device test was performed.
+
+The status report records these limits. Do not mark the complete verification/delivery task or production automatic bookkeeping complete.
