@@ -8,7 +8,7 @@ data class CaptureSnapshot(val running: Boolean, val parsed: Int, val unrecogniz
 }
 
 /** 메모리 한정 수신 경계. monotonic 시계를 쓰며 늦은 갱신은 중지 이후 세대에 적용하지 않는다. */
-class CaptureEngine(private val elapsed: () -> Long) {
+class CaptureEngine(private val allowedSource: String = "com.kbstar.kbbank", private val elapsed: () -> Long) {
   private var epoch = 0
   private var foreground = false
   private var connected = false
@@ -24,8 +24,11 @@ class CaptureEngine(private val elapsed: () -> Long) {
 
   @Synchronized fun foreground(value: Boolean) { foreground = value; if (!value) stop() }
   @Synchronized fun connection(value: Boolean) { connected = value; if (!value) stop() }
-  /** 명시적 시작 의도만 만든다. 검증 전이므로 아직 본문을 읽지 않는다. */
-  @Synchronized fun begin(wallTime: Long = 0): Int { stop(); pending = foreground && connected; startedAt = wallTime; return epoch }
+  /** @param activityResumed 시작 시점의 실제 Activity 활성 상태. 팝업의 입력 초점과 구분한다.
+   * 검증 전이므로 시작 의도만 만들며 아직 본문을 읽지 않는다. */
+  @Synchronized fun begin(wallTime: Long = 0, activityResumed: Boolean = foreground): Int {
+    stop(); foreground = activityResumed; pending = foreground && connected; startedAt = wallTime; return epoch
+  }
   /** 서버 조회 전에 네이티브 시계로 만료를 고정한다. 브리지 지연은 허용 시간을 늘리지 않는다. */
   @Synchronized fun beginVerification(expected: Int): Int {
     if (expected != epoch || !foreground || !connected || (!pending && !allowed())) return -1
@@ -56,7 +59,7 @@ class CaptureEngine(private val elapsed: () -> Long) {
   /** 허용/출처/요약/중복 검사 후에만 content를 호출한다. 원문이나 OS 객체는 대기열에 보관하지 않는다. */
   @Synchronized fun receive(key: String, source: String, summary: Boolean, receivedAt: Long,
     postedAt: Long = receivedAt, content: () -> Pair<String, String>) {
-    if (!allowed() || summary || source != "com.kbstar.kbbank" || postedAt < startedAt) return
+    if (!allowed() || summary || source != allowedSource || postedAt < startedAt) return
     val id = MessageDigest.getInstance("SHA-256").digest("$key:$postedAt".toByteArray()).joinToString("") { "%02x".format(it) }
     if (id in seen) return
     if (seen.size >= 256) { stop(); return }

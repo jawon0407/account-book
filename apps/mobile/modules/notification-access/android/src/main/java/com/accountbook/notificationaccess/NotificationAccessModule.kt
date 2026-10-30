@@ -8,6 +8,8 @@ import android.provider.Settings
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import expo.modules.kotlin.functions.Queues
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 
 /** JS에는 현재 OS 상태와 명시적 설정 이동만 제공한다. 권한을 대신 허용하지 않는다. */
 class NotificationAccessModule : Module() {
@@ -17,8 +19,12 @@ class NotificationAccessModule : Module() {
     OnActivityEntersBackground { NotificationAccessService.capture.foreground(false) }
     OnDestroy { NotificationAccessService.capture.stop() }
     AsyncFunction("beginCapture") {
-      NotificationAccessService.capture.foreground(appContext.currentActivity?.hasWindowFocus() == true)
-      NotificationAccessService.capture.begin(System.currentTimeMillis())
+      val activity = appContext.currentActivity
+      // Alert can still own window focus when its confirm callback runs. A resumed
+      // Activity is the foreground boundary; pause/destroy callbacks still stop capture.
+      val resumed = activity != null && !activity.isFinishing && !activity.isDestroyed &&
+        (activity as? LifecycleOwner)?.lifecycle?.currentState == Lifecycle.State.RESUMED
+      NotificationAccessService.capture.begin(System.currentTimeMillis(), activityResumed = resumed)
     }.runOnQueue(Queues.MAIN)
     AsyncFunction("beginCaptureVerification") { epoch: Int ->
       NotificationAccessService.capture.beginVerification(epoch)

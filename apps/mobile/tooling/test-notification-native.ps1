@@ -8,7 +8,7 @@ $classpath = $jars -join ';'
 $root = Split-Path $PSScriptRoot -Parent
 $output = Join-Path $root 'dist/native-tests'
 New-Item -ItemType Directory -Force -Path $output | Out-Null
-$sources = @(Get-ChildItem -LiteralPath (Join-Path $root 'modules/notification-access/android/src/main/java/com/accountbook/notificationaccess') -Filter '*.kt' | Where-Object { $_.Name -in @('CaptureEngine.kt','CashNotificationParser.kt') } | Select-Object -ExpandProperty FullName)
+$sources = @(Get-ChildItem -LiteralPath (Join-Path $root 'modules/notification-access/android/src/main/java/com/accountbook/notificationaccess') -Filter '*.kt' | Where-Object { $_.Name -in @('CaptureEngine.kt','CashNotificationParser.kt','CaptureSourcePolicy.kt') } | Select-Object -ExpandProperty FullName)
 $sources += Join-Path $root 'modules/notification-access/android/src/test/kotlin/CaptureBehaviorTest.kt'
 & (Join-Path $JavaHome 'bin/java.exe') -cp $classpath org.jetbrains.kotlin.cli.jvm.K2JVMCompiler -no-stdlib -no-reflect -classpath $classpath -d $output @sources
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

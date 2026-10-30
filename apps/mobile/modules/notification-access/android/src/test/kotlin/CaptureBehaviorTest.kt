@@ -2,6 +2,68 @@ package com.accountbook.notificationaccess
 
 /** 합성 자료만 사용한다. kotlin compiler로 실행 가능한 순수 JVM 회귀 시험. */
 fun main() {
+  // A native confirmation dialog takes window focus without pausing the Activity.
+  // Start uses the current Activity lifecycle, not the stale/module-created focus flag.
+  val resumed = CaptureEngine { 100L }
+  resumed.connection(true)
+  val resumedEpoch = resumed.begin(wallTime = 1000L, activityResumed = true)
+  check(resumed.renew(resumedEpoch, resumed.beginVerification(resumedEpoch))) {
+    "An explicitly confirmed start in a resumed Activity must be allowed"
+  }
+  val pausedEpoch = resumed.begin(wallTime = 1001L, activityResumed = false)
+  check(resumed.beginVerification(pausedEpoch) == -1 && !resumed.snapshot().running) {
+    "A paused/missing Activity must reject start and clear the earlier permit"
+  }
+  resumed.connection(false)
+  val disconnectedEpoch = resumed.begin(wallTime = 1002L, activityResumed = true)
+  check(resumed.beginVerification(disconnectedEpoch) == -1)
+  resumed.connection(true)
+  check(resumed.beginVerification(disconnectedEpoch) == -1) // No auto-start on rebind.
+  val explicitEpoch = resumed.begin(wallTime = 1003L, activityResumed = true)
+  check(resumed.renew(explicitEpoch, resumed.beginVerification(explicitEpoch)))
+  resumed.foreground(false)
+  resumed.foreground(true)
+  check(!resumed.snapshot().running && resumed.beginVerification(explicitEpoch) == -1)
+
+  // Test-only OS notifications must never broaden the normal bank-source policy.
+  val normal = CaptureSourcePolicy(syntheticOnly = false)
+  val synthetic = CaptureSourcePolicy(syntheticOnly = true)
+  check(normal.packageName == "com.kbstar.kbbank")
+  check(normal.accepts("com.kbstar.kbbank", null))
+  check(!normal.accepts("com.android.shell", "account-book-test-expense"))
+  check(synthetic.packageName == "com.android.shell")
+  check(synthetic.accepts("com.android.shell", "account-book-test-expense"))
+  listOf(null, "", "other-tag", "account-book-test-").forEach {
+    check(!synthetic.accepts("com.android.shell", it))
+  }
+  check(!synthetic.accepts("com.kbstar.kbbank", "account-book-test-expense"))
+  check(!synthetic.accepts("chat.app", "account-book-test-expense"))
+  val syntheticEngine = CaptureEngine(synthetic.packageName) { 100L }
+  syntheticEngine.foreground(true); syntheticEngine.connection(true)
+  val syntheticEpoch = syntheticEngine.begin()
+  check(syntheticEngine.renew(syntheticEpoch, syntheticEngine.beginVerification(syntheticEpoch)))
+  var syntheticReads = 0
+  val fakeBody = "가*나 10/29 15:53 123456-**-***789 가상상점\n체크카드출금 19,800 잔액230,121"
+  fun deliver(source: String, tag: String?) {
+    if (!synthetic.accepts(source, tag)) return
+    syntheticEngine.receive("synthetic", source, false, 1000L) {
+      syntheticReads++; "출금 19,800원" to fakeBody
+    }
+  }
+  deliver(normal.packageName, "account-book-test-expense")
+  deliver(synthetic.packageName, null)
+  check(syntheticReads == 0)
+  // Engine itself keeps the configured source, without relabeling shell as a bank.
+  syntheticEngine.receive("bank", normal.packageName, false, 1000L) {
+    syntheticReads++; "출금 19,800원" to fakeBody
+  }
+  check(syntheticReads == 0)
+  deliver(synthetic.packageName, "account-book-test-expense")
+  check(syntheticReads == 1 && syntheticEngine.snapshot().parsed == 1)
+  syntheticEngine.stop()
+  deliver(synthetic.packageName, "account-book-test-after-stop")
+  check(syntheticReads == 1 && syntheticEngine.snapshot().last == null)
+
   var now = 100L
   val engine = CaptureEngine { now }
   var reads = 0

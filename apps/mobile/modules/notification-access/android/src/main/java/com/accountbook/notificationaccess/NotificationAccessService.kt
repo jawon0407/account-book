@@ -9,13 +9,14 @@ import android.os.SystemClock
 class NotificationAccessService : NotificationListenerService() {
   companion object {
     @Volatile var connected = false; private set
-    val capture = CaptureEngine { SystemClock.elapsedRealtime() }
+    private val sourcePolicy = CaptureSourcePolicy(BuildConfig.SYNTHETIC_CAPTURE_ONLY)
+    val capture = CaptureEngine(sourcePolicy.packageName) { SystemClock.elapsedRealtime() }
   }
   override fun onListenerConnected() { super.onListenerConnected(); connected = true; capture.connection(true) }
   override fun onListenerDisconnected() { connected = false; capture.connection(false); super.onListenerDisconnected() }
   override fun onDestroy() { connected = false; capture.connection(false); super.onDestroy() }
   override fun onNotificationPosted(sbn: StatusBarNotification?) {
-    if (sbn == null || sbn.packageName == packageName) return
+    if (sbn == null || sbn.packageName == packageName || !sourcePolicy.accepts(sbn.packageName, sbn.tag)) return
     val notification = sbn.notification ?: return
     capture.receive(sbn.key, sbn.packageName,
       notification.flags and Notification.FLAG_GROUP_SUMMARY != 0,
