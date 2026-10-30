@@ -12,6 +12,7 @@ const rsa = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const now = new Date("2026-07-23T00:00:00.000Z");
 
 const validInput = {
+  clientChannel: "web",
   body: new Uint8Array(),
   contentType: null,
   method: "GET",
@@ -62,6 +63,7 @@ describe("DelegatedJwtSigner", () => {
       typ: "at+jwt",
     });
     expect(verified.payload).toEqual({
+      chn: "web",
       aud: "urn:account-book:api",
       exp: 1_784_764_830,
       iat: 1_784_764_800,
@@ -94,6 +96,17 @@ describe("DelegatedJwtSigner", () => {
 
     expect(equivalentPayload.rbh).toBe(firstPayload.rbh);
     expect(differentPayload.rbh).not.toBe(firstPayload.rbh);
+  });
+
+  it.each(["web", "android"] as const)("signs the trusted %s session channel", async clientChannel => {
+    const signed = await signer().sign({ ...validInput, clientChannel });
+    const verified = await jwtVerify(signed.token, p256.publicKey, { currentDate: now });
+    expect(verified.payload.chn).toBe(clientChannel);
+  });
+
+  it.each([undefined, null, "ios", "Android", ["android"], "", 1])("rejects missing or invalid session channel %#", async clientChannel => {
+    await expect(signer().sign({ ...validInput, clientChannel } as unknown as typeof validInput))
+      .rejects.toThrow(/^DELEGATED_JWT_INVALID$/u);
   });
 
   it("changes the request binding for method, body, and allowed content type", async () => {

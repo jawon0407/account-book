@@ -66,7 +66,7 @@ describe("bank least-privilege access on disposable PostgreSQL", () => {
     const result = await database.admin.query(`select relname,relrowsecurity,relforcerowsecurity,
       pg_get_userbyid(relowner) as owner from pg_class c join pg_namespace n on n.oid=c.relnamespace
       where n.nspname='app_bank' and c.relkind='r'`);
-    expect(result.rows).toHaveLength(3);
+    expect(result.rows.map((row) => row.relname).sort()).toEqual(["bank_connection_credentials", "bank_connection_requests", "bank_connections", "bank_request_limits"]);
     for (const row of result.rows) {
       expect(row.relrowsecurity).toBe(true);
       expect(row.relforcerowsecurity).toBe(true);

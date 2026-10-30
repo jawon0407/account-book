@@ -65,9 +65,14 @@ function parseDatabaseUrl(value: string | undefined): string {
   } catch {
     throw new Error("API_CONFIGURATION_INVALID");
   }
+  // Supavisor는 DB 역할 뒤에 프로젝트 식별자를 붙여 tenant를 선택한다.
+  // 임의 호스트나 다른 역할로 이 예외가 확장되지 않도록 주소와 포트를 함께 제한한다.
+  const supavisorRole = /^app_api\.[a-z]{20}$/u.test(url.username)
+    && /^[a-z0-9-]+\.pooler\.supabase\.com$/u.test(url.hostname)
+    && (url.port === "5432" || url.port === "6543");
   if (
     (url.protocol !== "postgres:" && url.protocol !== "postgresql:")
-    || url.username !== "app_api"
+    || (url.username !== "app_api" && !supavisorRole)
     || url.password === ""
     || url.hash !== ""
     || url.hostname === ""

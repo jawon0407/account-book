@@ -4,10 +4,12 @@ const SELECTOR_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 export const SESSION_COOKIE_NAME = "__Host-ab_session";
 /** The only cookie names this authentication boundary may create or remove. */
 export const INTERACTION_COOKIE_NAME = "__Host-ab_interaction";
+/** 가입·재설정의 브라우저 요청 예산을 상호작용 회전과 독립적으로 유지하는 쿠키 이름입니다. */
+export const AUTH_BUDGET_COOKIE_NAME = "__Host-ab_auth_budget";
 
 /** A host-only opaque authentication cookie suitable for response serialization. */
 export type AuthCookie = Readonly<{
-  name: typeof SESSION_COOKIE_NAME | typeof INTERACTION_COOKIE_NAME;
+  name: typeof SESSION_COOKIE_NAME | typeof INTERACTION_COOKIE_NAME | typeof AUTH_BUDGET_COOKIE_NAME;
   value: string;
   httpOnly: true;
   secure: true;
@@ -77,6 +79,18 @@ export function sessionCookie(value: string, secure: boolean): AuthCookie {
  */
 export function interactionCookie(value: string, secure: boolean): AuthCookie {
   return cookie(INTERACTION_COOKIE_NAME, value, secure);
+}
+
+/**
+ * 가입·재설정 요청 제한의 불투명 식별자를 10분 유지합니다. CSRF나 로그인 자격으로 사용하지 않습니다.
+ * 쿠키를 지우는 악성 클라이언트는 새 식별자를 얻을 수 있으므로 이메일·전역 제한도 함께 적용해야 합니다.
+ * @param value 상호작용 식별자와 별도로 생성한 브라우저 예산 식별자.
+ * @param secure 반드시 true인 보안 설정.
+ * @returns 보안 속성과 maxAge 600초를 가진 쿠키 객체.
+ * @throws 검증 실패 시 AUTH_COOKIE_INVALID.
+ */
+export function authBudgetCookie(value: string, secure: boolean): AuthCookie & Readonly<{ maxAge: 600 }> {
+  return { ...cookie(AUTH_BUDGET_COOKIE_NAME, value, secure), maxAge: 600 };
 }
 
 /** Removes only a known authentication cookie while preserving its host-only scope. */

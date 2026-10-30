@@ -9,16 +9,26 @@ export const DELEGATED_JWT_MAX_BYTES = 4096;
 /** Single JSON body limit for Fastify's parser and guard, keeping their validation boundary aligned. */
 export const DELEGATED_JSON_BODY_MAX_BYTES = 32_768;
 
+/** 서버가 검증한 인증 경로이며, 설치된 앱이나 기기의 진위를 증명하는 값은 아니다. */
+export const DelegatedClientChannelSchema = z.enum(["web", "android"]);
+export type DelegatedClientChannel = z.infer<typeof DelegatedClientChannelSchema>;
+
 /** Restricts `scope` to the least-privilege capability the BFF may exercise, not a general user role. */
 export const DelegatedScopeSchema = z.enum([
   "me:read",
+  "profile:read",
+  "profile:write",
   "account:read",
   "account:write",
   "category:read",
   "category:write",
   "transaction:read",
   "transaction:write",
+  "collector:read",
+  "collector:write",
   "dashboard:read",
+  "bank-connection:read",
+  "bank-connection:write",
 ]);
 export type DelegatedScope = z.infer<typeof DelegatedScopeSchema>;
 

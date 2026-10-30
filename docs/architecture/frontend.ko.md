@@ -8,8 +8,8 @@
 
 | 구분 | 현재 소스에서 확인할 수 있는 것 | 계획 또는 제외 |
 |---|---|---|
-| 화면 | 로그인, 가입, 이메일 확인 안내, 재설정 메일 요청, 새 비밀번호 설정 | 가계부 app shell·원장 화면은 계획. `/app`은 현재 404 |
-| HTTP | ky 공통 클라이언트와 같은 출처 `/api` BFF | 금융 화면용 query/mutation 연결은 후속 작업 |
+| 화면 | 인증 화면, 계좌·분류·닉네임 관리, `/app/transactions` 거래 목록·수입/지출 입력·수정·삭제 확인 | 시작 잔액·이체·대시보드는 후속 |
+| HTTP | ky 공통 클라이언트와 같은 출처 `/api` BFF, 사용자별 금융 query/mutation | 은행·이체 화면 연결은 후속 |
 | 상태 | TanStack Query와 React 로컬 state/ref | Zustand는 아직 없음. 여러 화면 공통의 비서버 UI 상태가 필요할 때 검토 |
 | 모바일 | 웹·모바일이 공유할 계약 설계 | React Native·Expo 및 모바일 인증/화면은 미구현 |
 | 저장·오프라인 | 서버 원장을 기준으로 하는 설계, 현재 QueryClient는 메모리 사용 | PWA 설치, manifest, service worker, 영구 금융 캐시, 오프라인 쓰기는 범위에서 제외 |
@@ -60,7 +60,7 @@ LoginPage
   → ky POST /api/auth/sign-in + X-CSRF-Token
   → route.POST(request) → handleAuthRoute("signIn", request)
   → 서버 AuthController.signIn → 인증/세션 처리
-  → 검증된 성공 응답 → onSuccess → /app (현재 미구현, 404)
+  → 검증된 성공 응답 → onSuccess → /app → 현재 사용자 확인 → 본인 계좌 목록
 ```
 
 ### 4.1 화면이 요청 함수를 전달한다
@@ -112,7 +112,7 @@ LoginPage
 
 입력·Origin·CSRF·인증·세션 처리는 서버 계층의 책임이다. UI에서 검사했어도 서버가 다시 검증해야 한다. 브라우저가 금융 테이블이나 서비스 자격증명에 직접 접근하지 않는다.
 
-성공 후 `LoginPage`는 `window.location.assign("/app")`를 호출한다. 현재 `/app` 페이지는 없다. 따라서 “로그인 요청 성공”과 “가계부 화면 완성”을 별개로 읽어야 한다.
+성공 후 `LoginPage`는 `window.location.assign("/app")`를 호출한다. 2026-09-30부터 `/app`은 사용자별 인증 경계를 거쳐 본인 계좌를 관리한다. [장부 코드 흐름](../guides/core-web-development.ko.md)에서 ky·React Query·CSRF·계정 전환 차단을 확인한다. 계좌 관리 구현은 거래·은행·모바일까지 완성됐다는 뜻이 아니다.
 
 ## 5. 현재 사용자 조회와 딱 한 번의 갱신
 
@@ -134,7 +134,8 @@ TanStack Query와 ky의 일반 자동 재시도는 꺼져 있다. 위 갱신은 
 | `/login` | `LoginPage` → `SignInForm` / `ProviderButtons` | 이메일 로그인은 `/app` 이동 |
 | `/sign-up` | `SignUpPage` → `SignUpForm` / `ProviderButtons` | 이메일 가입 수락 시 `/verify-email` 이동 |
 | `/verify-email` | `VerifyEmailPage` → `AuthStatus` | 안내만 표시. 여기서 메일을 발송하거나 인증 여부를 조회하지 않음 |
-| `/forgot-password` | `ForgotPasswordPage` → `PasswordResetRequestForm` | 계정 존재 여부를 숨긴 메일 안내 |
+| `/forgot-password` | `ForgotPasswordPage` → `PasswordResetRequestForm` | 비로그인 공개 요청. 사용자 승인 정책에 따라 미가입은 404 오류, 접수는 발송 요청 안내 |
+| `/forgot-password/invalid-link` | `InvalidRecoveryLinkPage` | 만료·실패 복구 링크의 공개 안내와 재요청 이동. 로그인 불필요 |
 | `/reset-password` | `ResetPasswordPage` → `PasswordUpdateForm` | 비밀번호 변경 후 `/login` 이동 |
 
 OAuth는 외부 계정으로 로그인하는 절차다. `ProviderButtons.begin(provider, label)`은 전체 공급자 버튼을 진행 상태로 잠그고 `start(provider)`를 기다린다. query 계층과 버튼 양쪽에서 계속 경로를 확인한다.
@@ -145,7 +146,7 @@ OAuth는 외부 계정으로 로그인하는 절차다. `ProviderButtons.begin(p
 
 ## 7. BFF 라우트 참조
 
-현재 라우트 모듈은 14개다. `[provider]`는 동적 경로 한 개를 뜻하며 google/kakao/naver별 파일 세 개가 아니다.
+아래 표는 기존 인증 라우트 14개를 설명한다. 별도로 준비 상태를 알려 주는 `GET /api/auth/providers`와 장부 라우트 8개(12작업)가 있다. 장부 거래 경로는 `GET/POST /api/transactions`다. `[provider]`는 동적 경로 한 개를 뜻하며 google/kakao/naver별 파일 세 개가 아니다.
 
 | HTTP 메서드·경로 | 어댑터에 고정 전달하는 작업 |
 |---|---|
@@ -174,7 +175,7 @@ OAuth는 외부 계정으로 로그인하는 절차다. `ProviderButtons.begin(p
 
 `createQueryClient`는 메모리 상태 관리자 한 개를 생성한다. `Providers`는 `useState(createQueryClient)`로 마운트 동안 같은 인스턴스를 사용한다. 영구 저장 연결이나 Zustand 저장소는 만들지 않는다.
 
-“영구 저장하지 않는다”와 “메모리에 절대 남지 않는다”는 다르다. TanStack mutation에는 입력 variables 등이 메모리에 남을 수 있으므로 비밀번호·토큰이 메모리에 전혀 없다고 설명하면 안 된다. 현재 `signOutMutationOptions`는 로그아웃 요청 설정이며 query 캐시 제거를 직접 수행하지 않는다. 향후 금융 화면에서 로그아웃·계정 전환 시 캐시 폐기를 별도로 연결해야 한다.
+“영구 저장하지 않는다”와 “메모리에 절대 남지 않는다”는 다르다. TanStack mutation에는 입력 variables 등이 메모리에 남을 수 있으므로 비밀번호·토큰이 메모리에 전혀 없다고 설명하면 안 된다. `signOutMutationOptions` 자체는 로그아웃 요청 설정이다. 금융 화면의 `LedgerAuthBoundary`는 사용자별 QueryClient를 사용하며, 세션 재확인/변경/로그아웃 시 기존 화면·폼을 숨기고 금융 캐시를 폐기한다. [거래 개발 흐름](../guides/transaction-development.ko.md)에서 현재 연결을 확인한다.
 
 `apiError(error)`는 공개 오류 봉투를 확인한다. `safeErrorMessage(error)`는 그중 허용된 code만 한국어로 바꾼다. 원본 공급자 메시지, 응답 본문, requestId를 화면에 그대로 표시하지 않는다. `AuthStatus`는 오류를 alert, 성공·진행을 status로 읽히게 하고, 폼은 오류 입력을 aria 속성과 포커스로 연결한다.
 

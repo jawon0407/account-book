@@ -5,11 +5,16 @@ dist/
 build/
 coverage/
 output/
+test-results/
+playwright-report/
+.playwright-cli/
 
 # Local environment and secrets
 .env
 .env.*
 !.env.example
+# Next.js local HTTPS certificates (may include private keys)
+apps/web/certificates/
 
 # Local design and brainstorming sessions
 .superpowers/
@@ -24,3 +29,16 @@ Thumbs.db
 
 # Logs
 *.log
+.gstack/
+
+# Native generated projects, Expo cache and signing material
+apps/mobile/.expo/
+apps/mobile/android/
+apps/mobile/ios/
+*.jks
+*.keystore
+*.p12
+*.mobileprovision
+
+# Supabase CLI local metadata
+supabase/.temp/

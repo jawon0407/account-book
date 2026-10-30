@@ -10,17 +10,28 @@ import {
   type SignInInput,
   type SignUpInput,
 } from "@account-book/contracts";
-import { useRef, useState, type FormEvent } from "react";
+import { useRef, useState, useSyncExternalStore, type FormEvent } from "react";
 import type { z } from "zod";
 import { AuthStatus } from "./auth-status.js";
 
-type Feedback = Readonly<{ kind: "pending" | "success" | "error"; message: string }>;
+type Feedback = Readonly<{ kind: "pending" | "success" | "error"; message: string; action?: "login" | "recovery" }>;
 type FieldErrors = Readonly<{ email?: string; password?: string }>;
 type Credentials = SignInInput | SignUpInput;
 type CredentialsFormProps<T extends Credentials> = Readonly<{ submit(input: T): Promise<unknown>; onSuccess?(): void }>;
 type SingleFormProps<T> = Readonly<{ submit(input: T): Promise<unknown>; onSuccess?(): void }>;
 
+const subscribeToHydration = () => () => {};
+const clientReady = () => true;
+const serverNotReady = () => false;
+
+/** SSR/초기 hydration 중 제출을 잠근다. 브라우저 이벤트 처리기가 준비된 뒤에만 true다. */
+function useAuthFormReady(): boolean {
+  return useSyncExternalStore(subscribeToHydration, clientReady, serverNotReady);
+}
+
 const ERROR_MESSAGES = new Map<string, string>([
+  ["AUTH_ACCOUNT_EXISTS", "이미 가입된 이메일이에요. 기존 계정으로 로그인해 주세요."],
+  ["AUTH_ACCOUNT_NOT_FOUND", "존재하지 않는 계정이에요. 이메일을 확인하거나 새로 가입해 주세요."],
   ["AUTH_INVALID_CREDENTIALS", "이메일 또는 비밀번호를 확인해 주세요."],
   ["AUTH_EMAIL_VERIFICATION_REQUIRED", "메일함에서 이메일 인증을 먼저 완료해 주세요."],
   ["AUTH_SESSION_EXPIRED", "인증 시간이 만료되었어요. 다시 로그인해 주세요."],
@@ -41,6 +52,21 @@ function safeErrorMessage(error: unknown): string {
     return "요청을 완료하지 못했어요. 잠시 후 다시 시도해 주세요.";
   }
   return ERROR_MESSAGES.get(error.code) ?? "요청을 완료하지 못했어요. 잠시 후 다시 시도해 주세요.";
+}
+
+/** @param error 공개 오류만 읽는다. @param recovery 복구 폼이면 로그인 아닌 재설정 링크를 안내한다. */
+function errorFeedback(error: unknown, recovery = false): Feedback {
+  const code = error !== null && typeof error === "object" && "code" in error ? error.code : undefined;
+  if (recovery && ["AUTH_OAUTH_TRANSACTION_INVALID", "AUTH_SESSION_EXPIRED", "AUTH_CSRF_REJECTED"].includes(String(code))) {
+    return { kind: "error", message: "재설정 링크가 만료되었거나 복구 확인이 끝나지 않았어요. 새 링크를 요청해 주세요.", action: "recovery" };
+  }
+  return { kind: "error", message: safeErrorMessage(error), ...(code === "AUTH_ACCOUNT_EXISTS" ? { action: "login" as const } : {}) };
+}
+
+/** @param value 폼의 상태와 고정된 후속 동작. 외부 URL이나 오류 원문은 렌더링하지 않는다. */
+function FormFeedback({ value }: Readonly<{ value: Feedback | null }>) {
+  if (value === null) return null;
+  return <><AuthStatus kind={value.kind}>{value.message}</AuthStatus>{value.action === "login" ? <a href="/login">기존 계정으로 로그인</a> : value.action === "recovery" ? <a href="/forgot-password">재설정 링크 다시 받기</a> : null}</>;
 }
 
 /**
@@ -98,6 +124,7 @@ function CredentialsForm<T extends Credentials>({
   const [errors, setErrors] = useState<FieldErrors>({});
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const isPending = feedback?.kind === "pending";
+  const ready = useAuthFormReady();
 
   /**
    * 기본 폼 이동을 막고 이메일/비밀번호 검증 후 주입된 요청을 한 번 실행한다.
@@ -124,12 +151,13 @@ function CredentialsForm<T extends Credentials>({
       setFeedback({ kind: "success", message: successMessage });
       onSuccess?.();
     } catch (error) {
-      setFeedback({ kind: "error", message: safeErrorMessage(error) });
+      setFeedback(errorFeedback(error));
     }
   }
 
   return (
-    <form className="auth-form" noValidate onSubmit={(event) => void handleSubmit(event)}>
+    <form className="auth-form" method="post" noValidate onSubmit={(event) => void handleSubmit(event)}>
+      <noscript>안전한 인증을 위해 JavaScript를 켜고 페이지를 다시 열어 주세요.</noscript>
       <div className="field-group">
         <label htmlFor={`${kind}-email`}>이메일</label>
         <input
@@ -160,11 +188,11 @@ function CredentialsForm<T extends Credentials>({
         <p className="field-hint">12자 이상 입력해 주세요.</p>
         {errors.password === undefined ? null : <p className="field-error" id={`${kind}-password-error`}>{errors.password}</p>}
       </div>
-      <button className="primary-button" disabled={isPending} type="submit">
+      <button className="primary-button" disabled={!ready || isPending} type="submit">
         <span>{isPending ? pendingLabel : buttonLabel}</span>
         {isPending ? <span className="pending-indicator" aria-hidden="true">…</span> : null}
       </button>
-      {feedback === null ? null : <AuthStatus kind={feedback.kind}>{feedback.message}</AuthStatus>}
+      <FormFeedback value={feedback} />
     </form>
   );
 }
@@ -190,13 +218,14 @@ export function SignUpForm(props: CredentialsFormProps<SignUpInput>) {
 /**
  * 비밀번호 복구 메일을 요청하는 이메일 입력 폼이다.
  * @param props - submit({email})은 요청 Promise, onSuccess는 요청 수락 후 실행할 선택 callback이다.
- * @returns 이메일 폼과 상태 안내. 계정 존재 여부와 무관한 성공 문구를 사용한다.
+ * @returns 이메일 폼과 상태 안내. 서버의 미가입 오류는 사용자 승인 정책에 따라 표시한다.
  */
 export function PasswordResetRequestForm({ submit, onSuccess }: SingleFormProps<PasswordResetRequestInput>) {
   const emailRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const isPending = feedback?.kind === "pending";
+  const ready = useAuthFormReady();
 
   /**
    * 이메일을 검증하고 복구 메일 요청을 실행한다.
@@ -219,7 +248,7 @@ export function PasswordResetRequestForm({ submit, onSuccess }: SingleFormProps<
     setFeedback({ kind: "pending", message: "재설정 안내를 준비하고 있어요." });
     try {
       await submit(parsed.data);
-      setFeedback({ kind: "success", message: "계정이 있다면 재설정 메일을 보냈어요. 메일함을 확인해 주세요." });
+      setFeedback({ kind: "success", message: "재설정 메일 발송을 요청했어요. 받은 편지함과 스팸함을 확인해 주세요. 소셜로 가입했다면 해당 소셜 로그인을 이용할 수도 있어요." });
       onSuccess?.();
     } catch (caught) {
       setFeedback({ kind: "error", message: safeErrorMessage(caught) });
@@ -227,14 +256,15 @@ export function PasswordResetRequestForm({ submit, onSuccess }: SingleFormProps<
   }
 
   return (
-    <form className="auth-form" noValidate onSubmit={(event) => void handleSubmit(event)}>
+    <form className="auth-form" method="post" noValidate onSubmit={(event) => void handleSubmit(event)}>
+      <noscript>안전한 인증을 위해 JavaScript를 켜고 페이지를 다시 열어 주세요.</noscript>
       <div className="field-group">
         <label htmlFor="reset-request-email">이메일</label>
         <input aria-describedby={error === null ? undefined : "reset-request-email-error"} aria-invalid={error === null ? undefined : true} autoComplete="email" id="reset-request-email" name="email" onChange={() => setError(null)} ref={emailRef} type="email" />
         {error === null ? null : <p className="field-error" id="reset-request-email-error">{error}</p>}
       </div>
-      <button className="primary-button" disabled={isPending} type="submit"><span>{isPending ? "안내 준비 중" : "재설정 링크 받기"}</span>{isPending ? <span className="pending-indicator" aria-hidden="true">…</span> : null}</button>
-      {feedback === null ? null : <AuthStatus kind={feedback.kind}>{feedback.message}</AuthStatus>}
+      <button className="primary-button" disabled={!ready || isPending} type="submit"><span>{isPending ? "안내 준비 중" : "재설정 링크 받기"}</span>{isPending ? <span className="pending-indicator" aria-hidden="true">…</span> : null}</button>
+      <FormFeedback value={feedback} />
     </form>
   );
 }
@@ -249,6 +279,7 @@ export function PasswordUpdateForm({ submit, onSuccess }: SingleFormProps<Passwo
   const [error, setError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Feedback | null>(null);
   const isPending = feedback?.kind === "pending";
+  const ready = useAuthFormReady();
 
   /**
    * 새 비밀번호 계약을 검사하고 주입된 변경 요청을 실행한다.
@@ -271,23 +302,24 @@ export function PasswordUpdateForm({ submit, onSuccess }: SingleFormProps<Passwo
     setFeedback({ kind: "pending", message: "새 비밀번호를 안전하게 저장하고 있어요." });
     try {
       await submit(parsed.data);
-      setFeedback({ kind: "success", message: "비밀번호를 변경했어요. 새 비밀번호로 로그인해 주세요." });
+      setFeedback({ kind: "success", message: "비밀번호를 변경했어요. 새 비밀번호로 로그인해 주세요. 보안 적용으로 바로 로그인되지 않으면 1~2분 후 다시 시도해 주세요." });
       onSuccess?.();
     } catch (caught) {
-      setFeedback({ kind: "error", message: safeErrorMessage(caught) });
+      setFeedback(errorFeedback(caught, true));
     }
   }
 
   return (
-    <form className="auth-form" noValidate onSubmit={(event) => void handleSubmit(event)}>
+    <form className="auth-form" method="post" noValidate onSubmit={(event) => void handleSubmit(event)}>
+      <noscript>안전한 인증을 위해 JavaScript를 켜고 페이지를 다시 열어 주세요.</noscript>
       <div className="field-group">
         <label htmlFor="new-password">새 비밀번호</label>
         <input aria-describedby={error === null ? undefined : "new-password-error"} aria-invalid={error === null ? undefined : true} autoComplete="new-password" id="new-password" minLength={12} name="password" onChange={() => setError(null)} ref={passwordRef} type="password" />
         <p className="field-hint">12자 이상 입력해 주세요.</p>
         {error === null ? null : <p className="field-error" id="new-password-error">{error}</p>}
       </div>
-      <button className="primary-button" disabled={isPending} type="submit"><span>{isPending ? "변경 중" : "비밀번호 변경"}</span>{isPending ? <span className="pending-indicator" aria-hidden="true">…</span> : null}</button>
-      {feedback === null ? null : <AuthStatus kind={feedback.kind}>{feedback.message}</AuthStatus>}
+      <button className="primary-button" disabled={!ready || isPending} type="submit"><span>{isPending ? "변경 중" : "비밀번호 변경"}</span>{isPending ? <span className="pending-indicator" aria-hidden="true">…</span> : null}</button>
+      <FormFeedback value={feedback} />
     </form>
   );
 }
