@@ -9,7 +9,11 @@ const TEST_EMAIL = "verified@example.test";
 const TEST_PASSWORD = "correct horse battery staple";
 const TEST_REFRESH_TOKEN = "e2e-provider-refresh-token-must-never-reach-browser";
 const USER_ID = "123e4567-e89b-42d3-a456-426614174001";
+const SECOND_TEST_EMAIL = "second@example.test";
+const SECOND_USER_ID = "123e4567-e89b-42d3-a456-426614174003";
 const MAX_BODY_BYTES = 4096;
+// 합성 IdP만의 세션 저장소. 실제 공급자/사용자 데이터와 연결하지 않는다.
+const refreshSessions = new Map<string, { email: string; userId: string; sessionId: string }>();
 
 const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
 const publicJwk = {
@@ -63,7 +67,7 @@ function credentials(value: unknown): value is Readonly<{ email: string; passwor
   if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return Object.keys(record).sort().join(",") === "email,password"
-    && record.email === TEST_EMAIL
+    && (record.email === TEST_EMAIL || record.email === SECOND_TEST_EMAIL)
     && record.password === TEST_PASSWORD;
 }
 
@@ -92,10 +96,17 @@ const server = createServer(async (request, response) => {
     try {
       if (request.headers["content-type"] !== "application/json") throw new Error("IDP_REQUEST_INVALID");
       const input = await body(request);
-      if (!credentials(input)) return json(response, 401, { code: "AUTH_INVALID_CREDENTIALS" });
+      const refresh = input !== null && typeof input === "object" && !Array.isArray(input) && Object.keys(input).join(",") === "refreshToken" && typeof (input as { refreshToken?: unknown }).refreshToken === "string" ? (input as { refreshToken: string }).refreshToken : null;
+      const identity = credentials(input)
+        ? { email: input.email, userId: input.email === SECOND_TEST_EMAIL ? SECOND_USER_ID : USER_ID, sessionId: randomUUID() }
+        : refresh === null ? undefined : refreshSessions.get(refresh);
+      if (!identity) return json(response, 401, { code: "AUTH_INVALID_CREDENTIALS" });
+      const { userId, email, sessionId: supabaseSessionId } = identity;
+      if (refresh !== null) refreshSessions.delete(refresh);
+      const refreshToken = `${TEST_REFRESH_TOKEN}:${randomUUID()}`;
+      refreshSessions.set(refreshToken, identity);
       const issuedAtSeconds = Math.floor(Date.now() / 1000);
       const accessTokenExpiresAt = new Date((issuedAtSeconds + 300) * 1000);
-      const supabaseSessionId = randomUUID();
       return json(response, 200, {
         accessToken: token({
           aud: AUDIENCE,
@@ -103,14 +114,14 @@ const server = createServer(async (request, response) => {
           iat: issuedAtSeconds,
           iss: ISSUER,
           session_id: supabaseSessionId,
-          sub: USER_ID,
+          sub: userId,
         }),
         accessTokenExpiresAt: accessTokenExpiresAt.toISOString(),
         issuedAtSeconds,
-        refreshToken: TEST_REFRESH_TOKEN,
+        refreshToken,
         supabaseSessionId,
-        user: { email: TEST_EMAIL, emailVerified: true, id: USER_ID },
-        userId: USER_ID,
+        user: { email, emailVerified: true, id: userId },
+        userId,
       });
     } catch {
       return json(response, 400, { code: "AUTH_INVALID_CREDENTIALS" });

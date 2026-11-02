@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
+import { PROVIDER_CLOCK_SKEW_SECONDS } from "../security/provider-time.js";
 
 type TokenEnvelope = Readonly<{ version: 1; keyId: string; iv: string; ciphertext: string; tag: string }>;
 type SessionRecord = Readonly<{
@@ -16,6 +17,8 @@ type SessionRecord = Readonly<{
   revokedAt: Date | null;
   revocationPendingAt: Date | null;
   rotationVersion: number;
+  clientChannel: "web" | "android";
+  deviceId: string | null;
 }>;
 
 type TokenPair = Readonly<{
@@ -36,6 +39,7 @@ type RotateInput = Readonly<{
   supabaseSessionId: string;
   accessTokenExpiresAt: Date;
   now: Date;
+  selectorRotation?: Readonly<{ expectedHash: Uint8Array; replacementHash: Uint8Array; deviceId: string }>;
 }>;
 
 const serviceModule = await import("./session-service.js").catch(() => ({} as Record<string, unknown>));
@@ -46,10 +50,11 @@ const SessionService = serviceModule.SessionService as
       refresher: (refreshToken: string) => Promise<TokenPair>,
       createId?: () => string,
       clock?: () => Date,
+      clientChannel?: "web" | "android",
     ) => {
-      create(tokens: TokenPair, now: Date): Promise<{ selector: string; sessionId: string }>;
+      create(tokens: TokenPair, now: Date, deviceId?: string): Promise<{ selector: string; sessionId: string }>;
       resolve(selector: string, now: Date): Promise<{ accessToken: string; refreshToken: string; sessionId: string }>;
-      refresh(selector: string, now: Date): Promise<{ status: "refreshed" | "superseded" }>;
+      refresh(selector: string, now: Date): Promise<{ status: "refreshed" | "superseded"; selector?: string }>;
       revokeCurrent(selector: string, now: Date): Promise<boolean>;
       revokeAllForUser(userId: string, now: Date): Promise<number>;
       markRevocationPending(sessionId: string, now: Date): Promise<void>;
@@ -167,8 +172,14 @@ class TestRepository {
     ) {
       return false;
     }
+    const native = input.selectorRotation;
+    if (native === undefined ? record.clientChannel !== "web" : (
+      record.clientChannel !== "android" || record.deviceId !== native.deviceId ||
+      !Buffer.from(record.selectorHash).equals(Buffer.from(native.expectedHash))
+    )) return false;
     this.record = {
       ...record,
+      selectorHash: native === undefined ? record.selectorHash : Uint8Array.from(native.replacementHash),
       encryptedAccessToken: input.encryptedAccessToken,
       encryptedRefreshToken: input.encryptedRefreshToken,
       supabaseSessionId: input.supabaseSessionId,
@@ -180,14 +191,16 @@ class TestRepository {
   }
 
   /**
-   * 호출 수를 기록하고 저장된 미폐기 레코드를 고정 테스트 시각에 폐기합니다. 입력 해시는 이 대역에서 사용하지 않습니다.
+   * 해시·채널이 일치하는 미폐기 레코드를 고정 테스트 시각에 폐기합니다.
+   * @param hash 현재 식별자의 해시. 이전 회전 값은 일치하지 않아야 합니다.
    * @returns 폐기한 레코드가 있으면 true.
    * @throws fail 설정 시 DB 실패.
    */
-  public async revokeBySelectorHash(): Promise<boolean> {
+  public async revokeBySelectorHash(hash: Uint8Array, _now: Date, channel = "web"): Promise<boolean> {
     this.calls.revoke += 1;
     if (this.fail) throw new Error("database-secret");
-    if (this.record === null || this.record.revokedAt !== null) return false;
+    if (this.record === null || this.record.revokedAt !== null || this.record.clientChannel !== channel ||
+      !Buffer.from(this.record.selectorHash).equals(Buffer.from(hash))) return false;
     this.record = { ...this.record, revokedAt: new Date(now) };
     return true;
   }
@@ -258,7 +271,7 @@ class SerializedSecurityRepository extends TestRepository {
   public async completeRecovery(user: string, completedAt: Date): Promise<void> {
     await this.exclusive(async () => {
       await this.pauseAt("recovery");
-      this.minimumAcceptedIat = Math.max(this.minimumAcceptedIat, Math.floor(completedAt.getTime() / 1000) + 1);
+      this.minimumAcceptedIat = Math.max(this.minimumAcceptedIat, Math.floor(completedAt.getTime() / 1000) + PROVIDER_CLOCK_SKEW_SECONDS + 1);
       if (this.record?.userId === user && this.record.revokedAt === null) this.record = { ...this.record, revokedAt: new Date(completedAt) };
     });
   }
@@ -347,6 +360,124 @@ function expectFailureReason(action: () => Promise<unknown>, reason: SessionFail
 }
 
 describe("SessionService", () => {
+  const deviceId = "123e4567-e89b-42d3-a456-426614174099";
+
+  it("creates web sessions without a device and refuses caller-supplied device elevation", async () => {
+    const { repository, service: subject } = service();
+    await subject.create(tokenPair(), now);
+    expect(repository.record).toMatchObject({ clientChannel: "web", deviceId: null });
+    await expectFailureReason(() => subject.create(tokenPair(), now, deviceId), "unavailable");
+    expect(repository.calls.createSession).toBe(1);
+  });
+
+  it("binds Android sessions to a canonical installation ID and isolates both channel directions", async () => {
+    const repository = new TestRepository();
+    const refresh = vi.fn(async () => tokenPair());
+    const android = new SessionService!(repository, keyring, refresh, () => id, () => now, "android");
+    const web = service(repository, refresh).service;
+    const nativeSession = await android.create(tokenPair(), now, deviceId);
+    expect(repository.record).toMatchObject({ clientChannel: "android", deviceId });
+    await expect(android.resolve(nativeSession.selector, now)).resolves.toMatchObject({ deviceId, clientChannel: "android" });
+    await expectFailureReason(() => web.resolve(nativeSession.selector, now), "expired");
+    await expectFailureReason(() => web.refresh(nativeSession.selector, now), "expired");
+    expect(refresh).not.toHaveBeenCalled();
+    await expect(web.revokeCurrent(nativeSession.selector, now)).resolves.toBe(false);
+    expect(repository.record?.revokedAt).toBeNull();
+    await expect(android.revokeCurrent(nativeSession.selector, now)).resolves.toBe(true);
+
+    const webSession = await web.create(tokenPair(), now);
+    await expectFailureReason(() => android.resolve(webSession.selector, now), "expired");
+    await expectFailureReason(() => android.refresh(webSession.selector, now), "expired");
+    await expect(android.revokeCurrent(webSession.selector, now)).resolves.toBe(false);
+    expect(repository.record?.revokedAt).toBeNull();
+    expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it.each([undefined, "", "not-a-uuid", "123E4567-E89B-42D3-A456-426614174099"])("rejects invalid Android device %s before persistence", async (device) => {
+    const repository = new TestRepository();
+    const android = new SessionService!(repository, keyring, async () => tokenPair(), () => id, () => now, "android");
+    await expectFailureReason(() => android.create(tokenPair(), now, device), "unavailable");
+    expect(repository.calls.createSession).toBe(0);
+  });
+
+  it.each([
+    { clientChannel: undefined, deviceId: null },
+    { clientChannel: "other", deviceId: null },
+    { clientChannel: "web", deviceId },
+    { clientChannel: "android", deviceId: null },
+    { clientChannel: "android", deviceId: "invalid" },
+  ])("rejects malformed stored session context %j", async (context) => {
+    const { repository, created, service: subject, refresher } = await createSession();
+    repository.record = { ...repository.record!, ...context } as unknown as SessionRecord;
+    await expectFailureReason(() => subject.resolve(created.selector, now), "expired");
+    await expectFailureReason(() => subject.refresh(created.selector, now), "expired");
+    expect(refresher).not.toHaveBeenCalled();
+  });
+
+  it("keeps the Android binding through refresh and revokes Android in account-wide logout", async () => {
+    const repository = new TestRepository();
+    const android = new SessionService!(repository, keyring, async () => tokenPair(), () => id, () => now, "android");
+    const created = await android.create(tokenPair(), now, deviceId);
+    const refreshed = await android.refresh(created.selector, now);
+    expect(refreshed).toMatchObject({ status: "refreshed", selector: expect.any(String) });
+    expect(repository.record).toMatchObject({ clientChannel: "android", deviceId, rotationVersion: 1 });
+    await expect(service(repository).service.revokeAllForUser(userId, now)).resolves.toBe(1);
+    await expectFailureReason(() => android.resolve(refreshed.selector!, now), "expired");
+  });
+
+  it("atomically replaces the Android credential without exposing provider tokens or extending absolute expiry", async () => {
+    const repository = new TestRepository();
+    const refresh = vi.fn(async () => tokenPair({ accessToken: "new-access", refreshToken: "new-refresh" }));
+    const android = new SessionService!(repository, keyring, refresh, () => id, () => now, "android");
+    const created = await android.create(tokenPair(), now, deviceId);
+    const before = copyRecord(repository.record!);
+    const result = await android.refresh(created.selector, now);
+    expect(result).toEqual({ status: "refreshed", selector: expect.stringMatching(/^[A-Za-z0-9_-]{43}$/u) });
+    expect(result.selector).not.toBe(created.selector);
+    await expect(android.resolve(result.selector!, now)).resolves.toMatchObject({ sessionId: id, accessToken: "new-access", refreshToken: "new-refresh" });
+    await expectFailureReason(() => android.resolve(created.selector, now), "expired");
+    await expectFailureReason(() => android.refresh(created.selector, now), "expired");
+    await expect(android.revokeCurrent(created.selector, now)).resolves.toBe(false);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    expect(repository.record).toMatchObject({ absoluteExpiresAt: before.absoluteExpiresAt, createdAt: before.createdAt, deviceId, rotationVersion: 1 });
+    expect(repository.record?.selectorHash).not.toEqual(before.selectorHash);
+    expect(JSON.stringify(result)).not.toMatch(/new-access|new-refresh|provider-/u);
+    expect(JSON.stringify(repository.record)).not.toContain(result.selector!);
+  });
+
+  it("returns one usable Android credential when two refresh requests race", async () => {
+    const repository = new TestRepository();
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const refresh = vi.fn(async () => { await gate; return tokenPair(); });
+    const android = new SessionService!(repository, keyring, refresh, () => id, () => now, "android");
+    const created = await android.create(tokenPair(), now, deviceId);
+    const results = Promise.allSettled([android.refresh(created.selector, now), android.refresh(created.selector, now)]);
+    await vi.waitFor(() => expect(refresh).toHaveBeenCalledTimes(2));
+    release();
+    const settled = await results;
+    expect(settled.filter(result => result.status === "fulfilled")).toHaveLength(1);
+    const winner = settled.find(result => result.status === "fulfilled");
+    expect(winner).toMatchObject({ status: "fulfilled", value: { status: "refreshed", selector: expect.any(String) } });
+    if (winner?.status !== "fulfilled") throw new Error("expected refresh winner");
+    await expect(android.resolve(winner.value.selector!, now)).resolves.toMatchObject({ sessionId: id });
+    expect(settled.find(result => result.status === "rejected")).toMatchObject({ reason: { reason: "expired", message: "AUTH_SESSION_OPERATION_FAILED" } });
+    expect(repository.record?.rotationVersion).toBe(1);
+  });
+
+  it.each(["revoke", "database"] as const)("does not return a native credential after %s failure during refresh", async failure => {
+    const repository = new TestRepository();
+    const android = new SessionService!(repository, keyring, async () => {
+      if (failure === "revoke") repository.record = { ...repository.record!, revokedAt: now };
+      else repository.failRotate = true;
+      return tokenPair();
+    }, () => id, () => now, "android");
+    const created = await android.create(tokenPair(), now, deviceId);
+    const hash = Uint8Array.from(repository.record!.selectorHash);
+    await expectFailureReason(() => android.refresh(created.selector, now), failure === "revoke" ? "expired" : "unavailable", created.selector, "database-secret");
+    expect(repository.record).toMatchObject({ selectorHash: hash, rotationVersion: 0 });
+  });
+
   it("persists only the selector digest and token envelopes", async () => {
     const { repository, created } = await createSession();
     const serialized = JSON.stringify(repository.record);
@@ -373,7 +504,7 @@ describe("SessionService", () => {
     await expectSafeFailure(() => subject.create(tokenPair({ supabaseSessionId: "not-a-uuid" }), now), "not-a-uuid");
     await expectSafeFailure(() => subject.create(tokenPair({ issuedAtSeconds: 0 }), now));
     await expectSafeFailure(() => subject.create(tokenPair({ issuedAtSeconds: 1.5 }), now));
-    await expectSafeFailure(() => subject.create(tokenPair({ issuedAtSeconds: Math.floor(now.getTime() / 1000) + 1 }), now));
+    await expectSafeFailure(() => subject.create(tokenPair({ issuedAtSeconds: Math.floor(now.getTime() / 1000) + 61, accessTokenExpiresAt: new Date(now.getTime() + 3600_000) }), now));
     await expectSafeFailure(() => subject.create(tokenPair({ accessTokenExpiresAt: new Date("invalid") }), now));
     await expectSafeFailure(() => subject.create(tokenPair(), new Date("invalid")));
     const nearMaximumNow = new Date(8_640_000_000_000_000 - 1);
@@ -400,32 +531,73 @@ describe("SessionService", () => {
     expect(repository.calls.createSession).toBe(2);
   });
 
-  it("leaves no stale session alive under either deterministic recovery race ordering", async () => {
-    const issuedAtSeconds = Math.floor(now.getTime() / 1000);
+  it.each([1, 60])("accepts %i seconds of provider skew for creation and refresh without shifting the issuance gate", async (skewSeconds) => {
+    const issuedAtSeconds = Math.floor(now.getTime() / 1000) + skewSeconds;
+    const pair = tokenPair({ issuedAtSeconds, accessTokenExpiresAt: new Date(now.getTime() + 3600_000) });
+    const repository = new TestRepository();
+    const subject = service(repository, vi.fn(async () => pair)).service;
+    repository.minimumAcceptedIat = issuedAtSeconds;
+    const created = await subject.create(pair, now);
+    await expect(subject.refresh(created.selector, now)).resolves.toEqual({ status: "refreshed" });
+    expect(repository.record).toMatchObject({ createdAt: now, accessTokenExpiresAt: pair.accessTokenExpiresAt, rotationVersion: 1 });
+
+    repository.minimumAcceptedIat = issuedAtSeconds + 1;
+    await expectSafeFailure(() => subject.create(pair, now));
+    expect(repository.calls.createSession).toBe(2);
+  });
+
+  it.each([0, 1, 30, 60])("leaves no stale session alive under either recovery race ordering with %i seconds of provider skew", async (skewSeconds) => {
+    const databaseNow = new Date(now);
+    const bffNow = new Date(now.getTime() + 500);
+    const providerNow = new Date(databaseNow.getTime() + skewSeconds * 1000);
+    const issuedAtSeconds = Math.floor(providerNow.getTime() / 1000);
+    const pair = tokenPair({ issuedAtSeconds, accessTokenExpiresAt: new Date(now.getTime() + 3600_000) });
 
     const sessionFirstRepository = new SerializedSecurityRepository();
     const sessionFirst = service(sessionFirstRepository).service;
     const sessionPause = sessionFirstRepository.pauseNext("session");
-    const sessionCreation = sessionFirst.create(tokenPair({ issuedAtSeconds }), now);
-    await sessionPause.reached;
-    const recoveryAfterSession = sessionFirstRepository.completeRecovery(userId, now);
+    const sessionCreation = sessionFirst.create(pair, bffNow);
+    await Promise.race([sessionPause.reached, sessionCreation]);
+    const recoveryAfterSession = sessionFirstRepository.completeRecovery(userId, databaseNow);
     sessionPause.release();
     await expect(sessionCreation).resolves.toMatchObject({ userId });
     await recoveryAfterSession;
-    expect(sessionFirstRepository.record?.revokedAt).toEqual(now);
-    expect(sessionFirstRepository.minimumAcceptedIat).toBe(issuedAtSeconds + 1);
+    expect(sessionFirstRepository.record?.revokedAt).toEqual(databaseNow);
 
     const recoveryFirstRepository = new SerializedSecurityRepository();
     const recoveryFirst = service(recoveryFirstRepository).service;
     const recoveryPause = recoveryFirstRepository.pauseNext("recovery");
-    const recoveryBeforeSession = recoveryFirstRepository.completeRecovery(userId, now);
+    const recoveryBeforeSession = recoveryFirstRepository.completeRecovery(userId, databaseNow);
     await recoveryPause.reached;
-    const staleCreation = recoveryFirst.create(tokenPair({ issuedAtSeconds }), now);
+    const staleCreation = recoveryFirst.create(pair, bffNow);
     recoveryPause.release();
     await recoveryBeforeSession;
     await expectSafeFailure(() => staleCreation);
     expect(recoveryFirstRepository.record).toBeNull();
-    expect(recoveryFirstRepository.minimumAcceptedIat).toBe(issuedAtSeconds + 1);
+    expect(recoveryFirstRepository.minimumAcceptedIat).toBe(Math.floor(databaseNow.getTime() / 1000) + 61);
+    expect(sessionFirstRepository.minimumAcceptedIat).toBe(Math.floor(databaseNow.getTime() / 1000) + 61);
+  });
+
+  it("allows a newly issued token after cooldown but never revives the pre-reset future token", async () => {
+    const repository = new SerializedSecurityRepository();
+    const subject = service(repository).service;
+    const databaseNow = new Date(now);
+    const preResetIssuedAt = Math.floor(now.getTime() / 1000) + 30;
+    await repository.completeRecovery(userId, databaseNow);
+    const afterCooldown = new Date(now.getTime() + 61_000);
+    await expectSafeFailure(() => subject.create(tokenPair({ issuedAtSeconds: preResetIssuedAt, accessTokenExpiresAt: new Date(now.getTime() + 3600_000) }), afterCooldown));
+    await expect(subject.create(tokenPair({ issuedAtSeconds: Math.floor(afterCooldown.getTime() / 1000), accessTokenExpiresAt: new Date(now.getTime() + 3600_000) }), afterCooldown)).resolves.toMatchObject({ userId });
+  });
+
+  it.each([[-60, 121], [0, 61], [60, 1]])("requires %i-second Auth skew to cross the reset barrier at %i elapsed seconds", async (providerOffset, elapsedSeconds) => {
+    const repository = new SerializedSecurityRepository();
+    const subject = service(repository).service;
+    await repository.completeRecovery(userId, now);
+    const before = new Date(now.getTime() + (elapsedSeconds - 1) * 1000);
+    const after = new Date(now.getTime() + elapsedSeconds * 1000);
+    const expiry = new Date(now.getTime() + 3600_000);
+    await expectSafeFailure(() => subject.create(tokenPair({ issuedAtSeconds: Math.floor(before.getTime() / 1000) + providerOffset, accessTokenExpiresAt: expiry }), before));
+    await expect(subject.create(tokenPair({ issuedAtSeconds: Math.floor(after.getTime() / 1000) + providerOffset, accessTokenExpiresAt: expiry }), after)).resolves.toMatchObject({ userId });
   });
 
   it("resolves without writes or refreshes", async () => {
@@ -508,6 +680,7 @@ describe("SessionService", () => {
     ["non-object token pair", undefined as unknown as TokenPair],
     ["empty access token", tokenPair({ accessToken: "" })],
     ["expired access token", tokenPair({ accessTokenExpiresAt: now })],
+    ["issued beyond the clock skew bound", tokenPair({ issuedAtSeconds: Math.floor(now.getTime() / 1000) + 61, accessTokenExpiresAt: new Date(now.getTime() + 3600_000) })],
   ] as const)("classifies a malformed replacement pair as expired: %s", async (_label, replacement) => {
     const { repository, created } = await createSession();
     const subject = new SessionService!(repository, keyring, async () => replacement, () => id, () => new Date(now));

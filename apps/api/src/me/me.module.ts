@@ -15,6 +15,7 @@ export const API_DATABASE_POOL = Symbol("API_DATABASE_POOL");
 
 /** Wires the protected current-user route to one static-key verifier and replay store. */
 @Module({
+  exports: [API_DATABASE_POOL, AuthGuard, ACCESS_TOKEN_VERIFIER],
   controllers: [MeController],
   providers: [
     {

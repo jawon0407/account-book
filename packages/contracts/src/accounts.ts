@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { utf16Length } from "./string-length.js";
 import {
   IdempotencyKeySchema,
   LedgerIdSchema,
@@ -10,7 +11,7 @@ import {
   VersionSchema,
 } from "./ledger-common.js";
 
-export const AccountNameSchema = z.string().trim().min(1).max(80);
+export const AccountNameSchema = z.string().trim().check(utf16Length(1, 80));
 export type AccountName = z.infer<typeof AccountNameSchema>;
 
 export const AccountKindSchema = z.enum(["cash", "bank", "card"]);

@@ -311,6 +311,31 @@ describe("EmailAuthService PKCE confirmation continuity", () => {
     expect(subject.sessions.create).toHaveBeenCalledWith(expect.objectContaining({ issuedAtSeconds: Math.floor(providerCompletedAt.getTime() / 1000) }), providerCompletedAt);
   });
 
+  it.each([1, 60])("accepts provider clock skew of %i seconds for sign-in and confirmation", async (skewSeconds) => {
+    const subject = setup();
+    const issuedAtSeconds = tokens.issuedAtSeconds + skewSeconds;
+    const providerTokens = { ...tokens, issuedAtSeconds, accessTokenExpiresAt: new Date(now.getTime() + 3600_000) };
+    subject.provider.signInResult = providerTokens;
+    subject.provider.confirmationResult = providerTokens;
+    await expect(subject.service.signIn(validInput, subject.context)).resolves.toMatchObject({ selector: "opaque-session-selector" });
+    await subject.service.signUp(validInput, subject.context);
+    await expect(subject.service.confirmEmail({ code: "code" }, subject.context)).resolves.toMatchObject({ selector: "opaque-session-selector" });
+    expect(subject.sessions.create).toHaveBeenCalledWith(expect.objectContaining({ issuedAtSeconds }), now);
+  });
+
+  it.each([
+    ["issuance beyond the clock skew bound", { issuedAtSeconds: tokens.issuedAtSeconds + 61, accessTokenExpiresAt: new Date(now.getTime() + 3600_000) }],
+    ["actual expiry at the current time", { accessTokenExpiresAt: now }],
+  ])("rejects %s for sign-in and confirmation", async (_label, override) => {
+    const subject = setup();
+    subject.provider.signInResult = { ...tokens, ...override };
+    subject.provider.confirmationResult = { ...tokens, ...override };
+    await expect(subject.service.signIn(validInput, subject.context)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    await subject.service.signUp(validInput, subject.context);
+    await expect(subject.service.confirmEmail({ code: "code" }, subject.context)).rejects.toMatchObject({ code: "AUTH_PROVIDER_UNAVAILABLE" });
+    expect(subject.sessions.create).not.toHaveBeenCalled();
+  });
+
   it("accepts a confirmation token issued in the next second using a post-provider clock sample", async () => {
     const providerCompletedAt = new Date(now.getTime() + 1_000);
     const subject = setup(() => providerCompletedAt);

@@ -145,7 +145,10 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
    * @throws 트랜잭션·요청 제한·제공자 오류.
    */
   public async exchangeOAuthCode(input: OAuthExchangeInput): Promise<AuthTokenPair> {
-    return this.exchange(input?.code, input?.codeVerifier);
+    // 기존 이메일 필수 호출은 유지한다. 공급자가 있으면 enum 검증 후에만 이메일 없는 OAuth 정책을 선택한다.
+    const provider = input?.provider === undefined ? undefined : AuthProviderSchema.safeParse(input.provider);
+    if (provider !== undefined && !provider.success) return fail("AUTH_OAUTH_TRANSACTION_INVALID");
+    return this.exchange(input?.code, input?.codeVerifier, provider?.data);
   }
 
   /**
@@ -158,12 +161,12 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
     try {
       const refresh = token(refreshToken);
       return await runProviderOperation(this.fetcher, async (operation) =>
-        tokenPair(dataOf(await this.client(operation.fetch).auth.refreshSession({ refresh_token: refresh })).session));
+        tokenPair(dataOf(await this.client(operation.fetch).auth.refreshSession({ refresh_token: refresh })).session, "refresh"));
     } catch (error) { return rethrowProviderError(error); }
   }
 
   /**
-   * 새 SDK 클라이언트에 토큰 쌍을 설정한 뒤 제공자 로그아웃을 호출하고 오류를 검사합니다.
+   * 새 SDK 클라이언트에 토큰 쌍을 설정한 뒤 현재 제공자 세션만 로그아웃합니다. 다른 기기는 유지합니다.
    * @param accessToken 복호화한 제공자 접근 토큰.
    * @param refreshToken 복호화한 제공자 갱신 토큰.
    * @returns 제공자 폐기가 완료되면 값 없이 종료합니다.
@@ -176,7 +179,7 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
         const client = this.client(operation.fetch);
         dataOf(await client.auth.setSession(tokens));
         operation.assertActive();
-        accepted(await client.auth.signOut());
+        accepted(await client.auth.signOut({ scope: "local" }));
       });
     } catch (error) { return rethrowProviderError(error); }
   }
@@ -248,10 +251,11 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
    * 코드·PKCE 비밀값을 검증해 grant_type=pkce 토큰 엔드포인트에 POST하고 원시 토큰 응답을 검사합니다.
    * @param authCode 콜백 인증 코드.
    * @param codeVerifier 서버 PKCE 비밀값.
+ * @param provider OAuth에서만 전달하는 검증된 공급자. 생략 시 이메일 인증 필수.
    * @returns 검증된 내부 토큰 쌍.
    * @throws HTTP·거래·응답 검증 실패의 고정 제공자 오류.
    */
-  private async exchange(authCode: unknown, codeVerifier: unknown): Promise<AuthTokenPair> {
+  private async exchange(authCode: unknown, codeVerifier: unknown, provider?: AuthProvider): Promise<AuthTokenPair> {
     try {
       const url = new URL("auth/v1/token", this.config.url);
       url.searchParams.set("grant_type", "pkce");
@@ -259,7 +263,7 @@ export class SupabaseAuthAdapter implements AuthProviderPort {
       return await runProviderOperation(this.fetcher, async (operation) => {
         const result = await requestSupabaseAuth(this.config, operation.fetch, url, body);
         if (!result.ok) throw mappedProviderError(result.body, result.status, true);
-        return rawTokenPair(result.body);
+        return rawTokenPair(result.body, provider);
       });
     } catch (error) { return rethrowProviderError(error); }
   }

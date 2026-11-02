@@ -5,6 +5,7 @@ import type { FastifyRequest } from "fastify";
 import {
   DELEGATED_JSON_BODY_MAX_BYTES,
   DELEGATED_JWT_MAX_BYTES,
+  DelegatedClientChannelSchema,
   DelegatedScopeSchema,
   normalizeDelegatedContentType,
   type DelegatedScope,
@@ -15,7 +16,8 @@ import {
   type AccessTokenVerifier,
 } from "./jwt-verifier.js";
 import type { AuthPrincipal } from "./principal.js";
-import { DELEGATED_SCOPE } from "./delegated-scope.js";
+import { DELEGATED_CHANNELS, DELEGATED_SCOPE } from "./delegated-scope.js";
+import { CoreError } from "../core/core-error.js";
 
 const BEARER = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/u;
 const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -163,6 +165,12 @@ export class AuthGuard implements CanActivate {
       request: guardedRequest,
       requiredScope,
     });
+    const allowed = this.reflector.getAllAndOverride<unknown>(DELEGATED_CHANNELS, [context.getHandler(), context.getClass()]);
+    if (allowed !== undefined) {
+      const channels = DelegatedClientChannelSchema.array().min(1).max(2).safeParse(allowed);
+      if (!channels.success || new Set(channels.data).size !== channels.data.length) throw new InvalidAccessTokenError();
+      if (!channels.data.includes(principal.clientChannel)) throw new CoreError("LEDGER_CHANNEL_FORBIDDEN", 403);
+    }
     request.principal = principal;
     return true;
   }

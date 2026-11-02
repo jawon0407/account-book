@@ -24,6 +24,9 @@ assertProductionAuthAdapter(process.env);
 const config: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
+  async headers() {
+    return [{ source: "/app/bank-connections/:path*", headers: [{ key: "Referrer-Policy", value: "no-referrer" }, { key: "Cache-Control", value: "private, no-store" }] }];
+  },
   turbopack: { root: resolve(import.meta.dirname, "../..") },
 };
 

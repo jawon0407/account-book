@@ -99,6 +99,7 @@ function binding(value: RequestDescriptor): string {
  */
 async function token(value = request(), overrides: Readonly<Record<string, unknown>> = {}, header: Record<string, unknown> = { alg: "ES256", typ: "at+jwt", kid: "key-1" }, signingKey = privateKey, signingOptions: Readonly<{ crit?: Record<string, boolean> }> = {}): Promise<string> {
   return new SignJWT({
+    chn: "web",
     aud: "urn:account-book:api",
     exp: now + 30,
     iat: now,
@@ -190,7 +191,7 @@ describe("DelegatedJwtVerifier", () => {
     const { verifier: subject } = verifier();
     const result = await subject.verify({ token: await token(), request: request(), requiredScope: "me:read" });
 
-    expect(result).toEqual({ userId, sessionId, scope: "me:read", requestId });
+    expect(result).toEqual({ userId, sessionId, scope: "me:read", requestId, clientChannel: "web" });
     expect(Object.isFrozen(result)).toBe(true);
   });
 
@@ -201,6 +202,30 @@ describe("DelegatedJwtVerifier", () => {
 
     expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1);
     expect(attempts.filter((attempt) => attempt.status === "rejected")).toHaveLength(1);
+  });
+
+  it.each(["web", "android"] as const)("returns only the signed %s channel", async chn => {
+    const { verifier: subject } = verifier();
+    await expect(subject.verify({ token: await token(request(), { chn }), request: request(), requiredScope: "me:read" }))
+      .resolves.toMatchObject({ clientChannel: chn });
+  });
+
+  it.each([undefined, null, "ios", "Android", ["android"], "", 1])("rejects missing or invalid signed channel before replay %#", async chn => {
+    const { verifier: subject, store } = verifier();
+    await expect(subject.verify({ token: await token(request(), { chn }), request: request(), requiredScope: "me:read" }))
+      .rejects.toMatchObject({ message: "AUTH_ACCESS_TOKEN_INVALID" });
+    expect(store.calls).toBe(0);
+  });
+
+  it("rejects a web JWT whose payload was changed to android without resigning", async () => {
+    const signed = await token();
+    const [header, payload, signature] = signed.split(".");
+    const claims = JSON.parse(Buffer.from(payload!, "base64url").toString("utf8"));
+    const forged = `${header}.${Buffer.from(JSON.stringify({ ...claims, chn: "android" })).toString("base64url")}.${signature}`;
+    const { verifier: subject, store } = verifier();
+    await expect(subject.verify({ token: forged, request: request(), requiredScope: "me:read" }))
+      .rejects.toMatchObject({ message: "AUTH_ACCESS_TOKEN_INVALID" });
+    expect(store.calls).toBe(0);
   });
 
   it.each([

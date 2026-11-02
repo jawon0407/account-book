@@ -10,7 +10,9 @@ import {
   DELEGATED_JWT_ISSUER,
   DELEGATED_JWT_MAX_BYTES,
   DELEGATED_JWT_TTL_SECONDS,
+  DelegatedClientChannelSchema,
   DelegatedScopeSchema,
+  type DelegatedClientChannel,
   type DelegatedScope,
 } from "@account-book/contracts/internal-api";
 import { SignJWT } from "jose";
@@ -19,6 +21,7 @@ const SAFE_KEY_ID = /^[A-Za-z0-9._-]{1,128}$/u;
 const CANONICAL_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 
 export type DelegatedSignInput = Readonly<{
+  clientChannel: DelegatedClientChannel;
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   target: string;
   contentType: string | null;
@@ -181,6 +184,7 @@ export class DelegatedJwtSigner {
       if (
         !isCanonicalUuid(input.userId) ||
         !isCanonicalUuid(input.sessionId) ||
+        !DelegatedClientChannelSchema.safeParse(input.clientChannel).success ||
         !DelegatedScopeSchema.safeParse(input.scope).success ||
         !(input.body instanceof Uint8Array)
       ) {
@@ -214,6 +218,7 @@ export class DelegatedJwtSigner {
       });
       const rbh = createHash("sha256").update(requestBinding, "utf8").digest("base64url");
       const token = await new SignJWT({
+        chn: input.clientChannel,
         rbh,
         rid: requestId,
         scp: input.scope,

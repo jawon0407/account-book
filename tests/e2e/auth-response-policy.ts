@@ -131,7 +131,7 @@ export function isMeResponse(
 ): boolean {
   return hasExactKeys(value, ["email", "emailVerified", "id"])
     && value.email === expected.email
-    && value.emailVerified === true
+    && value.emailVerified === (expected.email !== null)
     && value.id === expected.userId;
 }
 

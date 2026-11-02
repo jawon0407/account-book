@@ -36,6 +36,10 @@ describe("Drizzle declarations versus live PostgreSQL catalog", () => {
         join pg_attribute a on a.attrelid=i.indrelid and a.attnum=k.num order by k.pos) as columns
       from pg_index i join pg_class ci on ci.oid=i.indexrelid
       where i.indrelid=$1::regclass and i.indpred is not null`, [name]);
-    expect(indexes.rows).toEqual(config.indexes.map((index) => ({ name: index.config.name, unique: index.config.unique, columns: index.config.columns.map((column) => "name" in column ? column.name : undefined) })));
+    expect(indexes.rows).toEqual(config.indexes.map((index) => ({ name: index.config.name, unique: index.config.unique, columns: index.config.columns.flatMap((column) => "name" in column ? [column.name] : []) })));
+    if (config.name === "bank_connection_requests") {
+      const expression = (await database.admin.query("select pg_get_indexdef('app_bank.bank_requests_pending_deadline_idx'::regclass,1,true) as expression")).rows[0].expression;
+      expect(expression.toLowerCase().replaceAll(" ", "")).toBe("least(expires_at,code_expires_at)");
+    }
   });
 });

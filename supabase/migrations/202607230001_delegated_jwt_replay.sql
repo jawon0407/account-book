@@ -1,12 +1,16 @@
 do $$
 begin
+  if exists (select 1 from pg_roles where rolname = 'app_api' and (rolsuper or rolreplication or rolbypassrls)) then
+    raise exception 'UNSAFE_APP_API_ROLE';
+  end if;
   if not exists (select 1 from pg_roles where rolname = 'app_api') then
     create role app_api login nosuperuser nocreatedb nocreaterole noinherit noreplication nobypassrls;
   end if;
 end
 $$;
 
-alter role app_api login nosuperuser nocreatedb nocreaterole noinherit noreplication nobypassrls;
+-- 위험 속성은 위에서 거부한다. Hosted postgres로 SUPERUSER 속성을 다시 쓰지 않는다.
+alter role app_api login nocreatedb nocreaterole noinherit;
 
 do $$
 declare

@@ -1,0 +1,62 @@
+diff --git a/build/crawlers/node/fallback.js b/build/crawlers/node/fallback.js
+index 9df7d39d4edeef30effb829fe136797efdd216eb..b4b93cc6c6b89dfbb3afe754f49141d08d90f73c 100644
+--- a/build/crawlers/node/fallback.js
++++ b/build/crawlers/node/fallback.js
+@@ -66,7 +66,18 @@ function createFallbackFilesystem(opts) {
+             if (ignore(childAbsolutePath)) {
+                 continue;
+             }
+-            if (entry.isDirectory()) {
++            let fileType = entry;
++            // Windows reparse-backed regular files can be misreported by Dirent.
++            // lstat distinguishes those files from real symlinks and junctions.
++            if (process.platform === 'win32' && entry.isSymbolicLink()) {
++                try {
++                    fileType = fs_1.default.lstatSync(childAbsolutePath);
++                }
++                catch {
++                    continue;
++                }
++            }
++            if (fileType.isDirectory()) {
+                 // NOTE(@kitten): ".git" and ".hg" check replace the VCS_DIRECTORIES ignore pattern
+                 // NOTE(@kitten): `.cxx` is ephemeral and should always be safe to ignore
+                 if (!result.has(name) && name !== '.git' && name !== '.hg' && name !== '.cxx') {
+@@ -75,13 +86,13 @@ function createFallbackFilesystem(opts) {
+                     result.set(name, childDir);
+                 }
+             }
+-            else if (entry.isSymbolicLink()) {
++            else if (fileType.isSymbolicLink()) {
+                 // We can skip reading the symlink target here, since it'll be read lazily
+                 if (includeSymlinks && !result.has(name)) {
+                     result.set(name, [null, 0, 0, null, 1, null]);
+                 }
+             }
+-            else if (entry.isFile()) {
++            else if (fileType.isFile()) {
+                 const ext = path_1.default.extname(name).slice(1);
+                 if (exts[ext] && !result.has(name)) {
+                     result.set(name, [null, 0, 0, null, 0, null]);
+diff --git a/build/crawlers/node/index.js b/build/crawlers/node/index.js
+index 5b3b945f88fd2952dcae19e3e9de34da1c1b3038..fbec90c61c1e0eb7290fa67002348fc73b9e17ca 100644
+--- a/build/crawlers/node/index.js
++++ b/build/crawlers/node/index.js
+@@ -76,7 +76,16 @@ function find(roots, extensions, ignore, includeSymlinks, rootDir, console, prev
+                         continue;
+                     }
+                     const file = directory + path.sep + name;
+-                    const isSymbolicLink = entry.isSymbolicLink();
++                    let isSymbolicLink = entry.isSymbolicLink();
++                    // Windows cloud/reparse files can be classified as links by
++                    // readdir even though lstat reports an ordinary file.
++                    if (isSymbolicLink && process.platform === 'win32') {
++                        try {
++                            isSymbolicLink = fs.lstatSync(file).isSymbolicLink();
++                        } catch {
++                            continue; // The entry disappeared during the crawl.
++                        }
++                    }
+                     if (ignore(file) || (!includeSymlinks && isSymbolicLink)) {
+                         continue;
+                     }

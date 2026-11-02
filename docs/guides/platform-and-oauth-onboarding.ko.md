@@ -207,6 +207,8 @@ Vercel Preview wildcard는 production Supabase project에 넣지 않는다. Supa
 
 ## 7. Google OAuth app
 
+앱 측 2026-09-30 준비 내용과 개발용 정확한 등록 위치는 [소셜 인증 활성화 준비](social-auth-readiness.ko.md)를 먼저 읽는다. 콘솔 설정만으로 앱 버튼은 켜지지 않으며, 공급자별 검증 후 BFF 허용 목록을 반영한다. 실제 공급자 로그인이 완료된 상태로 표시하지 않는다.
+
 1. 이 서비스의 production 전용 Google Cloud project를 만든다. test와 production을 분리한다.
 2. **Google Auth Platform → Branding**에서 앱 이름, support email, home page, privacy policy, terms URL을 소유 도메인으로 입력한다.
 3. **Audience**에서 초기에는 External/Testing을 선택하고 지인 계정을 test user로 등록한다.
@@ -230,7 +232,7 @@ Vercel Preview wildcard는 production Supabase project에 넣지 않는다. Supa
 5. REST API key의 redirect URI에 §6.1의 Supabase callback을 등록한다.
 6. client secret 기능을 활성화하고 발급값은 Supabase provider 설정으로만 옮긴다.
 7. 동의항목은 실제 로그인에 필요한 최소값만 설정한다. 전화번호, 성별, 생일, 연령 등은 현재 범위에서 요청하지 않는다.
-8. email이 반드시 필요하다면 `account_email` 권한 조건과 Business App/추가 기능 심사 필요 여부를 확인한다. 권한을 얻지 못했을 때 더 민감한 정보로 대체하지 않고 Kakao login을 비활성화한다.
+8. `account_email` 권한 조건과 Business App/추가 기능 심사 필요 여부를 확인한다. 현재 앱은 이메일 없는 검증된 OAuth 신원을 처리할 수 있으나 Supabase의 이메일 없는 사용자 허용 설정과 실제 로그인·갱신을 검증해야 한다. 검증 전에는 Kakao 버튼을 비활성으로 유지하고 더 민감한 정보로 대체하지 않는다.
 9. Supabase **Auth → Providers → Kakao**에 REST API key와 client secret을 입력한다.
 10. test app 조건에서 성공, 사용자 취소, email 미제공·동의 거부, callback replay, logout 후 local session 폐기를 검증한다.
 11. 개인정보 동의항목 심사가 필요하면 가입 화면, 개인정보 처리방침, 수집 목적·항목·필수/선택 조건이 모두 일치하는 자료만 제출한다. 제출 캡처에는 실제 개인정보를 넣지 않는다.
@@ -241,15 +243,17 @@ Vercel Preview wildcard는 production Supabase project에 넣지 않는다. Supa
 
 1. NAVER Developers에서 **Application → 애플리케이션 등록**을 연다.
 2. 사용 API로 네이버 로그인을 선택하고 PC Web 환경을 등록한다.
-3. 서비스 URL은 production 소유 도메인, callback은 §6.1의 Supabase callback으로 등록한다.
+3. 서비스 URL은 production 소유 도메인, callback은 해당 Supabase custom provider 생성 화면에 표시되는 정확한 URL로 등록한다. 기본 공급자의 URL과 같다고 추정하지 않는다.
 4. 제공 정보는 이용자 식별자와 실제 필요한 최소 정보만 선택한다. email이 없어도 계정을 안전하게 처리할 수 있도록 `email_optional=true` 설계를 유지한다.
 5. Client ID와 Client Secret은 Supabase custom provider 설정으로만 옮긴다.
 6. Supabase **Auth → Providers → New Provider → Manual configuration**에서 OAuth2 `custom:naver`를 만든다.
 7. Supabase 화면의 callback을 Naver app과 다시 대조한다. authorization, token, userinfo endpoint는 Naver 공식 OAuth 문서의 현재 값을 사용한다.
-8. Naver upstream이 PKCE를 지원하지 않는 현재 계약 때문에 custom provider의 upstream `pkce_enabled=false`가 필요한지 개발 project에서 확인한다. Account Book BFF→Supabase의 S256 PKCE는 끄지 않는다.
+8. Naver upstream의 현재 PKCE 지원을 공식 계약·개발 응답으로 확인한다. 미지원이 확인된 경우에만 custom provider의 upstream `pkce_enabled=false` 필요 여부를 별도로 판단한다. Account Book BFF→Supabase의 S256 PKCE는 끄지 않는다.
 9. 개발 중에는 애플리케이션 등록자와 등록된 tester만 사용한다.
 10. 성공, 취소, Naver state, callback replay, email 누락, refresh/revoke, stable user identifier mapping을 각각 검증한다.
 11. 일반 사용자에게 열기 전에 사전 검수를 신청한다. 로그인 버튼부터 가입 완료까지의 전체 화면, 정보 활용처, 서비스 이름·logo를 제출하고 실제 개인정보는 가린다.
+
+네이버 프로필의 식별자는 중첩된 `response.id`다. 현재 Supabase custom OAuth 공식 가이드만으로 이 중첩 필드의 매핑 지원을 확정하지 못했다. 실제 사용자 ID 매핑·이메일 누락·갱신이 확인될 때까지 Naver를 활성 목록에 넣지 않는다. 호환되지 않으면 별도 설계가 필요하며 Passport나 임의 중계 URL을 자동 추가하지 않는다.
 
 [Supabase custom OAuth](https://supabase.com/docs/guides/auth/custom-oauth-providers), [Naver 로그인 API](https://developers.naver.com/docs/login/api/api.md), [Naver 사전 검수](https://developers.naver.com/docs/login/verify/)
 

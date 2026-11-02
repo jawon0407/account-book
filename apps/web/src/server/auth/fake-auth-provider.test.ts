@@ -32,6 +32,13 @@ it("implements every provider operation only from explicit deterministic results
 });
 
 const bridgeInput = { email: "verified@example.test", password: "correct horse battery staple" };
+it("uses the explicit loopback bridge for native refresh without replaying a password", async () => {
+  const fetcher = vi.fn<typeof fetch>(async () => validBridgeResponse());
+  const fake = new FakeAuthProvider({ tokenUrl: new URL("http://127.0.0.1:4510/token"), fetcher });
+  const result = await fake.refresh("synthetic-refresh");
+  expect(result.userId).toBe(bridgeUser.id);
+  expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ body: JSON.stringify({ refreshToken: "synthetic-refresh" }) });
+});
 const bridgeUser = { id: "123e4567-e89b-42d3-a456-426614174001", email: bridgeInput.email, emailVerified: true };
 
 it("propagates explicitly configured fake failures", async () => {

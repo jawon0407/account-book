@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { utf16Length } from "./string-length.js";
 import {
   ExpectedVersionSchema,
   IdempotencyKeySchema,
@@ -7,7 +8,7 @@ import {
   VersionSchema,
 } from "./ledger-common.js";
 
-export const CategoryNameSchema = z.string().trim().min(1).max(50);
+export const CategoryNameSchema = z.string().trim().check(utf16Length(1, 50));
 export type CategoryName = z.infer<typeof CategoryNameSchema>;
 
 export const CategorySortOrderSchema = z.number().int().min(0).max(10_000);

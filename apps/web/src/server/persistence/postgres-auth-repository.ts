@@ -13,6 +13,8 @@ import type {
   RotateSessionInput,
 } from "./auth-repository.js";
 import type { TokenEnvelope } from "../security/token-envelope.js";
+import { PROVIDER_CLOCK_SKEW_SECONDS } from "../security/provider-time.js";
+import { validSessionContext, type SessionChannel } from "../security/session-context.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const IDLE_LIFETIME_MS = 7 * DAY_MS;
@@ -95,6 +97,18 @@ function validDigest(value: unknown): value is Uint8Array {
 }
 
 /**
+ * Android 교체 조건의 두 해시·설치 UUID를 검증한다. 같은 해시로 갱신해 이전 자격 증명을 유지하는 입력은 거부한다.
+ * @param value 저장 경계에 전달된 교체 조건. undefined는 웹 갱신이다.
+ * @returns 웹 생략 또는 올바른 Android 교체 조건이면 true.
+ */
+function validSelectorRotation(value: RotateSessionInput["selectorRotation"]): boolean {
+  if (value === undefined) return true;
+  if (value === null || typeof value !== "object") return false;
+  return validDigest(value.expectedHash) && validDigest(value.replacementHash) &&
+    validSessionContext("android", value.deviceId) && !toBuffer(value.expectedHash).equals(toBuffer(value.replacementHash));
+}
+
+/**
  * 암호화 봉투 후보가 null이나 배열이 아닌 객체인지 최소한으로 확인합니다. 필드·인증 태그 검증은 암호화 계층이 맡습니다.
  * @param value DB에서 읽은 봉투 후보.
  * @returns 객체 형태이면 true.
@@ -119,6 +133,7 @@ function toRecord(value: unknown): AuthSessionRecord | null {
     validDate(row.accessTokenExpiresAt), validDate(row.createdAt), validDate(row.lastSeenAt), validDate(row.absoluteExpiresAt),
     row.revokedAt === null || validDate(row.revokedAt), row.revocationPendingAt === null || validDate(row.revocationPendingAt),
     Number.isSafeInteger(row.rotationVersion) && (row.rotationVersion as number) >= 0,
+    validSessionContext(row.clientChannel, row.deviceId),
   ].every(Boolean);
   if (!valid) return null;
   return {
@@ -135,6 +150,8 @@ function toRecord(value: unknown): AuthSessionRecord | null {
     revokedAt: row.revokedAt === null ? null : new Date(row.revokedAt as Date),
     revocationPendingAt: row.revocationPendingAt === null ? null : new Date(row.revocationPendingAt as Date),
     rotationVersion: row.rotationVersion as number,
+    clientChannel: row.clientChannel as SessionChannel,
+    deviceId: row.deviceId as string | null,
   };
 }
 
@@ -146,12 +163,14 @@ function toRecord(value: unknown): AuthSessionRecord | null {
 function toOAuthRecord(value: unknown): OAuthTransactionRecord | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
   const row = value as Record<string, unknown>;
+  if (row.intent !== "sign_in" && row.intent !== "sign_up") return null;
   if (!isUuid(String(row.id)) || !validDigest(row.stateHash) || !validDigest(row.interactionHash) || !["google", "kakao", "naver"].includes(String(row.provider)) || !validEnvelope(row.encryptedPkceVerifier) || !["/app", "/settings/security"].includes(String(row.returnPath)) || !validDate(row.createdAt) || !validDate(row.expiresAt) || (row.consumedAt !== null && !validDate(row.consumedAt))) return null;
   return {
     id: row.id as string,
     stateHash: Uint8Array.from(row.stateHash),
     interactionHash: Uint8Array.from(row.interactionHash),
     provider: row.provider as OAuthTransactionRecord["provider"],
+    intent: row.intent,
     encryptedPkceVerifier: row.encryptedPkceVerifier,
     returnPath: row.returnPath as OAuthTransactionRecord["returnPath"],
     createdAt: new Date(row.createdAt),
@@ -245,7 +264,7 @@ export class PostgresAuthRepository implements AuthRepository {
    * @throws DB 오류는 호출자에게 전달됩니다.
    */
   public async createSession(input: NewSessionRecord, providerIssuedAtSeconds: number): Promise<boolean> {
-    if (!isUuid(input.userId) || !Number.isSafeInteger(providerIssuedAtSeconds) || providerIssuedAtSeconds <= 0) return false;
+    if (!isUuid(input.userId) || !Number.isSafeInteger(providerIssuedAtSeconds) || providerIssuedAtSeconds <= 0 || !validSessionContext(input.clientChannel, input.deviceId)) return false;
     return this.database.transaction(async (transaction) => {
       await transaction.insert(authUserSecurityState).values({ userId: input.userId, minimumAcceptedIat: 0 }).onConflictDoNothing();
       const gates = await transaction.update(authUserSecurityState).set({
@@ -267,6 +286,8 @@ export class PostgresAuthRepository implements AuthRepository {
         revokedAt: input.revokedAt === null ? null : new Date(input.revokedAt),
         revocationPendingAt: input.revocationPendingAt === null ? null : new Date(input.revocationPendingAt),
         rotationVersion: input.rotationVersion,
+        clientChannel: input.clientChannel,
+        deviceId: input.deviceId,
       });
       return true;
     });
@@ -295,8 +316,8 @@ export class PostgresAuthRepository implements AuthRepository {
 
   /** Atomically swaps both encrypted tokens only when the rotation CAS still matches. */
   /**
-   * 기대 버전과 제공자 세션 ID가 여전히 일치하는 활성 세션만 두 암호화 토큰으로 교체합니다. 버전과 마지막 사용 시각도 갱신합니다.
-   * @param input 비교 조건·교체할 암호문·만료 및 현재 시각.
+   * 활성 세션의 암호문과 버전을 한 번에 교체합니다. Android는 채널·설치·이전 해시까지 대조하고 식별자 해시도 같은 UPDATE에서 바꿉니다.
+   * @param input 버전·제공자 세션 비교값, 교체 암호문·시각, 선택적 Android 식별자 교체 조건.
    * @returns 정확히 한 행을 갱신하면 true, 검증 실패나 경합 시 false.
    * @throws DB 갱신 오류.
    */
@@ -309,9 +330,12 @@ export class PostgresAuthRepository implements AuthRepository {
       !isUuid(input.expectedSupabaseSessionId) ||
       !isUuid(input.supabaseSessionId) ||
       !Number.isSafeInteger(input.expectedRotationVersion) ||
-      input.expectedRotationVersion < 0
+      input.expectedRotationVersion < 0 ||
+      !validSelectorRotation(input.selectorRotation)
     ) return false;
+    const native = input.selectorRotation;
     const rows = await this.database.update(authSessions).set({
+      ...(native === undefined ? {} : { selectorHash: toBuffer(native.replacementHash) }),
       encryptedAccessToken: input.encryptedAccessToken,
       encryptedRefreshToken: input.encryptedRefreshToken,
       supabaseSessionId: input.supabaseSessionId,
@@ -325,6 +349,11 @@ export class PostgresAuthRepository implements AuthRepository {
       isNull(authSessions.revokedAt),
       gt(authSessions.absoluteExpiresAt, input.now),
       gt(authSessions.lastSeenAt, cutoff),
+      native === undefined ? eq(authSessions.clientChannel, "web") : and(
+        eq(authSessions.clientChannel, "android"),
+        eq(authSessions.deviceId, native.deviceId),
+        eq(authSessions.selectorHash, toBuffer(native.expectedHash)),
+      ),
     )).returning();
     return rows.length === 1;
   }
@@ -334,13 +363,15 @@ export class PostgresAuthRepository implements AuthRepository {
    * 식별자 해시가 일치하는 미폐기 세션에 폐기 시각을 기록합니다. 제공자 로그아웃 요청은 하지 않습니다.
    * @param hash 폐기할 브라우저 식별자 해시.
    * @param now 기록할 폐기 시각.
+   * @param channel 서버에서 고정한 웹/Android 채널. SQL 조건에 포함해 다른 채널 철회를 막는다.
    * @returns 정확히 한 행을 폐기하면 true.
    * @throws DB 갱신 오류.
    */
-  public async revokeBySelectorHash(hash: Uint8Array, now: Date): Promise<boolean> {
+  public async revokeBySelectorHash(hash: Uint8Array, now: Date, channel: SessionChannel = "web"): Promise<boolean> {
     if (hash.length !== 32 || !validDate(now)) return false;
     const rows = await this.database.update(authSessions).set({ revokedAt: new Date(now) }).where(and(
       eq(authSessions.selectorHash, toBuffer(hash)),
+      eq(authSessions.clientChannel, channel),
       isNull(authSessions.revokedAt),
     )).returning();
     return rows.length === 1;
@@ -392,6 +423,7 @@ export class PostgresAuthRepository implements AuthRepository {
       stateHash: toBuffer(input.stateHash),
       interactionHash: toBuffer(input.interactionHash),
       provider: input.provider,
+      intent: input.intent,
       encryptedPkceVerifier: input.encryptedPkceVerifier,
       returnPath: input.returnPath,
       createdAt: new Date(input.createdAt),
@@ -576,7 +608,8 @@ export class PostgresAuthRepository implements AuthRepository {
       if (rows.length !== 1) return false;
       await transaction.insert(authUserSecurityState).values({ userId: input.userId, minimumAcceptedIat: 0 }).onConflictDoNothing();
       const gates = await transaction.update(authUserSecurityState).set({
-        minimumAcceptedIat: sql`greatest(${authUserSecurityState.minimumAcceptedIat}, floor(extract(epoch from clock_timestamp()))::bigint + 1)`,
+        // Auth가 DB보다 최대 허용 오차만큼 앞서 발급한 변경 전 토큰도 다시 세션이 되지 못하게 한다.
+        minimumAcceptedIat: sql`greatest(${authUserSecurityState.minimumAcceptedIat}, floor(extract(epoch from clock_timestamp()))::bigint + ${PROVIDER_CLOCK_SKEW_SECONDS} + 1)`,
       }).where(eq(authUserSecurityState.userId, input.userId)).returning();
       if (gates.length !== 1) throw new Error("AUTH_USER_SECURITY_STATE_LOCK_FAILED");
       await transaction.update(authSessions).set({ revokedAt: new Date(input.now) }).where(and(

@@ -60,8 +60,8 @@
 
 - [x] 새 독립 리뷰어에게 전체 변경·spec·검증 증거 전달. Critical0/Important1/Minor0. 실DB 대조·시간 검사 누락을 한 차례 보완했고 새 DB112개 및 전체 회귀를 통과했다.
 - [x] 실제 파일 수/줄 수, RED/GREEN/전체 검증/한계를 MD 및 Notion10/A2 페이지에 기록.
-- [ ] 최신 head/base의 PR CI·정상 merge·main provenance/품질 실행 확인. 보호 우회 없음.
-- [ ] A2.2 상태 전이의 작은 설계/계획으로 계속한다. A2.1만 끝났음을 표시한다.
+- [x] 최신 c13a5a7의 push36444134209·PR36444190431, 정상 PR18 merge b7ecd830, main36444621225 provenance/품질 실행 확인. 보호 우회 없음.
+- [x] A2.1만 완료됐음을 기록하고 [A2.2 사전 범위](../../status/2026-09-29-bank-state-transitions-next.ko.md)를 다음 기능 브랜치에 정리했다. A2.2 상세 설계/실행 계획/구현은 다음 작업이며 이번 완료에 포함하지 않는다.
 
 ## 계획 자체 검토
 

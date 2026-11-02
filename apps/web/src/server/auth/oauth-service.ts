@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { AuthProviderSchema, CurrentUserSchema, type AuthProvider, type CurrentUser } from "@account-book/contracts";
 import type { AuthRepository, OAuthTransactionRecord } from "../persistence/auth-repository.js";
 import { createPkceVerifier, derivePkceChallenge } from "../security/pkce.js";
+import { validProviderIssuedAt } from "../security/provider-time.js";
 import { createSessionSelector, hashSessionSelector } from "../security/session-selector.js";
 import { decryptToken, encryptToken, type TokenKeyring } from "../security/token-envelope.js";
 import type { SessionTokenPair } from "../session/session-service.js";
@@ -16,6 +17,7 @@ export type OAuthStartContext = Readonly<{
   callbackBaseUrl: URL;
   interactionSelector: string;
   returnPath: "/app" | "/settings/security";
+  intent?: "sign_in" | "sign_up";
   now: Date;
 }>;
 /** Browser callback values accepted only after exact transaction matching. */
@@ -33,6 +35,7 @@ type SessionCreator = Readonly<{
   create(tokens: SessionTokenPair, now: Date): Promise<Readonly<{ selector: string; accessTokenExpiresAt: Date; absoluteExpiresAt: Date }>>
 }>;
 type PublicResult = Readonly<{ selector: string; user: CurrentUser; accessTokenExpiresAt: Date; absoluteExpiresAt: Date; returnPath: "/app" | "/settings/security" }>;
+type OAuthResult = PublicResult | Readonly<{ status: "sign_in_required" }>;
 
 /** Fixed OAuth use-case error that never includes callback or provider values. */
 export class OAuthServiceError extends Error {
@@ -80,6 +83,16 @@ function validUuid(value: unknown): value is string { return typeof value === "s
  * @throws 허용되지 않은 경로이면 OAuth 오류.
  */
 function validReturnPath(value: unknown): "/app" | "/settings/security" { if (typeof value !== "string" || !RETURN_PATHS.has(value)) return fail(); return value as "/app" | "/settings/security"; }
+/**
+ * 서버에 저장할 OAuth 의도를 두 가지 허용 값으로 제한합니다.
+ * @param value 시작 요청 또는 저장 레코드의 의도.
+ * @returns 검증된 가입·로그인 의도.
+ * @throws 허용 값이 아니면 OAuth 트랜잭션 오류.
+ */
+function validIntent(value: unknown): "sign_in" | "sign_up" {
+  if (value !== "sign_in" && value !== "sign_up") return fail();
+  return value;
+}
 /**
  * 콜백 코드가 비어 있지 않고 4096자 이하이며 앞뒤 공백·제어문자가 없는지 검사합니다.
  * @param value 외부 콜백 코드.
@@ -154,9 +167,9 @@ function sameDigest(left: Uint8Array, right: Uint8Array): boolean { return left.
 function trustedPair(value: AuthTokenPair, now: Date): AuthTokenPair {
   const user = CurrentUserSchema.safeParse(value?.user);
   if (
-    !user.success || !user.data.emailVerified || user.data.id !== value?.userId || !validUuid(value?.userId) || !validUuid(value?.supabaseSessionId) ||
+    !user.success || (user.data.email !== null && !user.data.emailVerified) || user.data.id !== value?.userId || !validUuid(value?.userId) || !validUuid(value?.supabaseSessionId) ||
     typeof value?.accessToken !== "string" || value.accessToken.length === 0 || typeof value?.refreshToken !== "string" || value.refreshToken.length === 0 ||
-    !Number.isSafeInteger(value?.issuedAtSeconds) || value.issuedAtSeconds <= 0 || value.issuedAtSeconds > Math.floor(now.getTime() / 1000) ||
+    !validProviderIssuedAt(value?.issuedAtSeconds, now.getTime()) ||
     !validDate(value?.accessTokenExpiresAt) || value.accessTokenExpiresAt.getTime() <= now.getTime() || value.accessTokenExpiresAt.getTime() <= value.issuedAtSeconds * 1000
   ) return fail("AUTH_PROVIDER_UNAVAILABLE");
   return value;
@@ -172,7 +185,7 @@ function trustedClaim(record: OAuthTransactionRecord, input: { provider: AuthPro
   if (
     !validUuid(record?.id) || record?.provider !== input.provider || !sameDigest(record?.stateHash, input.stateHash) || !sameDigest(record?.interactionHash, input.interactionHash) ||
     !validDate(record?.createdAt) || !validDate(record?.expiresAt) || !validDate(record?.consumedAt) || record.expiresAt.getTime() <= input.now.getTime() ||
-    record.expiresAt.getTime() - record.createdAt.getTime() !== OAUTH_LIFETIME_MS || !validReturnPath(record?.returnPath)
+    record.expiresAt.getTime() - record.createdAt.getTime() !== OAUTH_LIFETIME_MS || !validReturnPath(record?.returnPath) || !validIntent(record?.intent)
   ) return fail();
   return record;
 }
@@ -188,7 +201,7 @@ function providerFailure(error: unknown): never {
   return fail("AUTH_PROVIDER_UNAVAILABLE");
 }
 
-/** Owns OAuth state, PKCE persistence, atomic callback claim, and opaque-session creation. */
+/** Owns OAuth state, intent, PKCE persistence, atomic claim, and login-only opaque sessions. */
 export class OAuthService {
   /** Installs narrow persistence/provider/session ports and injectable cryptographic generators for deterministic tests. */
   /**
@@ -223,7 +236,7 @@ export class OAuthService {
   /**
    * 새 state와 PKCE를 만들고 암호화한 검증값을 10분 트랜잭션으로 먼저 저장합니다. 이후 제공자가 준 인증 URL을 검증합니다.
    * @param providerValue 검사 전 제공자 식별자.
-   * @param context 신뢰된 콜백·브라우저·복귀 경로·시각.
+   * @param context 신뢰된 콜백·브라우저·복귀 경로·가입/로그인 의도·시각. 의도 생략은 로그인이다.
    * @returns 브라우저를 보낼 인증 URL만 담은 객체.
    * @throws 입력·저장·제공자 실패의 고정 코드.
    */
@@ -233,6 +246,7 @@ export class OAuthService {
       if (!provider.success || !validDate(context?.now)) return fail();
       const callback = validCallbackBase(context?.callbackBaseUrl);
       const returnPath = validReturnPath(context?.returnPath);
+      const intent = validIntent(context?.intent === undefined ? "sign_in" : context.intent);
       const interactionHash = selectorHash(context?.interactionSelector);
       const state = this.createState();
       const stateHash = selectorHash(state);
@@ -247,6 +261,7 @@ export class OAuthService {
         stateHash,
         interactionHash,
         provider: provider.data,
+        intent,
         encryptedPkceVerifier: encryptToken(verifier, { recordId: id, tokenKind: "pkce" }, this.keyring),
         returnPath,
         createdAt: new Date(context.now),
@@ -266,13 +281,13 @@ export class OAuthService {
    * @throws A fixed OAuth/provider code for invalid, replayed, expired, or failed callbacks.
    */
   /**
-   * 제공자·state·브라우저가 일치하는 트랜잭션을 한 번만 사용 처리한 뒤 PKCE로 코드를 교환하고 앱 세션을 만듭니다.
+   * 제공자·state·브라우저가 일치하는 트랜잭션을 한 번만 사용 처리한 뒤 PKCE로 코드를 교환합니다. 저장 의도가 로그인인 경우에만 앱 세션을 만듭니다.
    * @param callback 제공자·state·인증 코드.
    * @param context 기존 브라우저 식별자와 확인 시각.
-   * @returns 공개 사용자·세션 정보와 저장해 둔 내부 복귀 경로.
+   * @returns 로그인은 공개 세션과 내부 복귀 경로, 가입은 별도 로그인 필요 표시만 반환합니다.
    * @throws 재사용·만료·불일치·제공자 실패의 고정 코드.
    */
-  public async complete(callback: OAuthCallback, context: OAuthCompleteContext): Promise<PublicResult> {
+  public async complete(callback: OAuthCallback, context: OAuthCompleteContext): Promise<OAuthResult> {
     try {
       const provider = AuthProviderSchema.safeParse(callback?.provider);
       if (!provider.success || !validDate(context?.now)) return fail();
@@ -285,9 +300,12 @@ export class OAuthService {
       const record = trustedClaim(claimed, input);
       const codeVerifier = decryptToken(record.encryptedPkceVerifier, { recordId: record.id, tokenKind: "pkce" }, this.keyring);
       derivePkceChallenge(codeVerifier);
-      const providerPair = await this.provider.exchangeOAuthCode({ code, codeVerifier });
+      const providerPair = await this.provider.exchangeOAuthCode({ code, codeVerifier, provider: record.provider });
       const completedAt = postProviderTime(this.clock);
       const pair = trustedPair(providerPair, completedAt);
+      // 가입은 Supabase의 동일 신원 재사용 결과와 무관하게 별도 로그인으로 이어진다.
+      // 가입 시각·이메일·프로필로 기존 계정 여부를 추정하거나 앱 세션을 발급하지 않는다.
+      if (record.intent === "sign_up") return { status: "sign_in_required" };
       const created = await this.sessions.create({ accessToken: pair.accessToken, refreshToken: pair.refreshToken, userId: pair.userId, supabaseSessionId: pair.supabaseSessionId, issuedAtSeconds: pair.issuedAtSeconds, accessTokenExpiresAt: pair.accessTokenExpiresAt }, completedAt);
       return { selector: created.selector, user: pair.user, accessTokenExpiresAt: created.accessTokenExpiresAt, absoluteExpiresAt: created.absoluteExpiresAt, returnPath: record.returnPath };
     } catch (error) {

@@ -45,8 +45,13 @@ export class FakeAuthProvider implements AuthProviderPort {
   public async signInWithPassword(input: SignInInput): Promise<AuthTokenPair> {
     this.calls.signInWithPassword.push(input);
     if (this.bridge === undefined) return this.required(this.signInResult);
+    return this.bridgeRequest(input, this.bridge);
+  }
+
+  /** @param input 합성 로그인 또는 갱신 입력. @param bridge 명시적 로컬 테스트 연결. 운영에서는 컨테이너가 fake 모드를 금지한다. */
+  private async bridgeRequest(input: SignInInput | { refreshToken: string }, bridge: Readonly<{ tokenUrl: URL; fetcher?: typeof fetch }>): Promise<AuthTokenPair> {
     try {
-      const response = await (this.bridge.fetcher ?? fetch)(this.bridge.tokenUrl, {
+      const response = await (bridge.fetcher ?? fetch)(bridge.tokenUrl, {
         body: JSON.stringify(input),
         headers: { "Content-Type": "application/json" },
         method: "POST",
@@ -89,7 +94,11 @@ export class FakeAuthProvider implements AuthProviderPort {
    * @returns 새 접근·갱신 토큰 및 사용자·만료 정보.
    * @throws 설정된 failure 또는 필수 결과 누락 시 AuthProviderError.
    */
-  public async refresh(refreshToken: string): Promise<AuthTokenPair> { this.calls.refresh.push(refreshToken); return this.required(this.refreshResult); }
+  public async refresh(refreshToken: string): Promise<AuthTokenPair> {
+    this.calls.refresh.push(refreshToken);
+    if (this.bridge === undefined) return this.required(this.refreshResult);
+    return this.bridgeRequest({ refreshToken }, this.bridge);
+  }
   /**
    * 호출 입력을 메모리의 calls에 기록합니다. 실제 외부 폐기 없이 설정된 실패만 재현합니다.
    * @param accessToken 복호화한 제공자 접근 토큰.

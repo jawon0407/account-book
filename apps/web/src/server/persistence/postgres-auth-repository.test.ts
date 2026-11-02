@@ -18,11 +18,43 @@ describe("PostgresAuthRepository", () => {
     expect(values?.selectorHash).toEqual(expect.any(Buffer));
     expect(values?.selectorHash).not.toEqual(digest);
     expect(Object.keys(values ?? {}).sort()).toEqual([
-      "absoluteExpiresAt", "accessTokenExpiresAt", "createdAt", "encryptedAccessToken", "encryptedRefreshToken", "id", "lastSeenAt", "revocationPendingAt", "revokedAt", "rotationVersion", "selectorHash", "supabaseSessionId", "userId",
+      "absoluteExpiresAt", "accessTokenExpiresAt", "clientChannel", "createdAt", "deviceId", "encryptedAccessToken", "encryptedRefreshToken", "id", "lastSeenAt", "revocationPendingAt", "revokedAt", "rotationVersion", "selectorHash", "supabaseSessionId", "userId",
     ]);
     expect(values).not.toHaveProperty("accessToken");
     expect(values).not.toHaveProperty("refreshToken");
     expect(JSON.stringify(values)).not.toContain("tainted-");
+  });
+
+  it("round-trips Android context and rejects missing or contradictory context", async () => {
+    const { database, repository } = subject();
+    const deviceId = "123e4567-e89b-42d3-a456-426614174099";
+    const input = session({ clientChannel: "android", deviceId });
+    await expect(repository.createSession(input, Math.floor(now.getTime() / 1000))).resolves.toBe(true);
+    expect(database.calls[2]?.values).toMatchObject({ clientChannel: "android", deviceId });
+    database.rows = [input];
+    await expect(repository.findActiveBySelectorHash(randomBytes(32), now)).resolves.toMatchObject({ clientChannel: "android", deviceId });
+    for (const invalid of [
+      { clientChannel: undefined, deviceId: null }, { clientChannel: "other", deviceId: null },
+      { clientChannel: "web", deviceId }, { clientChannel: "android", deviceId: null },
+      { clientChannel: "android", deviceId: "bad" },
+    ]) {
+      database.rows = [session(invalid)];
+      await expect(repository.findActiveBySelectorHash(randomBytes(32), now)).resolves.toBeNull();
+      database.calls.length = 0;
+      await expect(repository.createSession(session(invalid), Math.floor(now.getTime() / 1000))).resolves.toBe(false);
+      expect(database.calls).toHaveLength(0);
+    }
+  });
+
+  it("includes the server-selected channel in current-session revocation SQL", async () => {
+    const { database, repository } = subject();
+    await repository.revokeBySelectorHash(randomBytes(32), now);
+    await repository.revokeBySelectorHash(randomBytes(32), now, "android");
+    const web = query(database.calls[0]?.predicates);
+    const android = query(database.calls[1]?.predicates);
+    expect(web.sql).toContain('"client_channel" =');
+    expect(web.params).toContain("web");
+    expect(android.params).toContain("android");
   });
 
   it("rejects stale or noncanonical issuance times without inserting a session", async () => {
@@ -92,8 +124,10 @@ describe("PostgresAuthRepository", () => {
     expect(statement.sql).toContain('"revoked_at" is null');
     expect(statement.sql).toContain('"absolute_expires_at" > $4');
     expect(statement.sql).toContain('"last_seen_at" > $5');
+    expect(statement.sql).toContain('"client_channel" = $6');
+    expect(update?.values).not.toHaveProperty("selectorHash");
     expect(statement.sql).not.toContain(" or ");
-    expect(statement.params).toEqual([id, 0, providerSessionId, now.toISOString(), new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString()]);
+    expect(statement.params).toEqual([id, 0, providerSessionId, now.toISOString(), new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000).toISOString(), "web"]);
 
     database.affectedRows = [];
     await expect(repository.rotate({
@@ -129,6 +163,37 @@ describe("PostgresAuthRepository", () => {
     expect(queries[1]).toContain('"revoked_at" is null');
     expect(queries[2]).toContain('"revoked_at" is not null');
     expect(database.calls[2]?.values).toHaveProperty("revocationPendingAt");
+  });
+
+  it("changes the native selector in the same UPDATE guarded by channel, device and previous digest", async () => {
+    const { database, repository } = subject();
+    const selectorRotation = { expectedHash: randomBytes(32), replacementHash: randomBytes(32), deviceId: "123e4567-e89b-42d3-a456-426614174099" };
+    await expect(repository.rotate({ sessionId: id, expectedRotationVersion: 0, expectedSupabaseSessionId: providerSessionId,
+      encryptedAccessToken: envelope, encryptedRefreshToken: envelope, supabaseSessionId: providerSessionId,
+      accessTokenExpiresAt: new Date(now.getTime() + 60_000), now, selectorRotation })).resolves.toBe(true);
+    expect(database.calls).toHaveLength(1);
+    const update = database.calls[0];
+    expect(update?.values).toMatchObject({ selectorHash: selectorRotation.replacementHash, encryptedAccessToken: envelope, encryptedRefreshToken: envelope });
+    expect(update?.values).not.toHaveProperty("deviceId");
+    expect(update?.values).not.toHaveProperty("absoluteExpiresAt");
+    const statement = query(update?.predicates);
+    expect(statement.sql).toContain('"client_channel" =');
+    expect(statement.sql).toContain('"device_id" =');
+    expect(statement.sql).toContain('"selector_hash" =');
+    expect(statement.params).toEqual(expect.arrayContaining(["android", selectorRotation.deviceId, selectorRotation.expectedHash]));
+  });
+
+  it("rejects malformed or unchanged native selector rotation before writing", async () => {
+    const { database, repository } = subject();
+    const hash = randomBytes(32);
+    const valid = { expectedHash: hash, replacementHash: randomBytes(32), deviceId: "123e4567-e89b-42d3-a456-426614174099" };
+    for (const selectorRotation of [null, {}, { ...valid, expectedHash: randomBytes(31) }, { ...valid, replacementHash: "invalid" },
+      { ...valid, replacementHash: hash }, { ...valid, deviceId: "invalid" }]) {
+      await expect(repository.rotate({ sessionId: id, expectedRotationVersion: 0, expectedSupabaseSessionId: providerSessionId,
+        encryptedAccessToken: envelope, encryptedRefreshToken: envelope, supabaseSessionId: providerSessionId,
+        accessTokenExpiresAt: new Date(now.getTime() + 60_000), now, selectorRotation })).resolves.toBe(false);
+    }
+    expect(database.calls).toHaveLength(0);
   });
 
   it("does not persist revocation updates for invalid adapter inputs", async () => {

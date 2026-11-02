@@ -1,0 +1,27 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.accountbook.notificationaccess'
+version = '0.1.0'
+
+// No runtime/JavaScript switch. Release always ignores the opt-in debug property.
+def syntheticCapture = providers.gradleProperty('accountBookSyntheticCapture').orElse('false').get()
+if (!(syntheticCapture in ['true', 'false'])) {
+  throw new GradleException('accountBookSyntheticCapture must be true or false')
+}
+
+android {
+  namespace 'com.accountbook.notificationaccess'
+  buildFeatures { buildConfig true }
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+    buildConfigField 'boolean', 'SYNTHETIC_CAPTURE_ONLY', 'false'
+  }
+  buildTypes {
+    debug { buildConfigField 'boolean', 'SYNTHETIC_CAPTURE_ONLY', syntheticCapture }
+    release { buildConfigField 'boolean', 'SYNTHETIC_CAPTURE_ONLY', 'false' }
+  }
+}

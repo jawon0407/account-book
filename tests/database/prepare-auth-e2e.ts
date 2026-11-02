@@ -8,6 +8,8 @@ const migrations = [
   "202607200002_server_pkce_transactions.sql",
   "202607200003_user_security_state.sql",
   "202607230001_delegated_jwt_replay.sql",
+  // BFF session queries select these columns for both web and Android logins.
+  "20261016040532_native_session_channel.sql",
 ] as const;
 
 const prepareRoles = `

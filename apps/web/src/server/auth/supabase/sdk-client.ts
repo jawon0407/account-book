@@ -25,9 +25,10 @@ export type SupabaseClient = Readonly<{ auth: {
   setSession(input: unknown): Promise<unknown>;
   /**
    * 현재 SDK 세션의 로그아웃을 요청하는 최소 인터페이스입니다.
+   * @param input 다른 기기의 세션을 폐기하지 않는 고정 local 범위.
    * @returns SDK 성공 또는 오류 응답.
    */
-  signOut(): Promise<unknown>;
+  signOut(input: { scope: "local" }): Promise<unknown>;
   /**
    * 현재 SDK 사용자 정보를 변경합니다.
    * @param input 변경할 비밀번호 등 사용자 필드.

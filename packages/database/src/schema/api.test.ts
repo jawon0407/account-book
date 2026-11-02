@@ -49,7 +49,7 @@ describe("delegated JWT replay schema", () => {
     const migration = await readFile(migrationUrl, "utf8").catch(() => "");
 
     expect(migration).toMatch(/create role app_api login nosuperuser nocreatedb nocreaterole noinherit noreplication nobypassrls/iu);
-    expect(migration).toMatch(/alter role app_api login nosuperuser nocreatedb nocreaterole noinherit noreplication nobypassrls/iu);
+    expect(migration).toMatch(/alter role app_api login nocreatedb nocreaterole noinherit/iu);
     expect(migration).toMatch(/revoke all privileges on schema app_private from app_api/iu);
     expect(migration).toMatch(/revoke all privileges on table app_private\.api_jwt_replays from public, anon, authenticated, service_role, app_session_bff, app_api/iu);
     expect(migration).toMatch(/grant usage on schema app_private to app_api/iu);
