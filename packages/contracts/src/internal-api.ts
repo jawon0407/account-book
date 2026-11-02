@@ -26,6 +26,8 @@ export const DelegatedScopeSchema = z.enum([
   "transaction:write",
   "collector:read",
   "collector:write",
+  "notification:read",
+  "notification:write",
   "dashboard:read",
   "bank-connection:read",
   "bank-connection:write",

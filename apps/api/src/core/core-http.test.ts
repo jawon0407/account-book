@@ -18,6 +18,7 @@ import { TransactionsRepository } from "../transactions/transactions.repository.
 import { CoreError } from "./core-error.js";
 import { CollectorRepository } from "../collector/collector.repository.js";
 import { NotificationConsentRepository } from "../collector/notification-consent.repository.js";
+import { NotificationTransactionsRepository } from "../notification-transactions/notification-transactions.repository.js";
 
 const userId = "11111111-1111-4111-8111-111111111111", resource = "22222222-2222-4222-8222-222222222222";
 const profile = { id: userId, nickname: null, avatarObjectKey: null, role: "member", signupProvider: "email", version: 1, createdAt: "2026-09-29T00:00:00Z", updatedAt: "2026-09-29T00:00:00Z" };
@@ -33,6 +34,8 @@ describe("core API signed HTTP boundary", () => {
   const accountRepo = { list: vi.fn(async () => ({ items: [account] })), create: vi.fn(async () => account), update: vi.fn(async () => account), archive: vi.fn(async () => account) };
   const categoryRepo = { list: vi.fn(async () => ({ items: [category] })), create: vi.fn(async () => category), update: vi.fn(async () => category), archive: vi.fn(async () => category) };
   const transactionRepo = { list: vi.fn(async () => ({ items: [], nextCursor: null })), create: vi.fn(async () => ({ id: resource })), update: vi.fn(async () => ({ id: resource, version: 2 })), remove: vi.fn(async () => ({ id: resource, version: 2, deletedAt: profile.createdAt })) };
+  const receipt = { eventId: resource,transactionId: resource,timeNeedsReview: true };
+  const ingestionRepo = { create: vi.fn(async () => receipt),get: vi.fn(async () => receipt) };
   beforeAll(async () => {
     const keys = await generateKeyPair("ES256"); privateKey = keys.privateKey;
     const used = new Set<string>();
@@ -45,11 +48,31 @@ describe("core API signed HTTP boundary", () => {
       .overrideProvider(CategoriesRepository).useValue(categoryRepo)
       .overrideProvider(TransactionsRepository).useValue(transactionRepo)
       .overrideProvider(NotificationConsentRepository).useValue(consentRepo)
+      .overrideProvider(NotificationTransactionsRepository).useValue(ingestionRepo)
       .overrideProvider(CollectorRepository).useValue(collectorRepo).compile();
     app = module.createNestApplication<NestFastifyApplication>(createApiFastifyAdapter(), { logger: false });
     registerRequestBodyParsers(app); await configureApiApplication(app); await app.init(); await app.getHttpAdapter().getInstance().ready();
   });
   afterAll(async () => { await app?.close(); });
+
+  it("binds minimal notification ingestion to signed Android identity and dedicated scopes", async () => {
+    const path = "/v1/notification-transactions", value = { eventId: resource,collectorVersion: 1,consentVersion: 1,sourceApp: "com.kbstar.kbbank",parserVersion: "kb-v1",type: "expense",amountKrw: 20000,counterpartyName: null,receivedAt: "2026-11-02T01:00:00.000Z" };
+    const response = await send("POST",path,"notification:write" as DelegatedScope,value,"android");
+    expect(response.statusCode).toBe(201); expect(response.json()).toEqual(receipt);
+    expect(response.headers["cache-control"]).toContain("no-store");
+    expect(ingestionRepo.create).toHaveBeenCalledWith(userId,expect.any(String),value);
+    expect((await send("GET",`${path}/${resource}`,"notification:read" as DelegatedScope,undefined,"android")).json()).toEqual(receipt);
+    expect((await send("POST",path,"notification:write" as DelegatedScope,value)).statusCode).toBe(403);
+    expect((await send("POST",path,"collector:write",value,"android")).statusCode).toBe(401);
+    expect((await send("GET",`${path}/${resource}`,"notification:write" as DelegatedScope,undefined,"android")).statusCode).toBe(401);
+    ingestionRepo.create.mockClear();
+    for (const change of [{ userId },{ rawText: "private" },{ amountKrw: 0 },{ sourceApp: "other.app" }]) {
+      expect((await send("POST",path,"notification:write" as DelegatedScope,{ ...value,...change },"android")).statusCode).toBe(400);
+    }
+    expect((await send("POST",`${path}?userId=x`,"notification:write" as DelegatedScope,value,"android")).statusCode).toBe(400);
+    expect((await send("GET",`${path}/invalid`,"notification:read" as DelegatedScope,undefined,"android")).statusCode).toBe(400);
+    expect(ingestionRepo.create).not.toHaveBeenCalled();
+  });
 
   it("exposes Android-only consent with strict inputs and method scopes", async () => {
     const path = "/v1/collector/consent";

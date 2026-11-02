@@ -17,7 +17,8 @@
 - 로컬에서는 Git이 무시하는 기존 `output/` 임시 화면 검사 파일의 브라우저 전역 변수 때문에 원래 lint 명령이 실패했다. 해당 파일과 제품 설정은 건드리지 않고 로컬 ESLint 명령에만 `--ignore-pattern output/`을 적용한 뒤 나머지는 원래 verify와 같은 단계를 실행했다. 원격 CI의 `pnpm verify`는 변경하지 않았다.
 - 제한된 실행 환경에서 임시 Git 저장소/Bash 권한 시험이 실패해 동일 검사를 정상 권한으로 다시 실행했고 위 결과를 확인했다. 테스트를 삭제하거나 건너뛰지 않았다.
 - 독립 코드 리뷰: Critical 0 / Important 0 / Minor 0. 리뷰어가 추가로 실행한 라우터 6건·취약 잠금 파일 변형 시험도 통과했다. 실제 Android 기기 성능까지 보장하는 검사는 아니다.
-- 정확한 새 SHA의 원격 CI는 푸시 후 확인한다. 로컬 통과만으로 원격 통과 또는 전체 보안 승인을 주장하지 않는다.
+- 커밋 `a3816268f00a9662e380ea4306bf5576e7cb7bca` 푸시 완료. [push CI](https://github.com/jawon0407/account-book/actions/runs/41371289047)와 [PR CI](https://github.com/jawon0407/account-book/actions/runs/41371293627) 모두 completed/success를 확인했다. 원래 verify·인증 커버리지·DB 통합·실제 브라우저 인증 E2E·High 감사·이력 게이트까지 통과했다.
+- GitHub 기본 브랜치의 Dependabot 경고는 푸시 시점 49건(Critical6/High8/Moderate23/Low12)으로 별도 남아 있다. 위 기능 브랜치 production 감사와 대상·시점이 다르다.
 
 ## 남아 있는 경고와 범위
 
@@ -28,4 +29,4 @@
 
 ## 다음 단계
 
-원격 CI 통과를 확인한 후 기존 승인 설계에 맞춰 알림 최소 추출값의 API·DB 접수를 시작한다. 저장 시점의 세션·동의·대표 기기 검증, 계좌/분류 미지정 원장, 동일 요청 1회 반영을 우선한다. 앱 자동 전송·백그라운드 수집·여러 은행 형식 확대는 별도 단계다.
+원격 CI 통과를 확인해 [API·DB 기반 계획](../superpowers/plans/2026-11-02-notification-ingestion-foundation.md)에 따라 착수했다. 저장 시점의 세션·동의·대표 기기 검증, 계좌/분류 미지정 원장, 동일 요청 1회 반영을 우선한다. 앱 자동 전송·백그라운드 수집·여러 은행 형식 확대는 별도 단계다.

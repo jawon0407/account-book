@@ -10,6 +10,7 @@ export { ledgerAccounts } from "./schema/ledger-accounts.js";
 export { ledgerCategories } from "./schema/ledger-categories.js";
 export { ledgerTransfers } from "./schema/ledger-transfers.js";
 export { notificationConsent } from "./schema/notification-consent.js";
+export { notificationReceipts } from "./schema/notification-receipts.js";
 export { ledgerTransactions } from "./schema/ledger-transactions.js";
 export { ledgerTimeHistory } from "./schema/ledger-time-history.js";
 export { ledgerIdempotencyRequests } from "./schema/ledger-idempotency.js";

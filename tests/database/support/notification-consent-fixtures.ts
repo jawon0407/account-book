@@ -5,8 +5,8 @@ import { CORE_MIGRATIONS, EXISTING_USER } from "./core-database.js";
 const CONTROL = "postgresql://postgres:postgres@127.0.0.1:5432/account_book_test";
 export const CONSENT_URL = "postgresql://postgres:postgres@127.0.0.1:5432/account_book_consent_test";
 
-/** @returns 새 폐기용 DB에 서버 동의 migration까지 적용한 테스트 경계. 운영 DB를 사용하지 않는다. */
-export async function openNotificationConsentDatabase() {
+/** @param ingestion true면 신규 접수 저장소도 적용한다. @returns 새 폐기용 DB 경계. 운영 DB를 사용하지 않는다. */
+export async function openNotificationConsentDatabase(ingestion = false) {
   if (process.env.TEST_DATABASE_URL !== CONTROL || process.env.TEST_DATABASE_DISPOSABLE !== "true") throw new Error("CONSENT_TEST_DATABASE_CONFIGURATION_INVALID");
   const control = new Client({ connectionString: CONTROL }), admin = new Client({ connectionString: CONSENT_URL });
   let created = false, ownerCreated = false;
@@ -43,6 +43,7 @@ export async function openNotificationConsentDatabase() {
     await admin.query(await readFile(new URL("../../../supabase/migrations/20261016040532_native_session_channel.sql",import.meta.url),"utf8"));
     await admin.query("grant usage,create on schema app_private to app_consent_test_owner; grant select,update,references on app_private.auth_sessions to app_consent_test_owner; set role app_consent_test_owner");
     for (const name of ["20261016053724_collector_lease.sql","20261021050645_notification_consent.sql"]) await admin.query(await readFile(new URL(`../../../supabase/migrations/${name}`,import.meta.url),"utf8"));
+    if (ingestion) await admin.query(await readFile(new URL("../../../supabase/migrations/20261102011955_notification_receipts.sql",import.meta.url),"utf8"));
     await admin.query("reset role");
     for (const role of roles) await admin.query(`alter role ${role.rolname} ${role.rolcanlogin ? "login" : "nologin"}`);
     await admin.query("commit"); return { admin, close };

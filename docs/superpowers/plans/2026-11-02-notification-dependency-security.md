@@ -37,7 +37,7 @@
 - [x] Change scoped override to 0.5.1 and regenerate/install with pnpm; review lockfile diff for unrelated changes.
 - [x] Run routing/policy tests, production audit at high threshold, and verify stages; exit 0, High/Critical 0. Local-only lint exclusion of ignored output/ is documented in the status record; remote verify remains unchanged.
 - [x] Independent review, record results and remaining lower-severity advisories. Critical/Important/Minor all 0; only reviewed files will be committed.
-- [ ] Push normal feature ref and observe the exact new SHA's push/PR workflows until terminal status. Record results in Notion.
+- [x] Push normal feature ref and observe exact SHA a3816268f00a9662e380ea4306bf5576e7cb7bca: push 41371289047 and PR 41371293627 completed/success. Recorded in Notion.
 
 ### Task 2: Hand off to notification ingestion API/DB
 
@@ -45,6 +45,6 @@
 
 **Interfaces:** Consumes successful Task 1 remote CI. Produces scoped API/DB plan with minimal normalized input, authenticated collector validation, nullable account/category ledger writes, idempotency and privacy tests.
 
-- [ ] Read approved data-flow design and current API/DB code; identify remaining technical decisions without reopening approved product choices.
-- [ ] Announce exact files/size and record plan before product changes.
-- [ ] Continue implementation under its own verification plan; do not enable real notification capture or migrate production implicitly.
+- [x] Read approved data-flow design and current API/DB code; identify remaining technical decisions without reopening approved product choices.
+- [x] Announce exact files/size and record plan before product changes.
+- [x] Hand off implementation to `2026-11-02-notification-ingestion-foundation.md`; no real notification capture or production migration. This checkbox denotes handoff, not ingestion completion.

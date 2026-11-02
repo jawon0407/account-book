@@ -14,12 +14,17 @@ import { CollectorController } from "../collector/collector.controller.js";
 import { CollectorRepository } from "../collector/collector.repository.js";
 import { NotificationConsentRepository } from "../collector/notification-consent.repository.js";
 import { NotificationConsentController } from "../collector/notification-consent.controller.js";
+import { NotificationTransactionsController } from "../notification-transactions/notification-transactions.controller.js";
+import { NotificationTransactionsRepository } from "../notification-transactions/notification-transactions.repository.js";
 
 /** 기존 인증 풀/가드를 재사용해 세 기능을 연결한다. 새 풀·고권한 계정·우회 인증은 만들지 않는다. */
 @Module({
   imports: [MeModule],
-  controllers: [ProfilesController, AccountsController, CategoriesController, TransactionsController, CollectorController, NotificationConsentController],
+  controllers: [ProfilesController, AccountsController, CategoriesController, TransactionsController, CollectorController, NotificationConsentController, NotificationTransactionsController],
   providers: [
+    { provide: NotificationTransactionsRepository, inject: [UserDatabase],
+      /** @param db 사용자 DB 경계. 동의 안내·모바일 전송 후속 검증 전까지 기본 비활성으로 유지한다. */
+      useFactory: (db: UserDatabase) => new NotificationTransactionsRepository(db) },
     { provide: NotificationConsentRepository, inject: [UserDatabase],
       /** @param db 사용자 transaction 경계. @returns 서버 동의 저장소. */
       useFactory: (db: UserDatabase) => new NotificationConsentRepository(db) },

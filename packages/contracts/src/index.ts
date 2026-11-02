@@ -41,3 +41,5 @@ export type { TimedLedgerEvidence, LedgerTimeEvidence, ResidenceTimeHistory, Res
 export { UtcInstantSchema } from "./ledger-time.js";
 export { ManualLedgerTimeInputSchema, TransactionTimeSnapshotSchema } from "./transaction-time.js";
 export type { ManualLedgerTimeInput, TransactionTimeSnapshot } from "./transaction-time.js";
+export { NotificationIngestionInputSchema, NotificationReceiptSchema } from "./notification-ingestion.js";
+export type { NotificationIngestionInput, NotificationReceipt } from "./notification-ingestion.js";
