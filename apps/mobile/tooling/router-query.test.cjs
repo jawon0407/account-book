@@ -67,6 +67,36 @@ test("Navigation core malformed query completes within an isolated five-second b
   assert.equal(result.status, 0, result.stderr);
 });
 
+test("Navigation core bounds decoding of distinct malformed percent runs", () => {
+  const parserPath = routerRequire.resolve(
+    "./build/react-navigation/core/getStateFromPath.js",
+  );
+  // Unlike repeated %FF, distinct runs exercised the quadratic replacement
+  // fallback in 0.5.0. Kill the isolated process if that behavior returns.
+  const result = spawnSync(
+    process.execPath,
+    [
+      "-e",
+      `const assert = require('node:assert/strict');
+       const { getStateFromPath } = require(${JSON.stringify(parserPath)});
+       let input = '';
+       for (let index = 0; index < 32000; index += 1) {
+         const high = Math.floor(index / 256).toString(16).padStart(2, '0');
+         const low = (index % 256).toString(16).padStart(2, '0');
+         input += '%' + high + '%' + low + 'x';
+       }
+       const state = getStateFromPath('/ledger?memo=' + input + '%zz',
+         { screens: { ledger: 'ledger' } });
+       assert.equal(typeof state.routes[0].params.memo, 'string');
+       assert.ok(state.routes[0].params.memo.startsWith(String.fromCharCode(0, 0) + 'x'));
+       assert.ok(state.routes[0].params.memo.endsWith('%zz'));`,
+    ],
+    { timeout: 5000, encoding: "utf8", maxBuffer: 4096 },
+  );
+  assert.equal(result.error, undefined, "distinct runs must not stall routing");
+  assert.equal(result.status, 0, result.stderr);
+});
+
 /**
  * Load Expo's real routing functions without loading React Native UI in Node.
  * The platform barrel is replaced by its real pure validator; query parsing,

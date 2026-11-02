@@ -62,7 +62,7 @@ const approvedPackageLocalSkipLibCheck = [
 
 const expectedWorkspaceOverrides = {
   "@expo/cli@57.0.31>zod": "4.6.6",
-  "query-string@7.1.3>decode-uri-component": "0.5.0",
+  "query-string@7.1.3>decode-uri-component": "0.5.1",
   "browserslist@4.29.3": "4.28.7",
   "xcode@3.0.1>uuid": "11.1.1",
   "next@16.4.1>sharp": "-",
@@ -160,6 +160,7 @@ function assertPatchedProductionResolutions(lockfile) {
     lockfile.slice(snapshotsStart),
   ];
   const patchedEntries = [
+    /^ {2}decode-uri-component@0\.5\.1:(?: \{\})?\r?$/mu,
     /^ {2}source-map-js@1\.2\.2:(?: \{\})?\r?$/mu,
     /^ {2}postcss@8\.5\.23:\r?$/mu,
     /^ {2}nanoid@3\.3\.18:(?: \{\})?\r?$/mu,
@@ -170,6 +171,7 @@ function assertPatchedProductionResolutions(lockfile) {
     /^ {2}zod@4\.6\.6:(?: \{\})?\r?$/mu,
   ];
   const vulnerableEntries = [
+    /^ {2}decode-uri-component@0\.(?:[0-4]\.\d+|5\.0):(?: \{\})?\r?$/mu,
     /^ {2}source-map-js@1\.2\.1:(?: \{\})?\r?$/mu,
     /^ {2}postcss@8\.5\.22:\r?$/mu,
     /^ {2}nanoid@3\.3\.16:(?: \{\})?\r?$/mu,
@@ -441,6 +443,20 @@ test("lockfile resolves only patched production dependency versions", () => {
   const lockfile = readFileSync(lockfilePath, "utf8");
 
   assertPatchedProductionResolutions(lockfile);
+  assert.throws(
+    () => assertPatchedProductionResolutions(
+      lockfile.replaceAll("decode-uri-component@0.5.1", "decode-uri-component@0.5.0"),
+    ),
+    /patched production dependency resolution/u,
+  );
+  for (const section of ["packages", "snapshots"]) {
+    assert.throws(
+      () => assertPatchedProductionResolutions(
+        lockfile.replace(`\n${section}:`, `\n${section}:\n  decode-uri-component@0.5.0:`),
+      ),
+      /vulnerable production dependency resolution/u,
+    );
+  }
   assert.throws(
     () =>
       assertPatchedProductionResolutions(
